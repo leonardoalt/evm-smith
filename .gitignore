@@ -1,0 +1,8 @@
+# Upstream EVM semantics — cloned separately, see README
+EVMYulLean/
+
+# Lake build artifacts
+.lake/
+
+# Empty workaround dir for upstream's extern_lib submodule check
+EthereumTests/
