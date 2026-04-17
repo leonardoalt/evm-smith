@@ -12,3 +12,6 @@ lean_lib «EvmSmith»
 
 lean_exe «evm-smith» where
   root := `EvmSmith.Demos.Main
+
+lean_exe «add3-dump-bytecode» where
+  root := `EvmSmith.Demos.Add3.DumpBytecode

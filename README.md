@@ -140,6 +140,42 @@ Open either file in an editor with Lean 4 support to step through interactively.
 lake build EvmSmith.Tests.Guards
 ```
 
+## Running the Foundry tests (`add3`)
+
+The `add3` runtime bytecode is also exercised via a Foundry test suite at
+`EvmSmith/Demos/Add3/foundry/`. The tests install the runtime at a test
+address via `vm.etch` and call it with raw calldata (no function
+selector) for concrete inputs, short/long calldata, wrap-around edge
+cases, and a 256-run fuzz sweep.
+
+Requires [Foundry](https://book.getfoundry.sh/) ≥ 1.0 on `PATH` (this
+machine has 1.5.1 at `~/.foundry/bin/forge`; install via `foundryup` if
+missing). Also requires the `forge-std` git submodule:
+
+```bash
+git submodule update --init --recursive    # once
+cd EvmSmith/Demos/Add3/foundry
+forge test
+```
+
+Expected output: 5 passing tests (`test_Add3_concrete`,
+`test_Add3_wraps`, `test_Add3_shortCalldata`, `test_Add3_longCalldata`,
+`testFuzz_Add3`).
+
+### Bytecode sync
+
+The Foundry tests read the runtime bytecode from
+`EvmSmith/Demos/Add3/foundry/test/Add3.bytecode.hex`, which is generated
+by a tiny Lean executable:
+
+```bash
+lake exe add3-dump-bytecode     # regenerate the hex file
+```
+
+Run this after any edit to `EvmSmith/Demos/Add3/Program.lean :: bytecode`.
+A `#guard` in `EvmSmith/Tests/Guards.lean` pins the byte length as a
+structural backstop.
+
 ## Using the framework
 
 Minimal example — run `ADD` on a two-element stack and inspect the top:

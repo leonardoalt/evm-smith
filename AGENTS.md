@@ -28,6 +28,10 @@ Lean proof of its correctness → `lake build` verifies both.
   it isn't yet upstream.
 - **[`EvmSmith/Demos/Add3/`](./EvmSmith/Demos/Add3/)** — the
   canonical worked example. Copy its shape when adding a new program.
+  Contains `Program.lean`, `Proofs.lean`, `DumpBytecode.lean` (emits
+  hex for Foundry), and `foundry/` (a Foundry test suite that loads
+  the runtime bytecode via `vm.etch` and exercises it with raw
+  calldata).
 
 ## Skills
 
@@ -37,6 +41,7 @@ Lean proof of its correctness → `lake build` verifies both.
 | [`/prove-program`](./.claude/skills/prove-program.md) | Write a correctness theorem for a program, chaining step lemmas via `runSeq_cons_ok`. |
 | [`/add-opcode-lemma`](./.claude/skills/add-opcode-lemma.md) | Extend `EvmSmith/Lemmas.lean` with a missing opcode lemma (needed when your program uses an opcode the existing lemmas don't cover). |
 | [`/debug-proof`](./.claude/skills/debug-proof.md) | Diagnose a failing proof — `whnf` timeout, `simp` no-progress, pattern mismatch, FFI opacity, etc. |
+| [`/refresh-bytecode`](./.claude/skills/refresh-bytecode.md) | After editing a program's `bytecode` in Lean, regenerate the hex dump that the Foundry tests read. |
 
 ## Constraints an agent should know
 
@@ -64,14 +69,18 @@ Lean proof of its correctness → `lake build` verifies both.
 ## Build / verify / run
 
 ```bash
-# First-time setup (one-off workaround for upstream's submodule check):
-mkdir -p EthereumTests
+# First-time setup:
+mkdir -p EthereumTests                         # upstream submodule-check workaround
+git submodule update --init --recursive        # pulls forge-std for the Foundry tests
 
 # Verify all proofs + tests (10-30min cold, seconds incremental):
 lake build
 
 # Run the IO demos end-to-end:
 lake exe evm-smith
+
+# Run the Foundry tests for add3 (requires Foundry ≥ 1.0 on PATH):
+cd EvmSmith/Demos/Add3/foundry && forge test
 ```
 
 See `README.md` → "Requirements" and "Building" for the full

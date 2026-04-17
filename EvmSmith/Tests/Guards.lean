@@ -107,6 +107,10 @@ end-to-end runs via `lake exe`. Here we only check structural invariants. -/
 
 #guard EvmSmith.Add3.program.length == 13
 #guard EvmSmith.Add3.compute.length == 8
+-- Bytecode size: the Foundry test harness
+-- (`EvmSmith/Demos/Add3/foundry/test/Add3.bytecode.hex`) is generated
+-- from this definition by `lake exe add3-dump-bytecode`. If this guard
+-- fires because the length changed, re-run the dumper.
 #guard EvmSmith.Add3.bytecode.size == 19
 
 end EvmSmith.Tests
