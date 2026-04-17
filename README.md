@@ -199,11 +199,6 @@ end EvmSmith.MyProgramProofs
 
 `EvmSmith/Demos/Add3/Program.lean` + `EvmSmith/Demos/Add3/Proofs.lean` show the full pattern.
 
-## Project history
-
-- `.claude/evm-lean.md` — original task brief (kept under its original name).
-- Planning artifacts (`plan.md`, three iterations of `plan_review_*.md`, `implementation_review.md`) live in `.claude/`; they are the design trail, kept out of the main tree for clarity.
-
 ## Limitations
 
 - **Bytes-level round-trips** (e.g. `MSTORE` → `RETURN` producing the bytes of `a + b + c`) go through `ffi.ByteArray.zeroes`, which is `opaque`. Proofs that need it would require an axiomatized round-trip lemma. Not fatal — prove the stack-level property instead, as `Add3Proofs` does.
