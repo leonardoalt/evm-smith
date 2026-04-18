@@ -1,69 +1,72 @@
-import EvmSmith.Lemmas
-import EvmSmith.Demos.Weth.Program
+import EvmSmith.Demos.Weth.Upsilon
 
 /-!
-# Correctness of the `Weth` program
+# Correctness of the `Weth` program — main safety invariant
 
-## Status
+## The invariant
 
-Lean proofs for `Weth` are **deferred**. The contract's safety is
-established end-to-end by the Foundry test suite at `./foundry/`,
-including a main-safety invariant (`invariant_user_funds_never_lost`
-— 256 fuzz runs × 50 depth = 12 800 transition checks) and a
-reentrancy test.
+    I σ C := match σ.find? C with
+            | none     => True
+            | some acc => totalBalance acc.storage ≤ acc.balance.toNat
 
-Block-level Lean proofs in the style of `Register/Proofs.lean` are
-feasible with the step lemmas added to `EvmSmith/Lemmas.lean` as part
-of this task (`runOp_callvalue`, `runOp_sload`, `runOp_lt`,
-`runOp_iszero`, `runOp_dup{1..5}`, `runOp_swap{1,2}`, `runOp_sub`,
-`runOp_pop`, `runOp_jumpdest`, `runOp_jumpi_{taken,not_taken}`,
-`runOp_revert`). However the deposit block's ten-step chain and the
-withdraw block's seventeen-step pre-CALL chain each require per-step
-state-shape normalisation (propagating the `sload` intermediate
-state's `executionEnv` field through the chain) that turns every
-chain step into a small proof obligation. That plumbing was out of
-scope for this deliverable.
+where `totalBalance` is the `ℕ`-valued sum of token balances stored
+in `C`'s storage (modeling Σ balances[addr] over all addrs). The
+invariant is "user funds never lost" — the contract always holds at
+least enough ETH to cover all recorded token balances. Weakened from
+equality to `≤` because ETH can be force-fed into `C` via
+`SELFDESTRUCT` or coinbase rewards. `ℕ` is used to sidestep modular-
+arithmetic pitfalls where a wrapped sum could trivially satisfy `≤`.
 
-## What the step lemmas enable (future work)
+## The four layers
 
-With the existing lemmas, the shape of each block-level theorem is:
+- **Layer 0** — `Std.TransCmp`/`Std.ReflCmp` instances for `UInt256`,
+  plus `UInt256.sub` bridge lemmas.
+  File: `EvmSmith/Lemmas/UInt256Order.lean`. **Closed.**
+- **Layer 1** — `totalBalance` sum behaviour under `RBMap.insert` and
+  `RBMap.erase`, via Batteries' `exists_insert_toList_zoom_*` and a
+  locally-derived erase permutation lemma.
+  File: `EvmSmith/Lemmas/RBMapSum.lean`. **Closed.**
+- **Layer 2** — `Θ_preserves_I`: fuel induction on the `Ξ`/`Θ` mutual
+  recursion, covering frame, balance-transfer, reentrance, precompile
+  frame, and `Weth_Ξ_preserves_I` for the program-specific content.
+  File: `EvmSmith/Demos/Weth/Theta.lean`. **Skeleton.**
+- **Layer 3** — `Υ_preserves_I`: wraps `Θ_preserves_I` with the
+  post-Θ steps (gas refund, beneficiary fee, selfdestruct sweep,
+  dead-account sweep, tstorage wipe).
+  File: `EvmSmith/Demos/Weth/Upsilon.lean`. **Skeleton.**
 
-```lean
-theorem deposit_block_result (s0 : EVM.State) (selector : UInt256)
-    (hs : s0.stack = [selector]) (hpc : s0.pc = depositLbl) :
-    ∃ sf, runSeq depositBlock s0 = .ok sf ∧
-          sf.toState = State.sstore
-            (State.sload s0.toState (addressSlot source)).1
-            (addressSlot source)
-            ((State.sload s0.toState (addressSlot source)).2
-             + s0.executionEnv.weiValue)
-```
+## Shared definitions
 
-And functional-correctness / account-frame corollaries layered on
-top via `sstore_accountMap`, the same pattern Register's proofs use.
-
-See `.claude/weth-plan.md` for the detailed block structure and
-invariant-statement targets.
-
-## What's provable today, what's provable "tomorrow", what's not
-
-| Invariant | Provable here | Blocker |
-|-----------|---------------|---------|
-| Block-level structural post-states | With effort (~100 LoC/block, state-shape plumbing) | Current file does not commit to proving them |
-| Per-call functional correctness (account-map level) | With effort, after block-level proofs | Same |
-| Per-call frame at account-map level | With effort, after block-level proofs | Same |
-| Slot-level functional correctness | Blocked | `LawfulOrd UInt256` missing (same gap that blocked Register's slot-level theorems); see `.claude/batteries-wishlist.md` |
-| Slot-level frame | Blocked | Same — `RBMap.find?_erase_*` also missing from Batteries |
-| Reentrancy safety | Blocked | CALL semantics route through Θ iterator in upstream |
-| Conservation (`Σ balances ≤ balance`) | Blocked | RBMap fold lemmas + CALL semantics |
-
-Everything in the "Blocked" rows is exercised by Foundry tests.
-Everything else can be closed by the next agent who picks up the
-proof-engineering work — the step lemmas are in place.
+`I`, `totalBalance`, `codeAt`, and `initial_state` live in
+`EvmSmith/Demos/Weth/Invariant.lean` so every layer can use them
+without circular imports. This file (`Proofs.lean`) consumes Layer 3's
+`Υ_preserves_I` and states the final user-facing theorem.
 -/
 
 namespace EvmSmith.WethProofs
+open EvmSmith.WethInvariant EvmSmith.WethProofs.Layer3
+     EvmYul EvmYul.EVM EvmSmith EvmSmith.Weth
 
--- Intentionally empty. See module docstring for status.
+export EvmSmith.WethInvariant (I totalBalance codeAt initial_state)
+
+/-! ## The main theorem -/
+
+/-- **The main theorem**: Weth's safety invariant is preserved by
+    every transaction. Delegates to `Layer3.Υ_preserves_I`. -/
+theorem weth_always_safe
+    (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
+    (H H_genesis : BlockHeader) (blocks : ProcessedBlocks)
+    (tx : Transaction) (S_T C : AccountAddress)
+    (hI : I σ C) (hCode : codeAt σ C)
+    (hCNotBeneficiary : C ≠ H.beneficiary)
+    (hCNotSender     : C ≠ S_T) :
+    match EVM.Υ fuel σ H_f H H_genesis blocks tx S_T with
+    | .ok (σ', _, _, _) => I σ' C
+    | .error _          => True := by
+  have h := Υ_preserves_I fuel σ H_f H H_genesis blocks tx S_T C
+              hI hCode hCNotBeneficiary hCNotSender
+  split <;> rename_i heq
+  · rw [heq] at h; exact h.1
+  · trivial
 
 end EvmSmith.WethProofs
