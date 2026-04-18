@@ -41,6 +41,15 @@ Lean proof of its correctness → `lake build` verifies both.
   `find?_erase_of_ne` / `findD_insert_self`; a follow-up pass can
   close them once those lemmas land. Same Foundry-test shape as Add3
   plus `vm.prank` for multi-sender scenarios.
+- **[`EvmSmith/Demos/Weth/`](./EvmSmith/Demos/Weth/)** — a
+  wrapped-ETH token contract in raw bytecode. Function dispatch via
+  4-byte selectors, JUMP/JUMPI/JUMPDEST control flow, SSTORE
+  state-update before CALL (checks-effects-interactions). 86 bytes
+  of runtime. Lean proofs deferred (see `Proofs.lean`); Foundry
+  covers full end-to-end safety: 13 concrete/fuzz tests plus two
+  invariant tests (256×50 = 12800 transitions each) and an explicit
+  reentrancy test. Main safety claim: `Σ storage[sender] ≤
+  contract.balance`.
 
 ## Skills
 

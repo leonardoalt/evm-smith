@@ -63,6 +63,10 @@ The last one is the literal soundness condition for a constant-folding optimizer
 
 We prove the arithmetic part. The `MSTORE ; RETURN` suffix's `H_return = (a+b+c).toByteArray` is *not* proved because the byte-level round-trip goes through the `ffi.ByteArray.zeroes` opaque FFI primitive, which is irreducible in Lean's kernel. See the docstring in `EvmSmith/Demos/Add3/Proofs.lean` for the full explanation. End-to-end behavior is demonstrated with concrete inputs through `lake exe evm-smith`.
 
+### Wrapped-ETH token (`EvmSmith/Demos/Weth/`)
+
+Third worked example — an 86-byte WETH-style contract. Adds three qualitatively new things: function dispatch via 4-byte selectors, control flow (JUMP/JUMPI/JUMPDEST), and cross-transaction state-mutating CALL for the ETH refund in `withdraw`. Safety claim — `Σ storage[sender] ≤ contract.balance` — is verified end-to-end via Foundry invariant testing (256 fuzz runs × 50 calls per run). Checks-effects-interactions ordering is tested against an explicit reentrant attacker contract. Lean-side block-level proofs are deferred; see `EvmSmith/Demos/Weth/Proofs.lean` for the status.
+
 ### Program-level safety (`EvmSmith/Demos/Register/Proofs.lean`)
 
 A second worked example: a 6-byte contract that reads one `uint256` from calldata and stores it at `storage[msg.sender]` (SSTORE + CALLER).
@@ -163,6 +167,12 @@ Each worked example ships with a Foundry test suite:
 - `EvmSmith/Demos/Register/foundry/` — 8 tests covering per-sender
   writes, sender isolation, overwrites, empty / zero-value edge
   cases, and two fuzz sweeps over `(sender, value)` pairs.
+- `EvmSmith/Demos/Weth/foundry/` — 15 tests: 13 concrete/fuzz
+  covering the deposit/withdraw flows + unknown-selector reverts
+  + arithmetic edge cases + reentrancy; plus two invariant tests
+  (`invariant_user_funds_never_lost` and
+  `invariant_ghost_accounting_consistent`) that each run 256 random
+  transaction sequences of depth 50 against the etched bytecode.
 
 Both suites install the runtime at a test address via `vm.etch` and
 call it with raw calldata (no function selector).
@@ -174,8 +184,9 @@ if missing). Also requires the `forge-std` git submodule:
 ```bash
 git submodule update --init --recursive         # once
 
-cd EvmSmith/Demos/Add3/foundry && forge test    # 5 tests
+cd EvmSmith/Demos/Add3/foundry && forge test     # 5 tests
 cd EvmSmith/Demos/Register/foundry && forge test # 8 tests
+cd EvmSmith/Demos/Weth/foundry && forge test     # 15 tests (incl. 2 invariants)
 ```
 
 Expected output: 5 passing tests (`test_Add3_concrete`,

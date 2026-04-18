@@ -1,6 +1,7 @@
 import EvmSmith.Framework
 import EvmSmith.Demos.Add3.Program
 import EvmSmith.Demos.Register.Program
+import EvmSmith.Demos.Weth.Program
 
 /-!
 # Tests for the EvmSmith framework
@@ -118,5 +119,16 @@ end-to-end runs via `lake exe`. Here we only check structural invariants. -/
 
 #guard EvmSmith.Register.program.length == 5
 #guard EvmSmith.Register.bytecode.size == 6
+
+/-! ## Structural checks on the `Weth` program -/
+
+#guard EvmSmith.Weth.depositBlock.length == 10
+#guard EvmSmith.Weth.withdrawPreCallBlock.length == 16
+#guard EvmSmith.Weth.bytecode.size == 86
+#guard EvmSmith.Weth.depositSelector == UInt256.ofNat 0xd0e30db0
+#guard EvmSmith.Weth.withdrawSelector == UInt256.ofNat 0x2e1a7d4d
+#guard EvmSmith.Weth.depositLbl == UInt256.ofNat 32
+#guard EvmSmith.Weth.withdrawLbl == UInt256.ofNat 42
+#guard EvmSmith.Weth.revertLbl == UInt256.ofNat 80
 
 end EvmSmith.Tests

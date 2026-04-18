@@ -1,0 +1,12 @@
+[profile.default]
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.20"
+optimizer = true
+optimizer_runs = 200
+fs_permissions = [{ access = "read", path = "./test/Weth.bytecode.hex" }]
+
+[invariant]
+runs = 256
+depth = 50
+fail_on_revert = false

@@ -111,6 +111,153 @@ lemma runOp_sstore
           toState := EvmYul.State.sstore s.toState key val } := by
   unfold runOp EvmYul.step; rfl
 
+/-- `CALLVALUE` pushes `executionEnv.weiValue` (the `msg.value`
+    transferred into this call-frame), advances PC by 1. -/
+lemma runOp_callvalue
+    (s : EVM.State) (stk : Stack UInt256) (pc : UInt256) :
+    runOp .CALLVALUE { s with stack := stk, pc := pc }
+      = .ok { s with
+          stack := s.executionEnv.weiValue :: stk
+          pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `SLOAD` pops a key, pushes the result of
+    `EvmYul.State.sload toState key` (which is `(toState,
+    storage[key])`), advances PC by 1. -/
+lemma runOp_sload
+    (s : EVM.State) (key : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .SLOAD { s with stack := key :: rest, pc := pc }
+      = .ok { s with
+          stack := (EvmYul.State.sload s.toState key).2 :: rest
+          pc := pc + UInt256.ofNat 1
+          toState := (EvmYul.State.sload s.toState key).1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `LT` on stack `[a, b, rest]`: pops both, pushes `a < b` as
+    `UInt256` (1 if true, 0 if false), advances PC by 1. -/
+lemma runOp_lt
+    (s : EVM.State) (a b : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .LT { s with stack := a :: b :: rest, pc := pc }
+      = .ok { s with
+          stack := UInt256.lt a b :: rest
+          pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `ISZERO` on `[a, rest]`: pops `a`, pushes `1` if `a = 0` else
+    `0`, PC + 1. -/
+lemma runOp_iszero
+    (s : EVM.State) (a : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .ISZERO { s with stack := a :: rest, pc := pc }
+      = .ok { s with
+          stack := UInt256.isZero a :: rest
+          pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `SUB` on `[a, b, rest]`: pops both, pushes `a - b`, PC + 1. -/
+lemma runOp_sub
+    (s : EVM.State) (a b : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .SUB { s with stack := a :: b :: rest, pc := pc }
+      = .ok { s with
+          stack := (a - b) :: rest
+          pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `JUMPDEST` is a no-op mark; it advances PC by 1. -/
+lemma runOp_jumpdest
+    (s : EVM.State) :
+    runOp .JUMPDEST s = .ok { s with pc := s.pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step
+  rfl
+
+/-- `JUMPI` (taken branch): stack `[dest, cond, rest]` with `cond ≠ 0`
+    sets `pc := dest`, pops both operands. -/
+lemma runOp_jumpi_taken
+    (s : EVM.State) (dest cond : UInt256) (rest : Stack UInt256) (pc : UInt256)
+    (hcond : (cond != (⟨0⟩ : UInt256)) = true) :
+    runOp .JUMPI { s with stack := dest :: cond :: rest, pc := pc }
+      = .ok { s with stack := rest, pc := dest } := by
+  unfold runOp EvmYul.step
+  show Except.ok { s with
+    pc := (if (cond != (⟨0⟩ : UInt256)) = true then dest else pc + UInt256.ofNat 1)
+    stack := rest } = _
+  rw [if_pos hcond]
+
+/-- `JUMPI` (not-taken branch): `cond = 0` leaves PC at `pc + 1`,
+    pops both operands. -/
+lemma runOp_jumpi_not_taken
+    (s : EVM.State) (dest : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .JUMPI { s with stack := dest :: (⟨0⟩ : UInt256) :: rest, pc := pc }
+      = .ok { s with stack := rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step
+  rfl
+
+/-- `REVERT` at the pure `EvmYul.step` level actually produces `.ok`
+    (setting `H_return`); the `X` iterator at higher levels is what
+    interprets the revert for message-call purposes. For block-level
+    proofs this means we treat REVERT as a tail opcode that produces
+    a concrete post-state, then separately note "the outer
+    interpretation is a revert". -/
+lemma runOp_revert
+    (s : EVM.State) (offset size : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .REVERT { s with stack := offset :: size :: rest, pc := pc }
+      = .ok { s with
+          stack := rest
+          pc := pc + UInt256.ofNat 1
+          toMachineState := MachineState.evmRevert s.toMachineState offset size } := by
+  unfold runOp EvmYul.step; rfl
+
+/-! ### DUPn / SWAPn (spike ahead of Weth's withdraw block) -/
+
+/-- `DUP1` duplicates the top element. -/
+lemma runOp_dup1
+    (s : EVM.State) (a : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .DUP1 { s with stack := a :: rest, pc := pc }
+      = .ok { s with stack := a :: a :: rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `DUP2` duplicates the 2nd element from the top. -/
+lemma runOp_dup2
+    (s : EVM.State) (a b : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .DUP2 { s with stack := a :: b :: rest, pc := pc }
+      = .ok { s with stack := b :: a :: b :: rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `DUP3` duplicates the 3rd element from the top. -/
+lemma runOp_dup3
+    (s : EVM.State) (a b c : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .DUP3 { s with stack := a :: b :: c :: rest, pc := pc }
+      = .ok { s with stack := c :: a :: b :: c :: rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `DUP5` duplicates the 5th element from the top. -/
+lemma runOp_dup5
+    (s : EVM.State) (a b c d e : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .DUP5 { s with stack := a :: b :: c :: d :: e :: rest, pc := pc }
+      = .ok { s with stack := e :: a :: b :: c :: d :: e :: rest
+                     pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `SWAP1` swaps the top two elements. -/
+lemma runOp_swap1
+    (s : EVM.State) (a b : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .SWAP1 { s with stack := a :: b :: rest, pc := pc }
+      = .ok { s with stack := b :: a :: rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `SWAP2` swaps the top and 3rd elements. -/
+lemma runOp_swap2
+    (s : EVM.State) (a b c : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .SWAP2 { s with stack := a :: b :: c :: rest, pc := pc }
+      = .ok { s with stack := c :: b :: a :: rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `POP` removes the top element. -/
+lemma runOp_pop
+    (s : EVM.State) (a : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .POP { s with stack := a :: rest, pc := pc }
+      = .ok { s with stack := rest, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
 /-- `STOP` sets `machineState.returnData` to empty. No stack change, no
     PC advance, no `accountMap` / `toState` change. In `runSeq` flow
     STOP is typically the last opcode; this lemma just pushes the
