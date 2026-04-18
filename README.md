@@ -63,23 +63,29 @@ The last one is the literal soundness condition for a constant-folding optimizer
 
 We prove the arithmetic part. The `MSTORE ; RETURN` suffix's `H_return = (a+b+c).toByteArray` is *not* proved because the byte-level round-trip goes through the `ffi.ByteArray.zeroes` opaque FFI primitive, which is irreducible in Lean's kernel. See the docstring in `EvmSmith/Demos/Add3/Proofs.lean` for the full explanation. End-to-end behavior is demonstrated with concrete inputs through `lake exe evm-smith`.
 
-### Wrapped-ETH token (`EvmSmith/Demos/Weth/`)
-
-Third worked example — an 86-byte WETH-style contract. Adds three qualitatively new things: function dispatch via 4-byte selectors, control flow (JUMP/JUMPI/JUMPDEST), and cross-transaction state-mutating CALL for the ETH refund in `withdraw`. Safety claim — `Σ storage[sender] ≤ contract.balance` — is verified end-to-end via Foundry invariant testing (256 fuzz runs × 50 calls per run). Checks-effects-interactions ordering is tested against an explicit reentrant attacker contract. Lean-side block-level proofs are deferred; see `EvmSmith/Demos/Weth/Proofs.lean` for the status.
-
-### Program-level safety (`EvmSmith/Demos/Register/Proofs.lean`)
+### Storage contract (`EvmSmith/Demos/Register/Proofs.lean`)
 
 A second worked example: a 6-byte contract that reads one `uint256` from calldata and stores it at `storage[msg.sender]` (SSTORE + CALLER).
 
-| Theorem | Statement | Status |
-| --- | --- | --- |
-| `program_result` | Exact structural post-state of `runSeq program s0`. | ✅ Proved |
-| `program_updates_caller_account` | After the call, the code owner's account is exactly `acc.updateStorage (addressSlot sender) x`. | ✅ Proved |
-| `program_preserves_other_accounts` | Every account address other than the code owner is unchanged. | ✅ Proved |
-| `program_sets_sender_slot` | `findD`-form functional correctness: the sender's slot reads back as `x`. | ⚠ `sorry` |
-| `program_preserves_other_slots` | Slot frame: any other slot in the same account is unchanged. | ⚠ `sorry` |
+| Theorem | Statement |
+| --- | --- |
+| `program_result` | Exact structural post-state of `runSeq program s0`. |
+| `program_updates_caller_account` | After the call, the code owner's account is exactly `acc.updateStorage (addressSlot sender) x`. |
+| `program_preserves_other_accounts` | Every account address other than the code owner is unchanged. |
 
-The two `sorry`-marked theorems are blocked on RBMap API gaps in Batteries — specifically `find?_erase_of_ne` and `findD_insert_self`. A follow-up pass (or an upstream Batteries PR) closes them; see the docstring in `EvmSmith/Demos/Register/Proofs.lean`. The three proved theorems are the load-bearing ones: `program_updates_caller_account` is the functional-correctness claim in its most direct form, and the missing theorems are surface restatements.
+All three proved sorry-free. The natural surface theorems at the slot level (`storageAt postState codeOwner (addressSlot sender) = x` and a slot-frame companion) were dropped because they require `Std.LawfulOrd UInt256` and `Batteries.RBMap.find?_erase_*` — neither of which exist upstream. See `.claude/batteries-wishlist.md`.
+
+### Wrapped-ETH token (`EvmSmith/Demos/Weth/`) — **main invariant not proved**
+
+Third worked example — an 86-byte WETH-style contract with function dispatch via 4-byte selectors, control flow (JUMP/JUMPI/JUMPDEST), and state-mutating `CALL` for the ETH refund in `withdraw`. The main safety claim is
+
+    Σ storage[sender] ≤ accountMap[Weth].balance
+
+**This invariant is not proved in Lean.** Foundry invariant testing exercises it at 256 × 50 = 12 800 transition checks, but fuzzing is not a substitute for a proof — and the whole point of this repo is that writing contracts in raw bytecode is only worthwhile if the safety claims are actually proved.
+
+What blocks the proof is documented in detail in **[`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md)**. In short: the proof needs three layers of missing infrastructure, nested on top of each other — `Batteries.RBMap.foldl` lemmas (Batteries PR-sized), CALL semantics through the upstream Θ iterator (EVMYulLean modeling), and a transaction-level induction schema we've never built. That document also sketches three realistic plans of attack for the next iteration.
+
+Weth's step lemmas (`runOp_jumpi_*`, `runOp_call*`, `runOp_dup{1..5}`, `runOp_swap{1,2}`, …) are in `EvmSmith/Lemmas.lean`, ready for the proof work. The Foundry test suite (15 tests including the invariant runs and an explicit reentrancy test) is in `EvmSmith/Demos/Weth/foundry/`.
 
 ## Requirements
 
@@ -268,11 +274,12 @@ end EvmSmith.MyProgramProofs
 
 ## Limitations
 
-- **Bytes-level round-trips** (e.g. `MSTORE` → `RETURN` producing the bytes of `a + b + c`) go through `ffi.ByteArray.zeroes`, which is `opaque`. Proofs that need it would require an axiomatized round-trip lemma. Not fatal — prove the stack-level property instead, as `Add3Proofs` does.
-- **No helpers for storage, memory beyond calldata, code-copy.** Contracts that touch `SLOAD`/`SSTORE` / `MLOAD`/`MSTORE` as part of their spec need to hand-patch `{ s with … }` to set up the initial state. Add helpers to `Framework.lean` as you hit them.
-- **System opcodes** (`CALL`, `CREATE`, `SELFDESTRUCT`, …) are not exercised by the demos. They need account-map setup the framework doesn't provide.
-- **No gas reasoning.** `runOpFull` deducts gas but the theorems ignore it; proving gas bounds would need a separate track.
-- **`unfold; rfl` depends on reducibility.** Most demo proofs close by `unfold EvmYul.step; rfl`. That works only as long as the upstream keeps `step`, `execBinOp`, `Stack.pop*`, etc. reducible `def`s. An upstream `@[irreducible]` annotation would break every proof simultaneously — at that point, proofs would need to go through named characterization lemmas instead.
+- **Bytes-level round-trips** (e.g. `MSTORE` → `RETURN` producing the bytes of `a + b + c`) go through `ffi.ByteArray.zeroes`, which is `opaque`. Proofs that need it would require an axiomatized round-trip lemma.
+- **Storage slot-level claims need `LawfulOrd UInt256`** (not registered) and **`Batteries.RBMap.find?_erase_*` lemmas** (don't exist upstream). See `.claude/batteries-wishlist.md`. Account-map-level claims are the workaround.
+- **Cross-transaction inductive invariants are not yet provable** in this repo. The main example where we wanted this — Weth's conservation claim — is blocked on three layers of missing infrastructure; see **[`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md)**. Until this is solved, contracts that fundamentally need cross-transaction invariants (token ledgers, AMMs, anything with a "no-drain" property) can only be tested, not proved, in this repo.
+- **`CALL` semantics are out of reach.** Upstream routes CALL through the `Θ` iterator (mutually-recursive message-call + contract-creation). Any proof about an `accountMap[C].balance` change requires reasoning about `Θ`. Out of scope for `runSeq`-based proofs.
+- **No gas reasoning.** `runOpFull` deducts gas but the theorems ignore it.
+- **`unfold; rfl` depends on reducibility.** Most demo proofs close by `unfold EvmYul.step; rfl`. An upstream `@[irreducible]` annotation on any of `step`, `execBinOp`, `Stack.pop*`, etc. would break every proof simultaneously — at that point, proofs would need to go through named characterization lemmas instead.
 
 ## License
 
