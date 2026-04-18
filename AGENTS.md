@@ -27,11 +27,20 @@ Lean proof of its correctness → `lake build` verifies both.
   fusion). Read the header comment for why this file exists and why
   it isn't yet upstream.
 - **[`EvmSmith/Demos/Add3/`](./EvmSmith/Demos/Add3/)** — the
-  canonical worked example. Copy its shape when adding a new program.
-  Contains `Program.lean`, `Proofs.lean`, `DumpBytecode.lean` (emits
-  hex for Foundry), and `foundry/` (a Foundry test suite that loads
-  the runtime bytecode via `vm.etch` and exercises it with raw
-  calldata).
+  canonical arithmetic worked example. Copy its shape when adding a
+  new program. Contains `Program.lean`, `Proofs.lean`,
+  `DumpBytecode.lean` (emits hex for Foundry), and `foundry/` (a
+  Foundry test suite that loads the runtime bytecode via `vm.etch`
+  and exercises it with raw calldata).
+- **[`EvmSmith/Demos/Register/`](./EvmSmith/Demos/Register/)** — a
+  storage-using worked example: `storage[msg.sender] = x`. Exercises
+  `CALLER` + `SSTORE` + `STOP`. Proves three invariants (structural
+  post-state, caller-account update, account-frame). Two further
+  invariants (findD-form functional correctness, slot-frame) sit as
+  `sorry` stubs because Batteries' RBMap API doesn't expose
+  `find?_erase_of_ne` / `findD_insert_self`; a follow-up pass can
+  close them once those lemmas land. Same Foundry-test shape as Add3
+  plus `vm.prank` for multi-sender scenarios.
 
 ## Skills
 

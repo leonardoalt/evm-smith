@@ -94,6 +94,53 @@ end EvmSmith.<Name>Proofs
   instead. See `EvmSmith/Demos/Add3/Proofs.lean` for the canonical
   statement of this limitation.
 
+## Storage-using programs
+
+If the program uses `SSTORE` / `SLOAD` / `MSTORE` / `MLOAD`, the post-state
+has mutated fields other than stack/pc. Some patterns worth knowing:
+
+- **`hacct` precondition.** `SSTORE` is a silent no-op if the code owner
+  account doesn't exist in `accountMap` (see `EvmYul/StateOps.lean:159 —
+  lookupAccount Iₐ |>.option self ...`). Any theorem about what `SSTORE`
+  wrote needs `hacct : s0.accountMap.find? s0.executionEnv.codeOwner =
+  some acc` as a hypothesis. The Foundry test harness satisfies this
+  trivially by calling `vm.etch` on the code-owner address.
+
+- **Prefer account-level statements over slot-level.** For storage
+  programs, a theorem like
+  "`(postState s0 x).accountMap.find? codeOwner = some
+  (acc.updateStorage sender x)`" is **cleanly provable** with the
+  existing Batteries API (via `sstore_accountMap` from
+  `EvmSmith.Lemmas` + `find?_insert_of_eq`). A surface-level restatement
+  "`storageAt postState codeOwner (addressSlot sender) = x`" requires
+  `Std.LawfulOrd UInt256` (not registered anywhere) plus RBMap `erase`
+  lemmas (missing from Batteries). Stick to account-level claims unless
+  you're prepared to prove the infrastructure; see
+  `.claude/batteries-wishlist.md` for what's needed upstream.
+
+- **`storageAt` helper** in `EvmSmith/Framework.lean` gives a safe
+  `.find? a |>.elim ⟨0⟩ (·.storage.findD k ⟨0⟩)` lookup that matches
+  the EVM's "absent key = 0" convention and the `Account.updateStorage`
+  "writing 0 erases the slot" quirk in one go.
+
+- **Substate frame is deliberately excluded.** `SSTORE` mutates
+  `substate.refundBalance` and `substate.accessedStorageKeys`. Frame
+  theorems should state themselves over `accountMap` only and note
+  that substate *does* change, so no one accidentally strengthens the
+  theorem to `sf.toState = s0.toState`.
+
+- **See the worked example** at `EvmSmith/Demos/Register/Proofs.lean`
+  for the full pattern.
+
+## Minimum-hypotheses principle
+
+A theorem about `postState s0 x` (a pure definition) typically doesn't
+need the runtime hypotheses `s0.stack = []` or the calldata hypothesis.
+Only the theorem that connects `runSeq program s0` to `postState s0 x`
+needs those. Drop unused hypotheses from theorem signatures — if you
+find yourself writing `let _ := hs` to silence unused-variable
+warnings, the hypothesis shouldn't be there in the first place.
+
 ## What to prove
 
 Good targets for program safety theorems:

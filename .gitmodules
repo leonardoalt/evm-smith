@@ -1,3 +1,6 @@
 [submodule "EvmSmith/Demos/Add3/foundry/lib/forge-std"]
 	path = EvmSmith/Demos/Add3/foundry/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std.git
+[submodule "EvmSmith/Demos/Register/foundry/lib/forge-std"]
+	path = EvmSmith/Demos/Register/foundry/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std.git

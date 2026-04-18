@@ -57,6 +57,19 @@ def stackOf : Except EVM.ExecutionException EVM.State → Option (Stack UInt256)
   | .ok s => some s.stack
   | .error _ => none
 
+/-- An EVM account address used as a storage key — mapped to the
+    `UInt256` slot index matching what `CALLER` pushes onto the stack
+    (zero-extension of the 20-byte address to 32 bytes). -/
+def addressSlot (a : AccountAddress) : UInt256 := UInt256.ofNat a.val
+
+/-- `storageAt s a slot` returns the value at `slot` in `a`'s storage,
+    or `⟨0⟩` if the account doesn't exist / the slot is unset. Matches
+    the EVM's "empty = 0" convention; consistent with
+    `Account.updateStorage`'s erase-on-zero behaviour so that
+    `findD` gives 0 for both "absent slot" and "slot explicitly 0". -/
+def storageAt (s : EVM.State) (a : AccountAddress) (slot : UInt256) : UInt256 :=
+  (s.accountMap.find? a).elim ⟨0⟩ (fun acc => acc.storage.findD slot ⟨0⟩)
+
 /-- A program is a sequence of `(opcode, optional push-arg)` pairs. -/
 abbrev Program := List (Operation .EVM × Option (UInt256 × Nat))
 

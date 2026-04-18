@@ -89,6 +89,54 @@ don't expect.
 `add_comm _ _` works for any `AddCommMonoid`, which `Fin n` with
 `NeZero n` has. Similarly `add_assoc`, `mul_comm`, etc.
 
+## Symptom: `failed to synthesize Std.TransCmp compare` (or `ReflCmp`)
+
+**Cause.** The RBMap lemma you're trying to invoke
+(`Batteries.RBMap.find?_insert_of_eq` etc.) needs a `[Std.TransCmp
+cmp]` instance for the key type. For key types where Batteries
+registers `LawfulOrd` (`Fin n`, `Nat`, `Int`, `Bool`), this is
+synthesized automatically. For user-defined types with only
+`deriving Ord`, `LawfulOrd` is *not* derived — you get an `Ord`
+instance but no proof that it satisfies the `TransCmp` /
+`ReflCmp` laws.
+
+This bites on `UInt256` specifically: it's a single-field structure
+over `Fin 2^256` with `deriving Ord`, but `LawfulOrd UInt256` is not
+registered anywhere. Same would happen for any user-defined
+structural wrapper with derived `Ord`.
+
+**Fix.**
+
+- **If the key type is `AccountAddress`** (`= Fin 2^160` via abbrev),
+  you're fine — `LawfulOrd (Fin n)` from Batteries applies. Use
+  `Std.ReflCmp.compare_self` and `Std.LawfulEqCmp.eq_of_compare` freely.
+- **If the key type is `UInt256`**, you're stuck until a `LawfulOrd
+  UInt256` instance exists. Short-term workaround: restate the
+  theorem at a level that doesn't need the typeclass — e.g.
+  reason about `accountMap.find? codeOwner = some (acc.updateStorage
+  ...)` rather than `storage.findD key d = val`. The first uses the
+  account-map-level RBMap (keyed on `AccountAddress`, which has
+  LawfulOrd); the second uses the storage-level RBMap (keyed on
+  `UInt256`, which doesn't). See
+  `EvmSmith/Demos/Register/Proofs.lean` for a program-proof that
+  avoids the issue by staying at the account-map level, and
+  `.claude/batteries-wishlist.md` for the upstream fix.
+
+## Symptom: `sorry` on `RBMap.erase`-involving goals
+
+**Cause.** `Batteries.RBMap` has no theorems about `erase` at the
+time of writing. `find?_erase_self`, `findD_erase_self`,
+`find?_erase_of_ne` — none of them exist. Since `Account.updateStorage k 0`
+routes through `storage.erase k` (the EVM convention that writing
+zero to a slot erases it), any theorem about `SSTORE` with `x = 0`
+needs these lemmas.
+
+**Fix.** Either:
+
+- Restrict the theorem to `x ≠ 0` (drops the erase branch); or
+- Avoid slot-level reasoning and state the theorem at the
+  account-map level via `accountMap.find?` + `Account.updateStorage`.
+
 ## Symptom: can't prove a byte-level property (e.g. `H_return = (a+b+c).toByteArray`)
 
 **Cause.** This requires a round-trip through

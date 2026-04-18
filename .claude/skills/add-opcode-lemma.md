@@ -78,6 +78,36 @@ Special cases:
   caller no longer runs subsequent opcodes. Proving these requires
   reasoning about halting semantics; it may not close by `rfl` alone.
 
+## State-modifying opcodes need a *second* lemma
+
+Stack-only opcodes (ADD, PUSH1, DUP) have a single `runOp_*` lemma
+that nails the post-state exactly. State-modifying opcodes — SSTORE,
+MSTORE, SELFDESTRUCT, the log opcodes — are deeper: their post-state
+runs the input through a non-trivial upstream function
+(`EvmYul.State.sstore`, `MachineState.mstore`, etc.) that has its
+own semantics.
+
+For those opcodes the pattern is **two lemmas**:
+
+1. **`runOp_<opcode>`** — the mechanical one. Says "the post-state is
+   the input with `toState`/`toMachineState` routed through
+   `upstream_fn`". Proof: `unfold runOp EvmYul.step; rfl`. See
+   `runOp_sstore` for the canonical example.
+
+2. **`<upstream_fn>_<property>`** — one or more
+   characterisation lemmas that say what `upstream_fn` actually does
+   to the relevant field, stripped of its orthogonal mutations. See
+   `sstore_accountMap` — it reduces `sstore`'s complex body (which
+   also touches `substate.refundBalance` and
+   `substate.accessedStorageKeys`) to a single `accountMap.insert`
+   equation, under the precondition that the code owner exists.
+
+A program proof composes: step lemma → structural post-state, then
+characterisation lemma → property of the field you care about. The
+separation lets the structural post-state stay `rfl`-closeable while
+the field-level reasoning is free to use `simp` / `unfold` /
+manual RBMap reasoning.
+
 ## After adding the lemma
 
 Build to verify:

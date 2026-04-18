@@ -63,6 +63,20 @@ The last one is the literal soundness condition for a constant-folding optimizer
 
 We prove the arithmetic part. The `MSTORE ; RETURN` suffix's `H_return = (a+b+c).toByteArray` is *not* proved because the byte-level round-trip goes through the `ffi.ByteArray.zeroes` opaque FFI primitive, which is irreducible in Lean's kernel. See the docstring in `EvmSmith/Demos/Add3/Proofs.lean` for the full explanation. End-to-end behavior is demonstrated with concrete inputs through `lake exe evm-smith`.
 
+### Program-level safety (`EvmSmith/Demos/Register/Proofs.lean`)
+
+A second worked example: a 6-byte contract that reads one `uint256` from calldata and stores it at `storage[msg.sender]` (SSTORE + CALLER).
+
+| Theorem | Statement | Status |
+| --- | --- | --- |
+| `program_result` | Exact structural post-state of `runSeq program s0`. | ✅ Proved |
+| `program_updates_caller_account` | After the call, the code owner's account is exactly `acc.updateStorage (addressSlot sender) x`. | ✅ Proved |
+| `program_preserves_other_accounts` | Every account address other than the code owner is unchanged. | ✅ Proved |
+| `program_sets_sender_slot` | `findD`-form functional correctness: the sender's slot reads back as `x`. | ⚠ `sorry` |
+| `program_preserves_other_slots` | Slot frame: any other slot in the same account is unchanged. | ⚠ `sorry` |
+
+The two `sorry`-marked theorems are blocked on RBMap API gaps in Batteries — specifically `find?_erase_of_ne` and `findD_insert_self`. A follow-up pass (or an upstream Batteries PR) closes them; see the docstring in `EvmSmith/Demos/Register/Proofs.lean`. The three proved theorems are the load-bearing ones: `program_updates_caller_account` is the functional-correctness claim in its most direct form, and the missing theorems are surface restatements.
+
 ## Requirements
 
 - [`elan`](https://github.com/leanprover/elan) (Lean version manager). The toolchain pinned in `lean-toolchain` (currently `leanprover/lean4:v4.22.0`) downloads automatically on first build.
@@ -140,22 +154,28 @@ Open either file in an editor with Lean 4 support to step through interactively.
 lake build EvmSmith.Tests.Guards
 ```
 
-## Running the Foundry tests (`add3`)
+## Running the Foundry tests
 
-The `add3` runtime bytecode is also exercised via a Foundry test suite at
-`EvmSmith/Demos/Add3/foundry/`. The tests install the runtime at a test
-address via `vm.etch` and call it with raw calldata (no function
-selector) for concrete inputs, short/long calldata, wrap-around edge
-cases, and a 256-run fuzz sweep.
+Each worked example ships with a Foundry test suite:
+
+- `EvmSmith/Demos/Add3/foundry/` — 5 tests covering arithmetic,
+  wrapping, short/long calldata, and a 256-run fuzz.
+- `EvmSmith/Demos/Register/foundry/` — 8 tests covering per-sender
+  writes, sender isolation, overwrites, empty / zero-value edge
+  cases, and two fuzz sweeps over `(sender, value)` pairs.
+
+Both suites install the runtime at a test address via `vm.etch` and
+call it with raw calldata (no function selector).
 
 Requires [Foundry](https://book.getfoundry.sh/) ≥ 1.0 on `PATH` (this
-machine has 1.5.1 at `~/.foundry/bin/forge`; install via `foundryup` if
-missing). Also requires the `forge-std` git submodule:
+machine has 1.5.1 at `~/.foundry/bin/forge`; install via `foundryup`
+if missing). Also requires the `forge-std` git submodule:
 
 ```bash
-git submodule update --init --recursive    # once
-cd EvmSmith/Demos/Add3/foundry
-forge test
+git submodule update --init --recursive         # once
+
+cd EvmSmith/Demos/Add3/foundry && forge test    # 5 tests
+cd EvmSmith/Demos/Register/foundry && forge test # 8 tests
 ```
 
 Expected output: 5 passing tests (`test_Add3_concrete`,

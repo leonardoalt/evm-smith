@@ -15,3 +15,6 @@ lean_exe «evm-smith» where
 
 lean_exe «add3-dump-bytecode» where
   root := `EvmSmith.Demos.Add3.DumpBytecode
+
+lean_exe «register-dump-bytecode» where
+  root := `EvmSmith.Demos.Register.DumpBytecode

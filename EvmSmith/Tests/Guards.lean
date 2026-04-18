@@ -1,5 +1,6 @@
 import EvmSmith.Framework
 import EvmSmith.Demos.Add3.Program
+import EvmSmith.Demos.Register.Program
 
 /-!
 # Tests for the EvmSmith framework
@@ -112,5 +113,10 @@ end-to-end runs via `lake exe`. Here we only check structural invariants. -/
 -- from this definition by `lake exe add3-dump-bytecode`. If this guard
 -- fires because the length changed, re-run the dumper.
 #guard EvmSmith.Add3.bytecode.size == 19
+
+/-! ## Structural checks on the `Register` program -/
+
+#guard EvmSmith.Register.program.length == 5
+#guard EvmSmith.Register.bytecode.size == 6
 
 end EvmSmith.Tests
