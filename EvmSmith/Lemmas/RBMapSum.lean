@@ -398,7 +398,7 @@ private theorem del_toList_filter
       simp
 
 /-- Simplified variant: `(t.erase cut).toList = t.toList.filter (cut · ≠ .eq)`. -/
-private theorem erase_toList_filter
+theorem erase_toList_filter
     {α : Type*} {cmp : α → α → Ordering} {cut : α → Ordering}
     [Std.TransCmp cmp] [Batteries.RBNode.IsStrictCut cmp cut]
     (t : Batteries.RBNode α) (ht : t.Ordered cmp) :

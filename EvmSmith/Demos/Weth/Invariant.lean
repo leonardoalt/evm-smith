@@ -49,12 +49,31 @@ def initial_state (C : AccountAddress) : EVM.State :=
 
 /-! ## Base case: the initial state satisfies `I` and `codeAt` -/
 
+/-- The initial-state lookup returns the freshly-deployed account. -/
+private theorem find?_initial (C : AccountAddress) :
+    (initial_state C).accountMap.find? C
+      = some { (default : Account .EVM) with code := bytecode } := by
+  unfold initial_state
+  simp only
+  apply RBMap.find?_insert_of_eq
+  exact Std.ReflCmp.compare_self
+
 theorem I_initial (C : AccountAddress) :
     I (initial_state C).accountMap C := by
-  sorry
+  unfold I
+  rw [find?_initial]
+  -- Goal: totalBalance ∅ ≤ (⟨0⟩ : UInt256).toNat
+  show EvmSmith.Layer1.totalBalance default ≤ _
+  -- default storage is ∅; totalBalance ∅ = 0 via the foldl definition.
+  unfold EvmSmith.Layer1.totalBalance
+  show (default : RBMap UInt256 UInt256 compare).foldl (fun acc _k v => acc + v.toNat) 0
+       ≤ _
+  rfl
 
 theorem codeAt_initial (C : AccountAddress) :
     codeAt (initial_state C).accountMap C := by
-  sorry
+  unfold codeAt
+  rw [find?_initial]
+  rfl
 
 end EvmSmith.WethInvariant
