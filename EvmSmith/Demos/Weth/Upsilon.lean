@@ -26,11 +26,16 @@ in a way covered by Layer 2.
 
 ## Status
 
-- `increaseBalance_frame`, `find?_erase_ne`, and
-  `C_not_dead_of_codeAt` are closed.
-- `erase_fold_frame` and `tstorage_wipe_frame` are closed.
-- `Υ_preserves_I` itself remains `sorry` pending full case analysis
-  through Υ's `do`-block (same kind of obstacle as `Θ_preserves_I`).
+Closed:
+- `increaseBalance_find?_ne` + `I_of_increaseBalance_ne` + `codeAt_of_increaseBalance_ne`.
+- `find?_erase_ne` (via Layer 1's `erase_toList_filter` bridged to AccountMap).
+- `erase_fold_frame`.
+- `C_not_dead_of_codeAt`.
+- `I_of_tstorage_wipe` + `codeAt_of_tstorage_wipe` (module `find?_tstorage_wipe`).
+
+Open:
+- `find?_tstorage_wipe`  — RBMap.map find? interaction, no upstream lemma.
+- `Υ_preserves_I` — deep do-block case split (same obstacle as Θ).
 -/
 
 namespace EvmSmith.WethProofs.Layer3
@@ -91,14 +96,51 @@ theorem codeAt_of_increaseBalance_ne
 `erase k` at `k ≠ C` leaves `σ.find? C` unchanged; extending to folds
 covers both the selfdestruct sweep and the dead-account sweep. -/
 
+/-- AccountMap-level erase permutation: `(σ.erase k).toList` is the
+    `compare k ·.1 ≠ .eq`-filtered `σ.toList`. Bridged from Layer 1's
+    `erase_toList_filter` via the `Ordering.byKey Prod.fst compare` cut.
+    -/
+private theorem am_erase_toList_filter
+    (σ : AccountMap .EVM) (k : AccountAddress) :
+    (σ.erase k).toList
+      = σ.toList.filter (fun p => decide (compare k p.1 ≠ .eq)) := by
+  have ho : σ.1.Ordered (Ordering.byKey Prod.fst compare) := σ.2.out.1
+  have := EvmSmith.Layer1.erase_toList_filter
+    (cmp := Ordering.byKey Prod.fst compare)
+    (cut := fun p => compare k p.1) σ.1 ho
+  exact this
+
 /-- Single erase at `k ≠ C` frame. -/
 theorem find?_erase_ne
     (σ : AccountMap .EVM) (k C : AccountAddress) (hne : k ≠ C) :
     (σ.erase k).find? C = σ.find? C := by
-  unfold RBMap.erase RBMap.find?
-  -- erase returns `⟨t.1.erase (compare k ·.1), _⟩` and find? queries with
-  -- compare C ·.1. Use RBSet-level erase lemma.
-  sorry
+  -- Bridge via findEntry?_some: both sides describe finding an entry
+  -- whose key compares `.eq` with `C`. On the erased side, an extra
+  -- `compare k y.1 ≠ .eq` conjunct shows up via the filter; it's
+  -- automatic when `C ≠ k` because `compare C y.1 = .eq → y.1 = C`.
+  unfold RBMap.find?
+  congr 1
+  ext y
+  rw [RBMap.findEntry?_some, RBMap.findEntry?_some]
+  -- filter-membership lemma for List.filter
+  have hfilter : y ∈ (σ.erase k).toList ↔
+      y ∈ σ.toList ∧ compare k y.1 ≠ .eq := by
+    rw [am_erase_toList_filter]
+    simp [List.mem_filter]
+  constructor
+  · rintro ⟨hMem, hEq⟩
+    rw [hfilter] at hMem
+    exact ⟨hMem.1, hEq⟩
+  · rintro ⟨hMem, hEq⟩
+    refine ⟨?_, hEq⟩
+    rw [hfilter]
+    refine ⟨hMem, ?_⟩
+    -- compare C y.1 = .eq → y.1 = C (LawfulEq). Combined with C ≠ k ⇒ k ≠ y.1.
+    have hCy : C = y.1 := Std.LawfulEqCmp.compare_eq_iff_eq.mp hEq
+    intro hky
+    apply hne
+    have hky' : k = y.1 := Std.LawfulEqCmp.compare_eq_iff_eq.mp hky
+    rw [hky', hCy]
 
 /-- Fold-erase frame: erasing a set of addresses, none of which is `C`,
     preserves `σ.find? C`. -/
