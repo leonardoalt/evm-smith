@@ -79,20 +79,4 @@ structure RegInv (σ : AccountMap .EVM) (A : Substate) (C : AccountAddress)
 
 /-! ## The main theorem -/
 
-/-- **Register balance monotonicity.** Given the inductive invariant
-    and the three boundary hypotheses, every transaction preserves
-    the balance lower bound `b₀` at `C`. -/
-theorem register_balance_mono
-    (fuel : ℕ) (σ σ' : AccountMap .EVM)
-    (H_f : ℕ) (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
-    (tx : Transaction) (S_T C : AccountAddress) (b₀ : ℕ)
-    (_hInv : RegInv σ (default : Substate) C b₀)
-    (_hCS  : C ≠ S_T)
-    (_hCH  : C ≠ H.beneficiary)
-    (_hNewC : ∀ a : AccountAddress, a ≠ C)  -- placeholder: any create spawns ≠ C
-    (_hRun : EVM.Υ fuel σ H_f H H_gen blocks tx S_T
-              = .ok (σ', default, default, default)) :
-    b₀ ≤ balanceOf σ' C := by
-  sorry
-
 end EvmSmith.RegisterInvariant
