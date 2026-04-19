@@ -117,8 +117,8 @@ end-to-end runs via `lake exe`. Here we only check structural invariants. -/
 
 /-! ## Structural checks on the `Register` program -/
 
-#guard EvmSmith.Register.program.length == 5
-#guard EvmSmith.Register.bytecode.size == 6
+#guard EvmSmith.Register.program.length == 14
+#guard EvmSmith.Register.bytecode.size == 20
 
 /-! ## Structural checks on the `Weth` program -/
 

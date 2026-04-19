@@ -6,7 +6,5 @@ import EvmSmith.Demos.DemoProofs
 import EvmSmith.Demos.Add3.Program
 import EvmSmith.Demos.Add3.Proofs
 import EvmSmith.Demos.Register.Program
-import EvmSmith.Demos.Register.Proofs
 import EvmSmith.Demos.Weth.Program
-import EvmSmith.Demos.Weth.Proofs
 import EvmSmith.Tests.Guards
