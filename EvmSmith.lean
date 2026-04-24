@@ -6,5 +6,8 @@ import EvmSmith.Demos.DemoProofs
 import EvmSmith.Demos.Add3.Program
 import EvmSmith.Demos.Add3.Proofs
 import EvmSmith.Demos.Register.Program
+import EvmSmith.Demos.Register.Invariant
+import EvmSmith.Demos.Register.BytecodeFrame
+import EvmSmith.Demos.Register.BalanceMono
 import EvmSmith.Demos.Weth.Program
 import EvmSmith.Tests.Guards
