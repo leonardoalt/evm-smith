@@ -30,25 +30,89 @@ bytecode witness discharges the `ΞPreservesAtC C` parameter.
 namespace EvmSmith.Register
 open EvmYul EvmYul.EVM EvmYul.Frame
 
-/-- **Register tail invariant.**
+/-! ### Register-level run-output structural hypotheses
 
-For every Υ-dispatch output `(σ_P, A, σ_F)` in a Register-run
-transaction at C, the post-dispatch substate's selfDestructSet
-excludes C and the dead-account filter over touchedAccounts excludes
-C. Discharged structurally:
+The new `ΥTailInvariant` predicate (in `UpsilonFrame.lean`) is now
+structurally pinned to the **specific** `A` produced by Υ's `.ok`
+output, and its dead-filter clause is gated by a `State.dead σ_F C =
+false` hypothesis (instead of being vacuously universally quantified
+over arbitrary σ_F). The dead-filter clause is now trivially provable
+from the gating hypothesis; all that remains is the SD-set fact about
+the specific `A`.
 
-  * **SD set excludes C**: Register's bytecode contains no
-    SELFDESTRUCT, so no inner frame with `Iₐ = C` can insert C into
-    A.selfDestructSet. Any other frame only inserts its own Iₐ,
-    which by `I_code_at_C_is_Register_bytecode` is ≠ C (code at
-    those addresses is not Register's bytecode).
-  * **Dead filter excludes C**: C's code is non-empty (Register
-    bytecode) so `State.dead σ_F C = false`.
+We package the SD-set fact as a structural hypothesis on
+`register_balance_mono`, parallel to the existing real-world
+hypotheses. It's stated structurally on Υ's `.ok` output; on `.error`
+it's vacuously `True`. Discharging it from Lean would require
+strengthening `Θ_balanceOf_ge` / `Λ_balanceOf_ge` to expose substate
+tracking, which is out of scope for this proof. The hypothesis
+captures the call-tree-level fact:
 
-We package as a single axiom at the Register level, mirroring the
-pattern in `Ξ_Register_preserves_balanceOf_at_C`. -/
-private axiom register_Υ_tail_invariant (C : AccountAddress) :
-    ΥTailInvariant C
+* Register's bytecode contains no SELFDESTRUCT (verifiable by
+  inspecting `EvmSmith.Demos.Register.Program.bytecode`), so no
+  Ξ-frame at `Iₐ = C` (which by `I_code_at_C_is_Register_bytecode`
+  runs Register's bytecode) inserts C into A.selfDestructSet.
+* SELFDESTRUCT at any other frame inserts that frame's `Iₐ`, which
+  is `≠ C` by hypothesis.
+-/
+
+/-- Hypothesis on Υ's run output: the resulting substate's
+self-destruct set excludes `C`. -/
+def RegSDExclusion (σ : AccountMap .EVM) (fuel H_f : ℕ)
+    (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
+    (S_T C : AccountAddress) : Prop :=
+  match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
+  | .ok (_, A, _, _) => ∀ k ∈ A.selfDestructSet.1.toList, k ≠ C
+  | _ => True
+
+/-- Hypothesis on Υ's body factorisation: every post-dispatch state
+σ_P that decomposes Υ's output via the tail-state form satisfies
+`State.dead σ_P C = false`, i.e. `C`'s account exists in σ_P with
+non-empty code (Register's bytecode).
+
+Universally quantified over the decomposition pair (σ_P, g'), so the
+caller of `register_Υ_body_factors` can apply it to whichever σ_P it
+extracts from the Θ/Λ dispatch.
+
+Captures the structural fact: σ_P is the post-Θ/Λ state on the
+debited σ₀; since `S_T ≠ C` and `lambda_derived_address_ne_C` excludes
+CREATE-derivation of `C`, no frame in the call tree erases or
+overwrites C's code. -/
+def RegDeadAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
+    (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
+    (S_T C : AccountAddress) : Prop :=
+  match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
+  | .ok (σ', A', _, _) =>
+      ∀ σ_P g',
+        σ' = Υ_tail_state σ_P g' A' H H_f tx S_T →
+        State.dead σ_P C = false
+  | _ => True
+
+/-- **Register tail invariant.** Converts the SD-exclusion structural
+hypothesis to the full `ΥTailInvariant` predicate.
+
+The dead-filter clause is discharged trivially: `k ∈ filter
+(dead σ_F ·)` implies `dead σ_F k = true` (by `mem_filter_pred`),
+which contradicts `dead σ_F C = false` (the hypothesis baked into
+`ΥTailInvariant`'s second clause) when `k = C`. -/
+private theorem register_Υ_tail_invariant
+    (σ : AccountMap .EVM) (fuel H_f : ℕ)
+    (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
+    (S_T C : AccountAddress)
+    (hSD : RegSDExclusion σ fuel H_f H H_gen blocks tx S_T C) :
+    ΥTailInvariant σ fuel H_f H H_gen blocks tx S_T C := by
+  unfold ΥTailInvariant RegSDExclusion at *
+  cases hΥ : EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
+  | error e => trivial
+  | ok r =>
+    obtain ⟨_, A, _, _⟩ := r
+    rw [hΥ] at hSD
+    refine ⟨hSD, ?_⟩
+    intro σ_F hDead k hk hkC
+    have hpk : State.dead σ_F k = true := mem_filter_pred _ _ _ hk
+    rw [hkC] at hpk
+    rw [hDead] at hpk
+    cases hpk
 
 /-! ## Helpers for the σ → σ₀ → σ_P balance chain
 
@@ -184,7 +248,7 @@ private theorem σ_to_σP_balance_mono_Λ
 
 For every transaction with Register's code at C, the `.ok` output of
 Υ decomposes as `Υ_tail_state σ_P g' A …` for some (σ_P, g') with
-`balanceOf σ_P C ≥ balanceOf σ C`.
+`balanceOf σ_P C ≥ balanceOf σ C` and `State.dead σ_P C = false`.
 
 The existence part follows from the fact that Υ's body has the
 syntactic form:
@@ -193,53 +257,89 @@ syntactic form:
 
 The monotonicity part chains through:
   σ → σ₀ (sender debit at `S_T ≠ C`): `balanceOf σ₀ C = balanceOf σ C`.
-  σ₀ → σ_P: by `Λ_balanceOf_ge` / `Θ_balanceOf_ge` (closed theorems). -/
+  σ₀ → σ_P: by `Λ_balanceOf_ge` / `Θ_balanceOf_ge` (closed theorems).
+
+The `State.dead σ_P C = false` part is supplied by the `RegDeadAtσP`
+hypothesis. -/
 private theorem register_Υ_body_factors
     (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
     (tx : Transaction) (S_T C : AccountAddress)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
-    (_hCode : codeAt σ C) :
+    (_hCode : codeAt σ C)
+    (hDeadσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     ΥBodyFactors σ fuel H_f H H_gen blocks tx S_T C := by
   unfold ΥBodyFactors
+  unfold RegDeadAtσP at hDeadσP
   unfold EVM.Υ
+  unfold EVM.Υ at hDeadσP
   match hRec : tx.base.recipient with
   | none =>
     simp only
+    rw [hRec] at hDeadσP
+    simp only at hDeadσP
     split
     case h_1 σ' A' z' gUsed' hOk =>
       split at hOk
       case h_1 a cA σ_P g' A z gReturn hΛ =>
-        refine ⟨σ_P, g', ?_, ?_⟩
-        · cases hOk
-          rfl
-        · cases hOk
-          exact σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
+        rw [hΛ] at hDeadσP
+        simp only at hDeadσP
+        cases hOk
+        refine ⟨σ_P, g', rfl, ?_, ?_⟩
+        · exact σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
             _ _ _ a cA σ_P g' A z gReturn hWF hS_T hΛ
+        · exact hDeadσP σ_P g' rfl
       case h_2 e hΛ =>
         simp [bind, Except.bind] at hOk
     case h_2 _ =>
       trivial
   | some t =>
     simp only
+    rw [hRec] at hDeadσP
+    simp only at hDeadσP
     split
     case h_1 σ' A' z' gUsed' hOk =>
       split at hOk
       case h_1 cA σ_P g' A z gReturn hΘ =>
-        refine ⟨σ_P, g', ?_, ?_⟩
-        · cases hOk
-          rfl
-        · cases hOk
-          exact σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
+        rw [hΘ] at hDeadσP
+        simp only at hDeadσP
+        cases hOk
+        refine ⟨σ_P, g', rfl, ?_, ?_⟩
+        · exact σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
             _ _ _ σ_P g' A z cA gReturn hWF hS_T hΘ
+        · exact hDeadσP σ_P g' rfl
       case h_2 e hΘ =>
         simp [bind, Except.bind] at hOk
     case h_2 _ =>
       trivial
 
 /-- Register's balance is non-decreasing across any transaction, under
-the boundary hypotheses and real-world well-formedness. -/
+the boundary hypotheses and real-world well-formedness.
+
+The two `Reg*` hypotheses (`hSDExcl`, `hDeadAtσP`) capture
+structural call-tree invariants of Register's run that are not
+derivable from the closed `Θ_balanceOf_ge`/`Λ_balanceOf_ge` outputs:
+
+  * `RegSDExclusion`: no SELFDESTRUCT in the call tree adds C to the
+    final substate's selfDestructSet. Holds because Register's
+    bytecode contains no SELFDESTRUCT and SELFDESTRUCT only inserts
+    its own executing-frame address `Iₐ` into the SD-set, which by
+    `I_code_at_C_is_Register_bytecode` is `≠ C` whenever code at
+    that address is not Register's bytecode.
+
+  * `RegDeadAtσP`: `C`'s account in σ_P (the Θ/Λ output) has
+    non-empty code (Register's bytecode), so
+    `State.dead σ_P C = false`. Holds because RegInv provides this
+    initially and Θ/Λ at `S_T ≠ C` plus
+    `lambda_derived_address_ne_C` prevent C's code from being
+    overwritten or erased.
+
+Both are real-world structural facts that mirror existing boundary
+hypotheses in spirit (cf. `hS_T`, `hBen`, `lambda_derived_address_ne_C`).
+Discharging them inside Lean would require strengthening Θ/Λ's frame
+outputs to expose substate-tracking and code-preservation, which is
+out of scope for this proof. -/
 theorem register_balance_mono
     (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
@@ -247,14 +347,16 @@ theorem register_balance_mono
     (hWF : StateWF σ)
     (hInv : RegInv σ C b₀)
     (hS_T : C ≠ S_T)
-    (hBen : C ≠ H.beneficiary) :
+    (hBen : C ≠ H.beneficiary)
+    (hSDExcl : RegSDExclusion σ fuel H_f H H_gen blocks tx S_T C)
+    (hDeadAtσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
     | .ok (σ', _, _, _) => b₀ ≤ balanceOf σ' C
     | .error _ => True :=
   Υ_balanceOf_ge fuel σ H_f H H_gen blocks tx S_T C b₀
     hWF hInv.bal hS_T hBen (bytecodePreservesBalance C)
-    (register_Υ_tail_invariant C)
+    (register_Υ_tail_invariant σ fuel H_f H H_gen blocks tx S_T C hSDExcl)
     (register_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
-      hWF hS_T hInv.code)
+      hWF hS_T hInv.code hDeadAtσP)
 
 end EvmSmith.Register
