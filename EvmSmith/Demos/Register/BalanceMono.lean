@@ -59,12 +59,24 @@ captures the call-tree-level fact:
 The framework now exposes a strengthened sibling predicate
 `ΞPreservesAtCStrong` (in `MutualFrame.lean`) that produces the
 post-frame substate's SD-set exclusion of `C` as a 4th conjunct.
+Phase A predicate scaffolding now also includes:
+* `ΞFrameAtCStrong C maxFuel` — strong sibling of `ΞFrameAtC`
+  (the `≠ C` form) with SD-input/SD-output threading.
+* `ΞAtCFrameStrong C maxFuel` — strong sibling of `ΞAtCFrame`
+  (the `= C` form), derivable from `ΞPreservesAtCStrong` via
+  `ΞAtCFrameStrong_of_witness`.
+* `ΞFrameAtC_of_Strong` — projection: a strong frame yields the
+  unstrengthened frame conclusion at any call site that supplies
+  an SD-exclusive input substate.
+
 Once a `bytecodePreservesBalanceStrong C : ΞPreservesAtCStrong C`
-witness is provided (closing the SD-set tracking through the entire
-mutual closure — the bulk of Phase A's work), the `RegSDExclusion`
-hypothesis here will be derivable inside Lean via `Υ`'s body
-factorisation plus the strengthened framework outputs. The leaf
-SELFDESTRUCT preservation is already proved in
+witness is provided AND the strong sibling of
+`Ξ_balanceOf_ge_bundled` (i.e. `ΞFrameAtCStrong C maxFuel` from
+the strong witness) is closed (closing the SD-set tracking through
+the entire mutual closure — the bulk of Phase A's remaining work),
+the `RegSDExclusion` hypothesis here will be derivable inside Lean
+via `Υ`'s body factorisation plus the strengthened framework
+outputs. The leaf SELFDESTRUCT preservation is already proved in
 `SelfdestructFrame.lean` (`selfdestruct_preserves_SD_exclude_C`).
 -/
 
