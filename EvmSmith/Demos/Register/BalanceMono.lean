@@ -132,9 +132,9 @@ private theorem balanceOf_σ₀_eq
 private theorem σ₀_StateWF
     (σ : AccountMap .EVM) (H_f : ℕ) (S_T : AccountAddress)
     (H : BlockHeader) (tx : Transaction)
-    (hWF : StateWF σ) :
+    (hWF : StateWF σ)
+    (hValid : TxValid σ S_T tx H H_f) :
     StateWF (Υ_σ₀ σ H_f S_T H tx) := by
-  have hValid := tx_validity σ S_T tx H H_f
   obtain ⟨acc, hFind, _hUpfront, hLeBal, _, _⟩ := hValid
   unfold Υ_σ₀
   apply StateWF_insert_le_bal _ _ _ acc hFind _ hWF
@@ -164,6 +164,7 @@ private theorem σ_to_σP_balance_mono_Θ
     (oData : ByteArray)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
+    (hValid : TxValid σ S_T tx H H_f)
     (hΘ : EVM.Θ fuel tx.blobVersionedHashes Batteries.RBSet.empty H_gen blocks
             (Υ_σ₀ σ H_f S_T H tx) (Υ_σ₀ σ H_f S_T H tx) AStar S_T S_T t
             (toExecute .EVM (Υ_σ₀ σ H_f S_T H tx) t)
@@ -171,8 +172,7 @@ private theorem σ_to_σP_balance_mono_Θ
           = .ok (cA', σ_P, g_ret, A, z, oData)) :
     balanceOf σ_P C ≥ balanceOf σ C := by
   have hσ₀_eq := balanceOf_σ₀_eq σ H_f S_T C H tx hS_T
-  have hWFσ₀ := σ₀_StateWF σ H_f S_T H tx hWF
-  have hValid := tx_validity σ S_T tx H H_f
+  have hWFσ₀ := σ₀_StateWF σ H_f S_T H tx hWF hValid
   obtain ⟨_acc, _hFind, _hUpfront, _hLeBal, hValueLe, hRecBound⟩ := hValid
   -- Apply Θ_balanceOf_ge at σ₀.
   have hΘ_result :=
@@ -209,14 +209,14 @@ private theorem σ_to_σP_balance_mono_Λ
     (z : Bool) (oData : ByteArray)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
+    (hValid : TxValid σ S_T tx H H_f)
     (hΛ : EVM.Lambda fuel tx.blobVersionedHashes Batteries.RBSet.empty
             H_gen blocks (Υ_σ₀ σ H_f S_T H tx) (Υ_σ₀ σ H_f S_T H tx) AStar
             S_T S_T g pPrice tx.base.value tx.base.data ⟨0⟩ none H true
           = .ok (a, cA', σ_P, g_ret, A, z, oData)) :
     balanceOf σ_P C ≥ balanceOf σ C := by
   have hσ₀_eq := balanceOf_σ₀_eq σ H_f S_T C H tx hS_T
-  have hWFσ₀ := σ₀_StateWF σ H_f S_T H tx hWF
-  have hValid := tx_validity σ S_T tx H H_f
+  have hWFσ₀ := σ₀_StateWF σ H_f S_T H tx hWF hValid
   obtain ⟨_acc, _hFind, _hUpfront, _hLeBal, hValueLe, _hRecBound⟩ := hValid
   -- Apply Λ_balanceOf_ge at σ₀.
   have hΛ_result :=
@@ -267,6 +267,7 @@ private theorem register_Υ_body_factors
     (tx : Transaction) (S_T C : AccountAddress)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
+    (hValid : TxValid σ S_T tx H H_f)
     (_hCode : codeAt σ C)
     (hDeadσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     ΥBodyFactors σ fuel H_f H H_gen blocks tx S_T C := by
@@ -288,7 +289,7 @@ private theorem register_Υ_body_factors
         cases hOk
         refine ⟨σ_P, g', rfl, ?_, ?_⟩
         · exact σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
-            _ _ _ a cA σ_P g' A z gReturn hWF hS_T hΛ
+            _ _ _ a cA σ_P g' A z gReturn hWF hS_T hValid hΛ
         · exact hDeadσP σ_P g' rfl
       case h_2 e hΛ =>
         simp [bind, Except.bind] at hOk
@@ -307,7 +308,7 @@ private theorem register_Υ_body_factors
         cases hOk
         refine ⟨σ_P, g', rfl, ?_, ?_⟩
         · exact σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
-            _ _ _ σ_P g' A z cA gReturn hWF hS_T hΘ
+            _ _ _ σ_P g' A z cA gReturn hWF hS_T hValid hΘ
         · exact hDeadσP σ_P g' rfl
       case h_2 e hΘ =>
         simp [bind, Except.bind] at hOk
@@ -348,6 +349,7 @@ theorem register_balance_mono
     (hInv : RegInv σ C b₀)
     (hS_T : C ≠ S_T)
     (hBen : C ≠ H.beneficiary)
+    (hValid : TxValid σ S_T tx H H_f)
     (hSDExcl : RegSDExclusion σ fuel H_f H H_gen blocks tx S_T C)
     (hDeadAtσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
@@ -357,6 +359,6 @@ theorem register_balance_mono
     hWF hInv.bal hS_T hBen (bytecodePreservesBalance C)
     (register_Υ_tail_invariant σ fuel H_f H H_gen blocks tx S_T C hSDExcl)
     (register_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
-      hWF hS_T hInv.code hDeadAtσP)
+      hWF hS_T hValid hInv.code hDeadAtσP)
 
 end EvmSmith.Register
