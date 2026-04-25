@@ -32,6 +32,34 @@ code is Register's bytecode.
 namespace EvmSmith.Register
 open EvmYul EvmYul.EVM EvmYul.Frame
 
+/-! ## Register-reachability predicate (groundwork)
+
+A small piece of infrastructure for the eventual conversion of the
+two axioms below into theorems: a predicate witnessing that a state
+`s` is on the Register-bytecode trace at one of its valid PCs
+(0, 2, 3, 4, 5, 7, 9, 11, 13, 15, 16, 17, 18, 19), with its code
+field equal to Register's bytecode.
+-/
+
+/-- A state `s` is **Register-reachable at PC** for the given PC values
+{0, 2, 3, 4, 5, 7, 9, 11, 13, 15, 16, 17, 18, 19} if it satisfies the
+expected per-PC stack-shape invariants of Register's bytecode trace. -/
+def RegisterReachable (s : EVM.State) : Prop :=
+  s.executionEnv.code = bytecode ∧
+  ∃ pc_set : Finset Nat,
+    pc_set = {0, 2, 3, 4, 5, 7, 9, 11, 13, 15, 16, 17, 18, 19} ∧
+    s.pc.toNat ∈ pc_set
+
+/-- An initial Register-execution state (PC=0, code=bytecode) is reachable. -/
+private theorem RegisterReachable_initial
+    (s : EVM.State)
+    (h_code : s.executionEnv.code = bytecode)
+    (h_pc : s.pc = UInt256.ofNat 0) :
+    RegisterReachable s := by
+  refine ⟨h_code, ⟨_, rfl, ?_⟩⟩
+  rw [h_pc]
+  decide
+
 /-! ## Register-pinned structural axioms
 
 Two narrow axioms — both pinned structurally to Register's specific
