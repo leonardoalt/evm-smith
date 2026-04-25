@@ -257,6 +257,20 @@ private theorem op_eq_of_fetchInstr_decode
   injection h with h _
   exact h.symm
 
+/-- Stronger version: derive both op and arg from fetchInstr. -/
+private theorem op_arg_eq_of_fetchInstr_decode
+    {I : ExecutionEnv .EVM} {pc : UInt256}
+    {op_dec : Operation .EVM} {arg_dec : Option (UInt256 × Nat)}
+    {op : Operation .EVM} {arg : Option (UInt256 × Nat)}
+    (hDec : decode I.code pc = some (op_dec, arg_dec))
+    (hFetch : fetchInstr I pc = .ok (op, arg)) :
+    op = op_dec ∧ arg = arg_dec := by
+  unfold fetchInstr at hFetch
+  rw [hDec] at hFetch
+  injection hFetch with h
+  injection h with h1 h2
+  exact ⟨h1.symm, h2.symm⟩
+
 /-- At any reachable CALL, `stack[2]? = some 0`. The only PC with op =
 CALL is 17, and the disjunct at PC=17 has `stack[2]? = some 0`. -/
 private theorem RegisterTrace_v0_at_CALL
@@ -313,7 +327,7 @@ private theorem RegisterTrace_initial
   -- Initial state has pc = 0 (default UInt256 = ⟨0⟩) and empty stack.
   left
   refine ⟨?_, ?_⟩
-  · show (0 : UInt256).toNat = 0
+  · show (⟨0⟩ : UInt256).toNat = 0
     decide
   · show ([] : Stack UInt256).length = 0
     rfl
@@ -324,6 +338,214 @@ This is the bulky obligation: for each Register PC, unfold `EVM.step`
 for the decoded op and verify the post-state lies on the next PC's
 disjunct of `RegisterTrace`. -/
 
+/-! ### Helpers for the step proof -/
+
+/-- For nats `a, b` with `a + b < UInt256.size`, the toNat of the sum
+of the corresponding `UInt256`s equals `a + b`. -/
+private theorem ofNat_add_ofNat_toNat
+    (a b : ℕ) (ha : a < UInt256.size) (hb : b < UInt256.size)
+    (hab : a + b < UInt256.size) :
+    (UInt256.ofNat a + UInt256.ofNat b).toNat = a + b := by
+  show (UInt256.ofNat a + UInt256.ofNat b).val.val = a + b
+  rw [show (UInt256.ofNat a + UInt256.ofNat b).val
+        = (UInt256.ofNat a).val + (UInt256.ofNat b).val from rfl]
+  rw [Fin.val_add]
+  show ((UInt256.ofNat a).val.val + (UInt256.ofNat b).val.val) % UInt256.size = a + b
+  have hav : (UInt256.ofNat a).val.val = a := by
+    show a % UInt256.size = a
+    exact Nat.mod_eq_of_lt ha
+  have hbv : (UInt256.ofNat b).val.val = b := by
+    show b % UInt256.size = b
+    exact Nat.mod_eq_of_lt hb
+  rw [hav, hbv]
+  exact Nat.mod_eq_of_lt hab
+
+/-- After a PUSH1-with-arg step, the post-state has pc + 2, stack with
+fresh top, and executionEnv preserved. -/
+private theorem step_PUSH1_shape
+    (s s' : EVM.State) (f' cost : ℕ) (v : UInt256)
+    (hStep : EVM.step (f' + 1) cost (some (.Push .PUSH1, some (v, 1))) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 2 ∧
+    s'.stack = v :: s.stack ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run, Option.some_bind] at hStep
+  injection hStep with hStep
+  subst hStep
+  refine ⟨rfl, rfl, rfl⟩
+
+/-- CALLDATALOAD: pops 1, pushes 1, pcΔ=1. -/
+private theorem step_CALLDATALOAD_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hd : UInt256) (tl : Stack UInt256) (hStk : s.stack = hd :: tl)
+    (hStep : EVM.step (f' + 1) cost (some (.CALLDATALOAD, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    (∃ v, s'.stack = v :: tl) ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchUnaryStateOp EVM.unaryStateOp at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨rfl, ⟨_, rfl⟩, rfl⟩
+
+/-- CALLER: pushes 1, pcΔ=1. -/
+private theorem step_CALLER_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hStep : EVM.step (f' + 1) cost (some (.CALLER, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    (∃ v, s'.stack = v :: s.stack) ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchExecutionEnvOp EVM.executionEnvOp at hStep
+  simp only [Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨rfl, ⟨_, rfl⟩, rfl⟩
+
+/-- SSTORE: pops 2, pcΔ=1. Note: executionEnv preserved (sstore preserves it). -/
+private theorem step_SSTORE_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hd1 hd2 : UInt256) (tl : Stack UInt256) (hStk : s.stack = hd1 :: hd2 :: tl)
+    (hStep : EVM.step (f' + 1) cost (some (.SSTORE, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    s'.stack = tl ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨rfl, rfl, ?_⟩
+  -- s'.executionEnv = (sstore ...).executionEnv = s.toState.executionEnv = s.executionEnv
+  show (EvmYul.State.sstore _ _ _).executionEnv = s.executionEnv
+  rw [sstore_preserves_executionEnv]
+
+/-- GAS: pushes 1, pcΔ=1. -/
+private theorem step_GAS_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hStep : EVM.step (f' + 1) cost (some (.GAS, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    (∃ v, s'.stack = v :: s.stack) ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchMachineStateOp EVM.machineStateOp at hStep
+  simp only [Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨rfl, ⟨_, rfl⟩, rfl⟩
+
+/-- POP: pops 1, pcΔ=1. -/
+private theorem step_POP_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hd : UInt256) (tl : Stack UInt256) (hStk : s.stack = hd :: tl)
+    (hStep : EVM.step (f' + 1) cost (some (.POP, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    s'.stack = tl ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨rfl, rfl, rfl⟩
+
+/-- STOP: pc and stack unchanged. -/
+private theorem step_STOP_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hStep : EVM.step (f' + 1) cost (some (.STOP, arg)) s = .ok s') :
+    s'.pc = s.pc ∧
+    s'.stack = s.stack ∧
+    s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- EVM.call preserves the input's pc field. -/
+private theorem EVM_call_preserves_pc
+    (f' cost : ℕ) (bvh : List ByteArray)
+    (g src rcp t v v' io is oo os : UInt256) (perm : Bool)
+    (es : EVM.State) (xv : UInt256) (es' : EVM.State)
+    (h : EVM.call f' cost bvh g src rcp t v v' io is oo os perm es = .ok (xv, es')) :
+    es'.pc = es.pc ∧ es'.executionEnv = es.executionEnv := by
+  unfold EVM.call at h
+  match f' with
+  | 0 => exact absurd h (by simp)
+  | n + 1 =>
+    simp only [bind, Except.bind, pure, Except.pure] at h
+    -- We split on the if-then-else first, then on the Θ result (or directly succeed).
+    split at h
+    · -- value ≤ balance ∧ depth < 1024 — Θ called.
+      split at h
+      · -- Θ error
+        exact absurd h (by simp)
+      · -- Θ ok
+        simp only [Except.ok.injEq, Prod.mk.injEq] at h
+        obtain ⟨_, hes⟩ := h
+        rw [← hes]
+        exact ⟨rfl, rfl⟩
+    · -- otherwise branch: directly returns ok with es modified only in σ etc.
+      simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨_, hes⟩ := h
+      rw [← hes]
+      exact ⟨rfl, rfl⟩
+
+/-- CALL: pops 7, pushes 1, pcΔ=1. -/
+private theorem step_CALL_shape
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hd1 hd2 hd3 hd4 hd5 hd6 hd7 : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl)
+    (hStep : EVM.step (f' + 1) cost (some (.CALL, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    (∃ v, s'.stack = v :: tl) ∧
+    s'.executionEnv = s.executionEnv := by
+  simp only [EVM.step, Operation.CALL, bind, Except.bind, pure, Except.pure] at hStep
+  rw [hStk] at hStep
+  split at hStep
+  · exact absurd hStep (by simp)
+  · rename_i p hpop7
+    obtain ⟨stack', μ₀, μ₁, μ₂, μ₃, μ₄, μ₅, μ₆⟩ := p
+    have hStack : stack' = tl := by
+      simp only [Stack.pop7] at hpop7
+      injection hpop7 with h
+      injection h with h
+      exact h.symm
+    split at hStep
+    · exact absurd hStep (by simp)
+    · rename_i p_call hCall
+      injection hStep with hEq
+      -- p_call.1 = x (push value), p_call.2 = post-call state with pc preserved.
+      -- Apply the call-preservation lemma. The "input state" is the one inside hCall.
+      have hCallPres := EVM_call_preserves_pc _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ hCall
+      obtain ⟨hPC, hEE⟩ := hCallPres
+      rw [← hEq]
+      refine ⟨?_, ⟨p_call.1, ?_⟩, ?_⟩
+      · show (p_call.2.replaceStackAndIncrPC (stack'.push p_call.1)).pc = s.pc + UInt256.ofNat 1
+        show p_call.2.pc + UInt256.ofNat 1 = s.pc + UInt256.ofNat 1
+        rw [hPC]
+      · show (p_call.2.replaceStackAndIncrPC (stack'.push p_call.1)).stack = p_call.1 :: tl
+        show stack'.push p_call.1 = p_call.1 :: tl
+        rw [hStack]; rfl
+      · show p_call.2.executionEnv = s.executionEnv
+        rw [hEE]
+
 private theorem RegisterTrace_step_preserves
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
@@ -331,14 +553,295 @@ private theorem RegisterTrace_step_preserves
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     RegisterTrace C s' := by
-  -- Use the step-preserves-balanceOf-style structure to extract the
-  -- `op = ...` fact from `hFetch`. Then for each PC, unfold `EVM.step`
-  -- for that op, derive `s'.pc` and `s'.stack`, and pick the appropriate
-  -- next-PC disjunct.
-  --
-  -- The proof body is bulky but mechanical. We rely on the fact that
-  -- non-CALL ops dispatch to `EvmYul.step` and CALL is handled inline.
-  sorry
+  obtain ⟨hCO, hCode, hPC⟩ := h
+  -- For each PC case, we'll: derive op and arg via op_arg_eq, then apply the shape
+  -- lemma, then pick the right next-PC disjunct.
+  rcases hPC with
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen, hs0⟩ |
+    ⟨hpc, hLen, hs0, hs1⟩ |
+    ⟨hpc, hLen, hs0, hs1, hs2⟩ |
+    ⟨hpc, hLen, hs0, hs1, hs2, hs3⟩ |
+    ⟨hpc, hLen, hs0, hs1, hs2, hs3, hs4⟩ |
+    ⟨hpc, hLen, hs1, hs2, hs3, hs4, hs5⟩ |
+    ⟨hpc, hLen, hs2, hs3, hs4, hs5, hs6⟩ |
+    ⟨hpc, hLen⟩ |
+    ⟨hpc, hLen⟩
+  all_goals (
+    have hpcEq : s.pc = UInt256.ofNat _ := pc_eq_ofNat_of_toNat s _ (by decide) hpc)
+  -- Case PC=0 (PUSH1 0).
+  · -- Decode at PC=0.
+    have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_0
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · -- Next PC = 2, stack length = 1.
+      right; left
+      refine ⟨?_, ?_⟩
+      · rw [hPC', hpcEq]
+        show ((UInt256.ofNat 0) + UInt256.ofNat 2).toNat = 2
+        exact ofNat_add_ofNat_toNat 0 2 (by decide) (by decide) (by decide)
+      · rw [hStk']
+        show List.length (UInt256.ofNat 0 :: s.stack) = 1
+        simp [hLen]
+  -- Case PC=2 (CALLDATALOAD).
+  · have hDec : decode s.executionEnv.code s.pc = some (.CALLDATALOAD, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_2
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    -- s.stack.length = 1, so we can extract a head.
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, hLen2 =>
+      have hLen3 : tl.length = 0 := by
+        have : (hd :: tl).length = 1 := by rw [← hStk_eq]; exact hLen
+        simpa using this
+      obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+        step_CALLDATALOAD_shape s s' f' cost none hd tl hStk_eq hStep
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hEE']; exact hCO
+      · rw [hEE']; exact hCode
+      · right; right; left
+        refine ⟨?_, ?_⟩
+        · rw [hPC', hpcEq]
+          exact ofNat_add_ofNat_toNat 2 1 (by decide) (by decide) (by decide)
+        · rw [hStk']
+          show (v :: tl).length = 1
+          simp [hLen3]
+  -- Case PC=3 (CALLER).
+  · have hDec : decode s.executionEnv.code s.pc = some (.CALLER, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_3
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ := step_CALLER_shape s s' f' cost none hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; left
+      refine ⟨?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 3 1 (by decide) (by decide) (by decide)
+      · rw [hStk']
+        show (v :: s.stack).length = 2
+        simp [hLen]
+  -- Case PC=4 (SSTORE).
+  · have hDec : decode s.executionEnv.code s.pc = some (.SSTORE, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_4
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, hLen2 =>
+      have hLen3 : tl.length = 0 := by
+        have : (hd1 :: hd2 :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
+        simpa using this
+      obtain ⟨hPC', hStk', hEE'⟩ :=
+        step_SSTORE_shape s s' f' cost none hd1 hd2 tl hStk_eq hStep
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hEE']; exact hCO
+      · rw [hEE']; exact hCode
+      · right; right; right; right; left
+        refine ⟨?_, ?_⟩
+        · rw [hPC', hpcEq]
+          exact ofNat_add_ofNat_toNat 4 1 (by decide) (by decide) (by decide)
+        · rw [hStk']; exact hLen3
+  -- Case PC=5 (PUSH1 0).
+  · have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_5
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · -- Next PC=7, stack=[0] (length 1, top=0).
+      right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 5 2 (by decide) (by decide) (by decide)
+      · rw [hStk']
+        show List.length (UInt256.ofNat 0 :: s.stack) = 1
+        simp [hLen]
+      · rw [hStk']
+        show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
+        rfl
+  -- Case PC=7 (PUSH1 0).
+  · have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_7
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 7 2 (by decide) (by decide) (by decide)
+      · rw [hStk']
+        show List.length (UInt256.ofNat 0 :: s.stack) = 2
+        simp [hLen]
+      · rw [hStk']
+        show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
+        rfl
+      · rw [hStk']
+        show (UInt256.ofNat 0 :: s.stack)[1]? = some ⟨0⟩
+        simp [List.getElem?_cons_succ]
+        exact hs0
+  -- Case PC=9 (PUSH1 0).
+  · have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_9
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 9 2 (by decide) (by decide) (by decide)
+      · rw [hStk']; show List.length (_ :: s.stack) = 3; simp [hLen]
+      · rw [hStk']; rfl
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+  -- Case PC=11 (PUSH1 0).
+  · have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_11
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 11 2 (by decide) (by decide) (by decide)
+      · rw [hStk']; show List.length (_ :: s.stack) = 4; simp [hLen]
+      · rw [hStk']; rfl
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+  -- Case PC=13 (PUSH1 0).
+  · have hDec : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_13
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_PUSH1_shape s s' f' cost _ hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 13 2 (by decide) (by decide) (by decide)
+      · rw [hStk']; show List.length (_ :: s.stack) = 5; simp [hLen]
+      · rw [hStk']; rfl
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+  -- Case PC=15 (CALLER).
+  · have hDec : decode s.executionEnv.code s.pc = some (.CALLER, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_15
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ := step_CALLER_shape s s' f' cost none hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 15 1 (by decide) (by decide) (by decide)
+      · rw [hStk']; show List.length (v :: s.stack) = 6; simp [hLen]
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
+  -- Case PC=16 (GAS).
+  · have hDec : decode s.executionEnv.code s.pc = some (.GAS, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_16
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ := step_GAS_shape s s' f' cost none hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; right; right; right; right; left
+      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 16 1 (by decide) (by decide) (by decide)
+      · rw [hStk']; show List.length (v :: s.stack) = 7; simp [hLen]
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
+      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs5
+  -- Case PC=17 (CALL).
+  · have hDec : decode s.executionEnv.code s.pc = some (.CALL, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_17
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    -- Stack length 7 — pull out 7 cons.
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl, hLen2 =>
+      have hTl : tl = [] := by
+        have : (hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl).length = 7 := by
+          rw [← hStk_eq]; exact hLen
+        have : tl.length = 0 := by simpa using this
+        exact List.length_eq_zero_iff.mp this
+      obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+        step_CALL_shape s s' f' cost none hd1 hd2 hd3 hd4 hd5 hd6 hd7 tl hStk_eq hStep
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hEE']; exact hCO
+      · rw [hEE']; exact hCode
+      · right; right; right; right; right; right; right; right; right; right; right; right; left
+        refine ⟨?_, ?_⟩
+        · rw [hPC', hpcEq]
+          exact ofNat_add_ofNat_toNat 17 1 (by decide) (by decide) (by decide)
+        · rw [hStk', hTl]; rfl
+  -- Case PC=18 (POP).
+  · have hDec : decode s.executionEnv.code s.pc = some (.POP, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_18
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, hLen2 =>
+      have hLen3 : tl.length = 0 := by
+        have : (hd :: tl).length = 1 := by rw [← hStk_eq]; exact hLen
+        simpa using this
+      obtain ⟨hPC', hStk', hEE'⟩ :=
+        step_POP_shape s s' f' cost none hd tl hStk_eq hStep
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hEE']; exact hCO
+      · rw [hEE']; exact hCode
+      · right; right; right; right; right; right; right; right; right; right; right; right; right
+        refine ⟨?_, ?_⟩
+        · rw [hPC', hpcEq]
+          exact ofNat_add_ofNat_toNat 18 1 (by decide) (by decide) (by decide)
+        · rw [hStk']; exact hLen3
+  -- Case PC=19 (STOP). Halt — disjunct stays at PC=19 length=0.
+  · have hDec : decode s.executionEnv.code s.pc = some (.STOP, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_19
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    subst hOp; subst hArg
+    obtain ⟨hPC', hStk', hEE'⟩ := step_STOP_shape s s' f' cost none hStep
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hEE']; exact hCO
+    · rw [hEE']; exact hCode
+    · right; right; right; right; right; right; right; right; right; right; right; right; right
+      refine ⟨?_, ?_⟩
+      · rw [hPC']; exact hpc
+      · rw [hStk']; exact hLen
 
 /-! ## Bytecode-preservation theorem -/
 
