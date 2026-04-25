@@ -65,7 +65,9 @@ We prove the arithmetic part. The `MSTORE ; RETURN` suffix's `H_return = (a+b+c)
 
 ### Storage contract (`EvmSmith/Demos/Register/Proofs.lean`)
 
-A second worked example: a 6-byte contract that reads one `uint256` from calldata and stores it at `storage[msg.sender]` (SSTORE + CALLER).
+A second worked example: a 20-byte contract that reads one `uint256` from calldata, stores it at `storage[msg.sender]` (SSTORE + CALLER), then issues a single `CALL` with value 0 to `msg.sender` — exposing reentrancy as part of the safety question.
+
+`Register/Proofs.lean` (sorry-free):
 
 | Theorem | Statement |
 | --- | --- |
@@ -73,7 +75,17 @@ A second worked example: a 6-byte contract that reads one `uint256` from calldat
 | `program_updates_caller_account` | After the call, the code owner's account is exactly `acc.updateStorage (addressSlot sender) x`. |
 | `program_preserves_other_accounts` | Every account address other than the code owner is unchanged. |
 
-All three proved sorry-free. The natural surface theorems at the slot level (`storageAt postState codeOwner (addressSlot sender) = x` and a slot-frame companion) were dropped because they require `Std.LawfulOrd UInt256` and `Batteries.RBMap.find?_erase_*` — neither of which exist upstream. See `.claude/batteries-wishlist.md`.
+The natural surface theorems at the slot level (`storageAt postState codeOwner (addressSlot sender) = x` and a slot-frame companion) were dropped because they require `Std.LawfulOrd UInt256` and `Batteries.RBMap.find?_erase_*` — neither of which exist upstream. See `.claude/batteries-wishlist.md`.
+
+### Reentrancy-resistant balance monotonicity for Register
+
+The headline proof of this repo. `EvmSmith/Demos/Register/BalanceMono.lean :: register_balance_mono` states:
+
+> *After any single Ethereum transaction (`Υ`), Register's balance at its deployment address `C` is `≥` the balance it had before the transaction.*
+
+This holds **in the presence of arbitrary reentrancy** through the `CALL` Register itself emits, plus any nested CREATE / CREATE2 / SELFDESTRUCT paths the EVM allows. The proof composes a contract-specific bytecode walk (`BytecodeFrame.lean`) with the EVMYulLean frame library (see "[Framework for cross-transaction invariants](#framework-for-cross-transaction-invariants)" below). Three real-world axioms are used: T2 (precompile purity), T5 (Keccak collision-resistance), and a deployment-pinned code-identity claim (`I.codeOwner = C → I.code = bytecode`); no balance- or stack-shape axioms.
+
+Full structure: see [`EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md).
 
 ### Wrapped-ETH token (`EvmSmith/Demos/Weth/`) — **main invariant not proved**
 
@@ -83,9 +95,24 @@ Third worked example — an 86-byte WETH-style contract with function dispatch v
 
 **This invariant is not proved in Lean.** Foundry invariant testing exercises it at 256 × 50 = 12 800 transition checks, but fuzzing is not a substitute for a proof — and the whole point of this repo is that writing contracts in raw bytecode is only worthwhile if the safety claims are actually proved.
 
-What blocks the proof is documented in detail in **[`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md)**. In short: the proof needs three layers of missing infrastructure, nested on top of each other — `Batteries.RBMap.foldl` lemmas (Batteries PR-sized), CALL semantics through the upstream Θ iterator (EVMYulLean modeling), and a transaction-level induction schema we've never built. That document also sketches three realistic plans of attack for the next iteration.
+The Register balance-monotonicity proof unblocks the *infrastructure* layer (cross-transaction induction through reentrant CALLs is now a solved framework problem; see below). What's left for Weth is the contract-specific bytecode walk over its 86 bytes — substantially larger than Register's 20-byte walk because Weth has function-dispatch control flow plus storage-sum reasoning. The pre-existing blocker note **[`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md)** still documents the storage-side gaps (`Batteries.RBMap.foldl` lemmas).
 
 Weth's step lemmas (`runOp_jumpi_*`, `runOp_call*`, `runOp_dup{1..5}`, `runOp_swap{1,2}`, …) are in `EvmSmith/Lemmas.lean`, ready for the proof work. The Foundry test suite (15 tests including the invariant runs and an explicit reentrancy test) is in `EvmSmith/Demos/Weth/foundry/`.
+
+## Framework for cross-transaction invariants
+
+`EVMYulLean/EvmYul/Frame/` is a frame library (closed in this repo's branch of EVMYulLean) for reasoning about per-account invariants at every layer of the EVM dispatch hierarchy: per-opcode (`StepFrame`), single CALL/CREATE arms (`StepSystemFrame`), the X instruction loop (`XFrame`), the Ξ interpreter and the Θ/Λ message-call / contract-creation iterators (`MutualFrame`), the Υ transaction-level driver (`UpsilonFrame`), and SELFDESTRUCT (`SelfdestructFrame`).
+
+Highlights:
+
+* **`Υ_balanceOf_ge`** — top-level `b₀ ≤ balanceOf σ' C` for any post-Υ state σ', under standard boundary hypotheses (`C ≠ S_T`, `C ≠ H.beneficiary`) plus a per-bytecode `ΞPreservesAtC C` witness.
+* **`ΞPreservesAtC_of_Reachable`** — turns any contract-specific reachability predicate `Reachable : EVM.State → Prop` plus six closure obligations into the `ΞPreservesAtC C` witness. This is the consumer entry point.
+* **`StepShapes`** — 81 per-opcode shape lemmas (`step_PUSH1_shape`, `step_CALL_shape`, etc.) describing post-step `(pc, stack, executionEnv)` for the most common opcodes. Coverage spans pushes, arithmetic primops, DUP/SWAP, control flow, copy ops, environment readers, and CALL.
+* **`PcWalk`** — 54 per-PC wrappers (`step_PUSH1_at_pc`, etc.) that combine `decode-bytecode-at-pc` extraction with the matching shape lemma, compressing each PC case in a contract's bytecode walk to a single tactic invocation.
+
+Three open axioms remain: T2 (precompile purity), T5 (Keccak collision), and per-contract code-identity (deployment-pinned). All other balance-frame results are theorems.
+
+Architecture overview: [`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRARY.md). End-to-end usage example: [`EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md). Generalization plan for further lifts: [`GENERALIZATION_PLAN.md`](./GENERALIZATION_PLAN.md). Step-by-step playbook for new contracts: [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md).
 
 ## Requirements
 
@@ -276,8 +303,9 @@ end EvmSmith.MyProgramProofs
 
 - **Bytes-level round-trips** (e.g. `MSTORE` → `RETURN` producing the bytes of `a + b + c`) go through `ffi.ByteArray.zeroes`, which is `opaque`. Proofs that need it would require an axiomatized round-trip lemma.
 - **Storage slot-level claims need `LawfulOrd UInt256`** (not registered) and **`Batteries.RBMap.find?_erase_*` lemmas** (don't exist upstream). See `.claude/batteries-wishlist.md`. Account-map-level claims are the workaround.
-- **Cross-transaction inductive invariants are not yet provable** in this repo. The main example where we wanted this — Weth's conservation claim — is blocked on three layers of missing infrastructure; see **[`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md)**. Until this is solved, contracts that fundamentally need cross-transaction invariants (token ledgers, AMMs, anything with a "no-drain" property) can only be tested, not proved, in this repo.
-- **`CALL` semantics are out of reach.** Upstream routes CALL through the `Θ` iterator (mutually-recursive message-call + contract-creation). Any proof about an `accountMap[C].balance` change requires reasoning about `Θ`. Out of scope for `runSeq`-based proofs.
+- **Cross-transaction balance-monotonicity** is provable now (Register's `register_balance_mono` is the worked example). The framework consumer surface still has two boundary hypotheses (`*SDExclusion`, `*DeadAtσP`) — structural call-tree facts that follow from "your bytecode contains no SELFDESTRUCT" + T5, but aren't yet derived inside Lean. Eliminating them is in-flight: predicates `ΞFrameAtCStrong` / `ΞAtCFrameStrong` exist; threading SD-tracking through the mutual closure is open. See [`GENERALIZATION_PLAN.md`](./GENERALIZATION_PLAN.md) Step 5.
+- **Storage-sum invariants** (e.g. Weth's `Σ storage[k] ≤ contract.balance`) need a different framework path than balance-mono. The Frame library closes the reentrancy/CALL side; the storage-sum side needs `Batteries.RBMap.foldl` lemmas (Batteries PR-sized). See [`.claude/weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md).
+- **CALLs with non-zero value** can't be proved balance-monotone (the contract's balance can decrease — by design). The framework's at-C / v=0 chain assumes value-0 CALLs out. Contracts that emit non-zero CALLs need a different invariant shape (relative bound or staged precondition). See `GENERALIZATION_PLAN.md` Step 4.
 - **No gas reasoning.** `runOpFull` deducts gas but the theorems ignore it.
 - **`unfold; rfl` depends on reducibility.** Most demo proofs close by `unfold EvmYul.step; rfl`. An upstream `@[irreducible]` annotation on any of `step`, `execBinOp`, `Stack.pop*`, etc. would break every proof simultaneously — at that point, proofs would need to go through named characterization lemmas instead.
 

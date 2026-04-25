@@ -33,14 +33,18 @@ Lean proof of its correctness → `lake build` verifies both.
   Foundry test suite that loads the runtime bytecode via `vm.etch`
   and exercises it with raw calldata).
 - **[`EvmSmith/Demos/Register/`](./EvmSmith/Demos/Register/)** — a
-  storage-using worked example: `storage[msg.sender] = x`. Exercises
-  `CALLER` + `SSTORE` + `STOP`. Proves three invariants (structural
-  post-state, caller-account update, account-frame). Two further
-  invariants (findD-form functional correctness, slot-frame) sit as
-  `sorry` stubs because Batteries' RBMap API doesn't expose
-  `find?_erase_of_ne` / `findD_insert_self`; a follow-up pass can
-  close them once those lemmas land. Same Foundry-test shape as Add3
-  plus `vm.prank` for multi-sender scenarios.
+  storage-using worked example: `storage[msg.sender] = x` followed by
+  a value-0 `CALL` to `msg.sender`, exposing reentrancy. Exercises
+  `CALLER`/`SSTORE`/`CALL`/`POP`/`STOP`. Three locally proved
+  invariants (`Proofs.lean`: structural post-state, caller-account
+  update, account-frame). **Plus the headline cross-transaction
+  result**: `BalanceMono.lean :: register_balance_mono` —
+  Register's balance is non-decreasing across any single Ethereum
+  transaction, *under arbitrary reentrancy*, sorry-free. Proof
+  composes a per-PC bytecode walk in `BytecodeFrame.lean` with the
+  EVMYulLean frame library (see "Frame library" below). End-to-end
+  walkthrough:
+  [`BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md).
 - **[`EvmSmith/Demos/Weth/`](./EvmSmith/Demos/Weth/)** — a
   wrapped-ETH token contract in raw bytecode. Function dispatch via
   4-byte selectors, JUMP/JUMPI/JUMPDEST control flow, SSTORE
@@ -49,23 +53,69 @@ Lean proof of its correctness → `lake build` verifies both.
   covers full end-to-end safety: 13 concrete/fuzz tests plus two
   invariant tests (256×50 = 12800 transitions each) and an explicit
   reentrancy test. Main safety claim: `Σ storage[sender] ≤
-  contract.balance`.
+  contract.balance`. The invariant-side blockers are now mostly
+  about Weth's own bytecode walk (the framework is closed); see
+  [`weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md).
+
+## Frame library — for proving cross-transaction / reentrancy-resistant invariants
+
+If your contract needs to maintain a per-account invariant *across*
+an entire Ethereum transaction (`Υ`), through nested CALL / CREATE /
+SELFDESTRUCT and arbitrary reentrancy, the proof goes through the
+**Frame library** in
+[`EVMYulLean/EvmYul/Frame/`](./EVMYulLean/EvmYul/Frame/) (closed in
+this repo's branch of EVMYulLean — see
+[`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRARY.md) for the
+overview).
+
+The consumer entry point is **`ΞPreservesAtC_of_Reachable`**: you
+supply a contract-specific `Reachable : EVM.State → Prop`
+predicate that captures your bytecode trace, plus six closure
+obligations, and you get the per-bytecode `ΞPreservesAtC C` witness
+that feeds `Υ_balanceOf_ge` (the transaction-level frame).
+
+Three reusable building blocks:
+
+* **[`StepShapes.lean`](./EVMYulLean/EvmYul/Frame/StepShapes.lean)**
+  (81 lemmas) — for each opcode, a single-step lemma describing the
+  post-state's `pc`, `stack`, `executionEnv` shape after `EVM.step`.
+  Coverage spans pushes, arithmetic primops, DUP/SWAP, control flow,
+  copy ops, environment readers, and CALL.
+* **[`PcWalk.lean`](./EVMYulLean/EvmYul/Frame/PcWalk.lean)**
+  (54 wrappers) — `step_OP_at_pc` lemmas combining `decode-bytecode`
+  extraction with the matching shape, so each PC case in a contract
+  walk compresses to one tactic invocation.
+* **[`MutualFrame.lean`](./EVMYulLean/EvmYul/Frame/MutualFrame.lean)** —
+  `Θ_balanceOf_ge`, `Λ_balanceOf_ge`, `Ξ_balanceOf_ge_bundled`, the
+  joint mutual closure. Don't dive in unless you need to extend the
+  bundle's outputs.
+
+The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md) and demonstrated end-to-end by `EvmSmith/Demos/Register/BalanceMono.lean`. Generalisation roadmap (open work): [`GENERALIZATION_PLAN.md`](./GENERALIZATION_PLAN.md).
 
 ## Skills
 
 | Skill | When to use |
 |-------|-------------|
 | [`/add-program`](./.claude/skills/add-program.md) | Scaffold a new bytecode program under `EvmSmith/Demos/<Name>/Program.lean`. |
-| [`/prove-program`](./.claude/skills/prove-program.md) | Write a correctness theorem for a program, chaining step lemmas via `runSeq_cons_ok`. |
+| [`/prove-program`](./.claude/skills/prove-program.md) | Write a *single-tx, runSeq-level* correctness theorem (functional shape, post-state). |
+| [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md) | Write a *cross-transaction, reentrancy-resistant* per-account invariant via the Frame library + `ΞPreservesAtC_of_Reachable`. |
 | [`/add-opcode-lemma`](./.claude/skills/add-opcode-lemma.md) | Extend `EvmSmith/Lemmas.lean` with a missing opcode lemma (needed when your program uses an opcode the existing lemmas don't cover). |
 | [`/debug-proof`](./.claude/skills/debug-proof.md) | Diagnose a failing proof — `whnf` timeout, `simp` no-progress, pattern mismatch, FFI opacity, etc. |
 | [`/refresh-bytecode`](./.claude/skills/refresh-bytecode.md) | After editing a program's `bytecode` in Lean, regenerate the hex dump that the Foundry tests read. |
 
 ## Constraints an agent should know
 
-- **Do not modify `EVMYulLean/`.** It's a separate clone of an upstream
-  repo, gitignored here. Improvements that should land there are
-  tracked in `EVMYulLean/UPSTREAM_WISHLIST.md` (also gitignored).
+- **`EVMYulLean/` is a working fork**, not a read-only upstream. It's
+  gitignored in this repo because it's a sibling clone with its own
+  git history. The active branch
+  (`evm-smith-frame-library` on `leonardoalt/EVMYulLean`) carries the
+  Frame library and step-shape extensions used here. When extending
+  the framework — new step shapes, new closure-frame conjuncts,
+  bytecode-walk machinery — modifications belong there. Use
+  `git -C EVMYulLean ...` for git ops; commit incrementally; push to
+  the `fork` remote (already configured). Modifications that should
+  return to upstream Nethermind/EVMYulLean are tracked in
+  `EVMYulLean/UPSTREAM_WISHLIST.md` (also gitignored).
 - **Do not commit `.lake/`, `EthereumTests/`, or `EVMYulLean/`.**
   They're in `.gitignore` for good reasons (build artifacts, empty
   workaround dir, external dep).
