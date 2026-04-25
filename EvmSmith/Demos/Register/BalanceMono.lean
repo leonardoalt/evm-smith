@@ -54,6 +54,18 @@ captures the call-tree-level fact:
   runs Register's bytecode) inserts C into A.selfDestructSet.
 * SELFDESTRUCT at any other frame inserts that frame's `Iₐ`, which
   is `≠ C` by hypothesis.
+
+**Phase A (in progress): SD-set tracking inside the framework.**
+The framework now exposes a strengthened sibling predicate
+`ΞPreservesAtCStrong` (in `MutualFrame.lean`) that produces the
+post-frame substate's SD-set exclusion of `C` as a 4th conjunct.
+Once a `bytecodePreservesBalanceStrong C : ΞPreservesAtCStrong C`
+witness is provided (closing the SD-set tracking through the entire
+mutual closure — the bulk of Phase A's work), the `RegSDExclusion`
+hypothesis here will be derivable inside Lean via `Υ`'s body
+factorisation plus the strengthened framework outputs. The leaf
+SELFDESTRUCT preservation is already proved in
+`SelfdestructFrame.lean` (`selfdestruct_preserves_SD_exclude_C`).
 -/
 
 /-- Hypothesis on Υ's run output: the resulting substate's
