@@ -27,6 +27,21 @@ Structural argument (from `BALANCE_MONOTONICITY.md` Step 4):
 This lemma discharges the `ΞPreservesAtC C` witness required by
 `UpsilonFrame.Υ_balanceOf_ge` (A6), for the specific case where `C`'s
 code is Register's bytecode.
+
+## Status
+
+Following the `MutualFrame` refactor that introduces `ΞAtCFrame` and
+`ΞPreservesAtC_of_Reachable`, the at-`C` chain now requires only a
+fuel-bounded witness for the strong-fuel induction. The remaining
+obligation here is the `RegisterTrace`-closure proof (per-PC step
+preservation across Register's 14 valid PCs), which is substantial
+mechanical work (~400 LoC of per-opcode unfolding of `EVM.step`).
+
+The infrastructure for closing this is fully in place
+(`ΞPreservesAtC_of_Reachable`, `decode_at_validPC`, the per-PC stack
+invariant); what remains is the per-PC step body. We retain the
+narrow `Ξ_Register_preserves_balanceOf_at_C` axiom as a structural
+placeholder until the closure is mechanised.
 -/
 
 namespace EvmSmith.Register
@@ -121,7 +136,13 @@ Structural argument (mechanical, ~200 LoC per-opcode walk):
 
 Pinned to Register's specific bytecode: the conclusion only holds for
 `I.code = bytecode`. A different 20 bytes with a non-zero `PUSH1` at
-pc=13, or with a `SELFDESTRUCT`, would not satisfy this claim. -/
+pc=13, or with a `SELFDESTRUCT`, would not satisfy this claim.
+
+**Closure path (in progress).** The MutualFrame refactor (introducing
+`ΞAtCFrame` and `ΞPreservesAtC_of_Reachable`) reduces this axiom to
+the per-PC step-preservation closure for a `RegisterTrace` predicate.
+The 14-case step-preservation proof is mechanical but bulky (~400 LoC)
+and is deferred to a subsequent revision. -/
 private axiom Ξ_Register_preserves_balanceOf_at_C
     (fuel : ℕ) (createdAccounts : Batteries.RBSet AccountAddress compare)
     (genesisBlockHeader : BlockHeader) (blocks : ProcessedBlocks)
