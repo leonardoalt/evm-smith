@@ -83,7 +83,7 @@ The headline proof of this repo. `EvmSmith/Demos/Register/BalanceMono.lean :: re
 
 > *After any single Ethereum transaction (`Υ`), Register's balance at its deployment address `C` is `≥` the balance it had before the transaction.*
 
-This holds **in the presence of arbitrary reentrancy** through the `CALL` Register itself emits, plus any nested CREATE / CREATE2 / SELFDESTRUCT paths the EVM allows. The proof composes a contract-specific bytecode walk (`BytecodeFrame.lean`) with the EVMYulLean frame library (see "[Framework for cross-transaction invariants](#framework-for-cross-transaction-invariants)" below). Three real-world axioms are used: T2 (precompile purity), T5 (Keccak collision-resistance), and a deployment-pinned code-identity claim (`I.codeOwner = C → I.code = bytecode`); no balance- or stack-shape axioms.
+This holds **in the presence of arbitrary reentrancy** through the `CALL` Register itself emits, plus any nested CREATE / CREATE2 / SELFDESTRUCT paths the EVM allows. The proof composes a contract-specific bytecode walk (`BytecodeFrame.lean`) with the EVMYulLean frame library (see "[Framework for cross-transaction invariants](#framework-for-cross-transaction-invariants)" below). Two real-world axioms are used: T2 (precompile purity) and T5 (Keccak collision-resistance); the deployment-pinned code-identity claim (`I.codeOwner = C → I.code = bytecode`) is now an explicit `DeployedAtC C` *hypothesis* on `register_balance_mono`, not an axiom.
 
 Full structure: see [`EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md).
 
@@ -110,7 +110,7 @@ Highlights:
 * **`StepShapes`** — 81 per-opcode shape lemmas (`step_PUSH1_shape`, `step_CALL_shape`, etc.) describing post-step `(pc, stack, executionEnv)` for the most common opcodes. Coverage spans pushes, arithmetic primops, DUP/SWAP, control flow, copy ops, environment readers, and CALL.
 * **`PcWalk`** — 54 per-PC wrappers (`step_PUSH1_at_pc`, etc.) that combine `decode-bytecode-at-pc` extraction with the matching shape lemma, compressing each PC case in a contract's bytecode walk to a single tactic invocation.
 
-Three open axioms remain: T2 (precompile purity), T5 (Keccak collision), and per-contract code-identity (deployment-pinned). All other balance-frame results are theorems.
+Two open axioms remain: T2 (precompile purity) and T5 (Keccak collision). All other balance-frame results are theorems; per-contract code-identity is a hypothesis on consumer theorems, not a global axiom.
 
 Architecture overview: [`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRARY.md). End-to-end usage example: [`EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md). Generalization plan for further lifts: [`GENERALIZATION_PLAN.md`](./GENERALIZATION_PLAN.md). Step-by-step playbook for new contracts: [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md).
 

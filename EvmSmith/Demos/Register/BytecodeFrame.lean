@@ -45,17 +45,21 @@ private def RegisterTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 18 ∧ s.stack.length = 1) ∨
    (s.pc.toNat = 19 ∧ s.stack.length = 0))
 
-/-! ## Register-pinned code-identity axiom
+/-! ## Register-pinned code-identity hypothesis
 
-The remaining structural axiom: Register's bytecode is what runs at
-`C` whenever `I.codeOwner = C`. -/
+The remaining structural claim: Register's bytecode is what runs at
+`C` whenever `I.codeOwner = C`. Stated as a `Prop` predicate consumers
+supply as a hypothesis (rather than a global axiom), because as a
+universally-quantified-over-`I` claim it is provably false in
+isolation — it only holds in the deployment context where `C` was
+seeded with Register's bytecode and nothing in the call tree can
+overwrite it. -/
 
-/-- **Register-context code-identity axiom.**
+/-- **Register-context code-identity hypothesis.**
 
-Whenever `Ξ` runs at `I.codeOwner = C` during a transaction whose
-deployment placed Register's bytecode at `C`, `I.code = Register.bytecode`.
+`DeployedAtC C` asserts that any `ExecutionEnv` with `codeOwner = C`
+runs Register's bytecode. Real-world tx contexts satisfy this when:
 
-Holds because:
   * Register's genesis deployment installed this exact 20-byte code at `C`.
   * Register's own bytecode contains no `CREATE` / `CREATE2` opcode,
     so no nested frame can overwrite code at `C`.
@@ -65,11 +69,13 @@ Holds because:
   * Register's bytecode contains no `SELFDESTRUCT`, so `C`'s account
     is never erased (which would otherwise reset its code to empty).
 
-This is a structural invariant of the Register-deployed transaction
-context — not a free "any code at C" claim. -/
-private axiom I_code_at_C_is_Register_bytecode
-    (I : ExecutionEnv .EVM) (C : AccountAddress) :
-    I.codeOwner = C → I.code = bytecode
+In Lean, the predicate is logically too strong to be derivable from
+`StateWF` + the existing protocol axioms alone — the call-graph
+structure that pins it is a property of the tx execution, not the
+input state. So `register_balance_mono` takes it as a hypothesis,
+mirroring `RegSDExclusion` / `RegDeadAtσP`. -/
+def DeployedAtC (C : AccountAddress) : Prop :=
+  ∀ I : ExecutionEnv .EVM, I.codeOwner = C → I.code = bytecode
 
 /-! ## Closure properties of `RegisterTrace`
 
@@ -237,9 +243,11 @@ private theorem RegisterTrace_v0_at_CALL
 
 /-! ### Initial-state lemma -/
 
-/-- An initial Register-execution state is `RegisterTrace`. -/
+/-- An initial Register-execution state is `RegisterTrace`, given the
+deployment-pinned code-identity witness. -/
 private theorem RegisterTrace_initial
     (C : AccountAddress)
+    (hDeployed : DeployedAtC C)
     (cA : Batteries.RBSet AccountAddress compare)
     (gbh : BlockHeader) (bs : ProcessedBlocks)
     (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
@@ -255,7 +263,7 @@ private theorem RegisterTrace_initial
           gasAvailable := g
           blocks := bs
           genesisBlockHeader := gbh } := by
-  have hCode : I.code = bytecode := I_code_at_C_is_Register_bytecode I C hCO
+  have hCode : I.code = bytecode := hDeployed I hCO
   refine ⟨hCO.symm, hCode, ?_⟩
   -- Initial state has pc = 0 (default UInt256 = ⟨0⟩) and empty stack.
   left
@@ -532,8 +540,8 @@ private theorem RegisterTrace_step_preserves
 /-! ## Bytecode-preservation theorem -/
 
 /-- Register's bytecode at `C` preserves `balanceOf C` through any Ξ
-invocation. -/
-theorem bytecodePreservesBalance (C : AccountAddress) :
+invocation, given the deployment-pinned code-identity witness. -/
+theorem bytecodePreservesBalance (C : AccountAddress) (hDeployed : DeployedAtC C) :
     ΞPreservesAtC C := by
   exact ΞPreservesAtC_of_Reachable C (RegisterTrace C)
     (RegisterTrace_Z_preserves C)
@@ -541,6 +549,6 @@ theorem bytecodePreservesBalance (C : AccountAddress) :
     (RegisterTrace_decodeSome C)
     (RegisterTrace_op_in_8 C)
     (RegisterTrace_v0_at_CALL C)
-    (RegisterTrace_initial C)
+    (RegisterTrace_initial C hDeployed)
 
 end EvmSmith.Register

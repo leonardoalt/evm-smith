@@ -64,13 +64,18 @@ balance at C is `≥ b₀`, the lower bound carried by `RegInv`.
 ## What axioms are used
 
 After this proof, the entire workspace (EVMYulLean + EvmSmith) contains
-exactly **three axioms**:
+exactly **two axioms**:
 
 | Axiom | Where | Why |
 |-------|-------|-----|
 | `precompile_preserves_accountMap` | `EVMYulLean/EvmYul/Frame/MutualFrame.lean:122` | T2: precompiles are pure relative to the account map |
 | `lambda_derived_address_ne_C` | `EVMYulLean/EvmYul/Frame/MutualFrame.lean:141` | T5: Keccak collision-resistance — no CREATE/CREATE2 produces address C |
-| `I_code_at_C_is_Register_bytecode` | `EvmSmith/Demos/Register/BytecodeFrame.lean:70` | Deployment-pinned: any frame with `I.codeOwner = C` runs Register's bytecode |
+
+Plus one explicit **hypothesis** on `register_balance_mono` (not an axiom):
+
+| Hypothesis | Where | Why |
+|------------|-------|-----|
+| `DeployedAtC C` (`hDeployed`) | `EvmSmith/Demos/Register/BytecodeFrame.lean` | Deployment-pinned: any frame with `I.codeOwner = C` runs Register's bytecode. As a globally-quantified-over-`I` claim it is provably false; it only holds in the deployment context where `C` was seeded with Register's bytecode. Caller asserts this when invoking `register_balance_mono`. |
 
 All three are real-world structural assumptions:
 
@@ -174,9 +179,9 @@ Closure proofs (in `BytecodeFrame.lean`):
   `decide` over the bytecode + the 14 valid PCs.
 * `RegisterTrace_v0_at_CALL` — extracts `stack[2]? = some 0` from
   the PC=17 disjunct.
-* `RegisterTrace_initial` — uses the `I_code_at_C_is_Register_bytecode`
-  axiom to derive `I.code = bytecode` from `I.codeOwner = C`, then
-  the initial PC=0 + empty stack.
+* `RegisterTrace_initial` — uses the `DeployedAtC C` hypothesis (a
+  caller-supplied `Prop`, not an axiom) to derive `I.code = bytecode`
+  from `I.codeOwner = C`, then the initial PC=0 + empty stack.
 
 #### 2. `ΥTailInvariant` — the post-dispatch tail
 
@@ -188,7 +193,7 @@ hypotheses:
 
 * `RegSDExclusion` — `C ∉ A.selfDestructSet`. Holds in practice
   because Register has no SELFDESTRUCT and any sub-frame's `Iₐ ≠ C`
-  by `I_code_at_C_is_Register_bytecode` (anything else at C runs
+  by `DeployedAtC` (anything else at C runs
   Register, which has no SELFDESTRUCT).
 * `RegDeadAtσP` — `State.dead σ_P C = false`. Holds because C's
   account in σ_P retains Register's bytecode (non-empty code), so

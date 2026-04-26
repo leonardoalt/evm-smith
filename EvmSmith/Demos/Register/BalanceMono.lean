@@ -186,6 +186,7 @@ private theorem σ_to_σP_balance_mono_Θ
     (σ_P : AccountMap .EVM) (g_ret : UInt256) (A : Substate)
     (z : Bool) (cA' : Batteries.RBSet AccountAddress compare)
     (oData : ByteArray)
+    (hDeployed : DeployedAtC C)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
     (hValid : TxValid σ S_T tx H H_f)
@@ -213,8 +214,8 @@ private theorem σ_to_σP_balance_mono_Θ
       (fun acc' hFindR => hRecBound t acc' hFindR)
       (Or.inr ⟨Υ_newSender σ H_f S_T H tx,
                σ₀_find_S_T σ H_f S_T H tx, hValueLe⟩)
-      (bytecodePreservesBalance C)
-      (fun f _ => ΞFrameAtC_of_witness C (bytecodePreservesBalance C) f)
+      (bytecodePreservesBalance C hDeployed)
+      (fun f _ => ΞFrameAtC_of_witness C (bytecodePreservesBalance C hDeployed) f)
   rw [hΘ] at hΘ_result
   obtain ⟨hMonoΘ, _, _⟩ := hΘ_result
   rw [hσ₀_eq] at hMonoΘ
@@ -231,6 +232,7 @@ private theorem σ_to_σP_balance_mono_Λ
     (a : AccountAddress) (cA' : Batteries.RBSet AccountAddress compare)
     (σ_P : AccountMap .EVM) (g_ret : UInt256) (A : Substate)
     (z : Bool) (oData : ByteArray)
+    (hDeployed : DeployedAtC C)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
     (hValid : TxValid σ S_T tx H H_f)
@@ -261,8 +263,8 @@ private theorem σ_to_σP_balance_mono_Λ
         injection hFindS with hAcc'
         rw [← hAcc']
         exact hValueLe)
-      (bytecodePreservesBalance C)
-      (fun f _ => ΞFrameAtC_of_witness C (bytecodePreservesBalance C) f)
+      (bytecodePreservesBalance C hDeployed)
+      (fun f _ => ΞFrameAtC_of_witness C (bytecodePreservesBalance C hDeployed) f)
   rw [hΛ] at hΛ_result
   obtain ⟨_, hMonoΛ, _, _⟩ := hΛ_result
   rw [hσ₀_eq] at hMonoΛ
@@ -289,10 +291,10 @@ private theorem register_Υ_body_factors
     (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
     (tx : Transaction) (S_T C : AccountAddress)
+    (hDeployed : DeployedAtC C)
     (hWF : StateWF σ)
     (hS_T : C ≠ S_T)
     (hValid : TxValid σ S_T tx H H_f)
-    (_hCode : codeAt σ C)
     (hDeadσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     ΥBodyFactors σ fuel H_f H H_gen blocks tx S_T C := by
   unfold ΥBodyFactors RegDeadAtσP at *
@@ -313,7 +315,7 @@ private theorem register_Υ_body_factors
         cases hOk
         exact ⟨σ_P, g', rfl,
           σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
-            _ _ _ a cA σ_P g' A z gReturn hWF hS_T hValid hΛ,
+            _ _ _ a cA σ_P g' A z gReturn hDeployed hWF hS_T hValid hΛ,
           hDeadσP σ_P g' rfl⟩
   | some t =>
     simp only
@@ -330,7 +332,7 @@ private theorem register_Υ_body_factors
         cases hOk
         exact ⟨σ_P, g', rfl,
           σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
-            _ _ _ σ_P g' A z cA gReturn hWF hS_T hValid hΘ,
+            _ _ _ σ_P g' A z cA gReturn hDeployed hWF hS_T hValid hΘ,
           hDeadσP σ_P g' rfl⟩
 
 /-- Register's balance is non-decreasing across any transaction, under
@@ -368,15 +370,16 @@ theorem register_balance_mono
     (hS_T : C ≠ S_T)
     (hBen : C ≠ H.beneficiary)
     (hValid : TxValid σ S_T tx H H_f)
+    (hDeployed : DeployedAtC C)
     (hSDExcl : RegSDExclusion σ fuel H_f H H_gen blocks tx S_T C)
     (hDeadAtσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
     | .ok (σ', _, _, _) => b₀ ≤ balanceOf σ' C
     | .error _ => True :=
   Υ_balanceOf_ge fuel σ H_f H H_gen blocks tx S_T C b₀
-    hWF hInv.bal hS_T hBen (bytecodePreservesBalance C)
+    hWF hInv.bal hS_T hBen (bytecodePreservesBalance C hDeployed)
     (register_Υ_tail_invariant σ fuel H_f H H_gen blocks tx S_T C hSDExcl)
     (register_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
-      hWF hS_T hValid hInv.code hDeadAtσP)
+      hDeployed hWF hS_T hValid hDeadAtσP)
 
 end EvmSmith.Register
