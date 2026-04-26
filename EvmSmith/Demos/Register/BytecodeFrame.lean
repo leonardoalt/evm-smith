@@ -186,20 +186,14 @@ private theorem RegisterTrace_decodeSome
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 0 (by decide) hpc]; exact decode_bytecode_at_0⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 2 (by decide) hpc]; exact decode_bytecode_at_2⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 3 (by decide) hpc]; exact decode_bytecode_at_3⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 4 (by decide) hpc]; exact decode_bytecode_at_4⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 5 (by decide) hpc]; exact decode_bytecode_at_5⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 7 (by decide) hpc]; exact decode_bytecode_at_7⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 9 (by decide) hpc]; exact decode_bytecode_at_9⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 11 (by decide) hpc]; exact decode_bytecode_at_11⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 13 (by decide) hpc]; exact decode_bytecode_at_13⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 15 (by decide) hpc]; exact decode_bytecode_at_15⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 16 (by decide) hpc]; exact decode_bytecode_at_16⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 17 (by decide) hpc]; exact decode_bytecode_at_17⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 18 (by decide) hpc]; exact decode_bytecode_at_18⟩
-  · exact ⟨_, by rw [pc_eq_ofNat_of_toNat s 19 (by decide) hpc]; exact decode_bytecode_at_19⟩
+  all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc])
+  exacts [⟨_, decode_bytecode_at_0⟩, ⟨_, decode_bytecode_at_2⟩,
+          ⟨_, decode_bytecode_at_3⟩, ⟨_, decode_bytecode_at_4⟩,
+          ⟨_, decode_bytecode_at_5⟩, ⟨_, decode_bytecode_at_7⟩,
+          ⟨_, decode_bytecode_at_9⟩, ⟨_, decode_bytecode_at_11⟩,
+          ⟨_, decode_bytecode_at_13⟩, ⟨_, decode_bytecode_at_15⟩,
+          ⟨_, decode_bytecode_at_16⟩, ⟨_, decode_bytecode_at_17⟩,
+          ⟨_, decode_bytecode_at_18⟩, ⟨_, decode_bytecode_at_19⟩]
 
 /-- The decoded op at any reachable state is one of Register's 8. -/
 private theorem RegisterTrace_op_in_8
@@ -216,31 +210,14 @@ private theorem RegisterTrace_op_in_8
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩
-  all_goals first
-    | (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch
-       first
-        | (rw [decode_bytecode_at_0] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_2] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_3] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_4] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_5] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_7] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_9] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_11] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_13] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_15] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_16] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_17] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_18] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
-        | (rw [decode_bytecode_at_19] at hFetch; injection hFetch with h1; injection h1 with h1 _; subst h1; tauto))
-
-/-- Local aliases for the framework helpers `EvmYul.Frame.op_eq_of_fetchInstr_decode`
-and `EvmYul.Frame.op_arg_eq_of_fetchInstr_decode`. Kept so the
-existing call-sites in this file (e.g. `RegisterTrace_op_in_8`,
-`RegisterTrace_v0_at_CALL`) need no change. -/
-private abbrev op_eq_of_fetchInstr_decode := @EvmYul.Frame.op_eq_of_fetchInstr_decode
-
-private abbrev op_arg_eq_of_fetchInstr_decode := @EvmYul.Frame.op_arg_eq_of_fetchInstr_decode
+  all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch)
+  all_goals
+    simp only [decode_bytecode_at_0, decode_bytecode_at_2, decode_bytecode_at_3,
+      decode_bytecode_at_4, decode_bytecode_at_5, decode_bytecode_at_7,
+      decode_bytecode_at_9, decode_bytecode_at_11, decode_bytecode_at_13,
+      decode_bytecode_at_15, decode_bytecode_at_16, decode_bytecode_at_17,
+      decode_bytecode_at_18, decode_bytecode_at_19] at hFetch
+  all_goals (injection hFetch with h1; injection h1 with h1 _; subst h1; tauto)
 
 /-- At any reachable CALL, `stack[2]? = some 0`. The only PC with op =
 CALL is 17, and the disjunct at PC=17 has `stack[2]? = some 0`. -/
@@ -250,28 +227,24 @@ private theorem RegisterTrace_v0_at_CALL
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (.CALL, arg)) :
     s.stack[2]? = some ⟨0⟩ := by
   obtain ⟨_, hCode, hPC⟩ := h
+  unfold fetchInstr at hFetch
+  rw [hCode] at hFetch
   rcases hPC with
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩ |
     ⟨hpc, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _, hs2, _⟩ | ⟨hpc, _⟩ | ⟨hpc, _⟩
-  -- All non-PC=17 cases: contradict hFetch with concrete decode.
+  -- The PC=17 disjunct already provides the witness; every other PC's
+  -- decode contradicts `op = .CALL`, so we can dispatch by simping
+  -- with the full decode table and falling back to the witness.
+  all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch)
   all_goals first
-    | exact hs2  -- PC = 17 case
-    | (
-        first
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 0 (by decide) hpc ▸ decode_bytecode_at_0) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 2 (by decide) hpc ▸ decode_bytecode_at_2) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 3 (by decide) hpc ▸ decode_bytecode_at_3) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 4 (by decide) hpc ▸ decode_bytecode_at_4) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 5 (by decide) hpc ▸ decode_bytecode_at_5) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 7 (by decide) hpc ▸ decode_bytecode_at_7) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 9 (by decide) hpc ▸ decode_bytecode_at_9) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 11 (by decide) hpc ▸ decode_bytecode_at_11) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 13 (by decide) hpc ▸ decode_bytecode_at_13) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 15 (by decide) hpc ▸ decode_bytecode_at_15) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 16 (by decide) hpc ▸ decode_bytecode_at_16) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 18 (by decide) hpc ▸ decode_bytecode_at_18) hFetch; cases hOp)
-          | (have hOp := op_eq_of_fetchInstr_decode (hCode ▸ pc_eq_ofNat_of_toNat s 19 (by decide) hpc ▸ decode_bytecode_at_19) hFetch; cases hOp))
+    | exact hs2
+    | (simp only [decode_bytecode_at_0, decode_bytecode_at_2, decode_bytecode_at_3,
+        decode_bytecode_at_4, decode_bytecode_at_5, decode_bytecode_at_7,
+        decode_bytecode_at_9, decode_bytecode_at_11, decode_bytecode_at_13,
+        decode_bytecode_at_15, decode_bytecode_at_16,
+        decode_bytecode_at_18, decode_bytecode_at_19] at hFetch
+       cases hFetch)
 
 /-! ### Initial-state lemma -/
 
@@ -342,6 +315,33 @@ reuse across contract proofs:
 They resolve here via `open EvmYul.Frame`.
 -/
 
+/-- Repackage the proof of `RegisterTrace C s'` from the
+shape-lemma outputs (`hEE'`, plus the chosen disjunct of the
+post-state's `(pc, stack)` pair). The first three components of
+`RegisterTrace` (codeOwner, code) are reduced to one `rw [hEE']`
+each. -/
+private theorem mk_registerTrace
+    {C : AccountAddress} {s s' : EVM.State}
+    (hCO : C = s.executionEnv.codeOwner)
+    (hCode : s.executionEnv.code = bytecode)
+    (hEE' : s'.executionEnv = s.executionEnv)
+    (hPC : (s'.pc.toNat = 0 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 2 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 3 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 4 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 5 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 7 ∧ s'.stack.length = 1 ∧ s'.stack[0]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 9 ∧ s'.stack.length = 2 ∧ s'.stack[0]? = some ⟨0⟩ ∧ s'.stack[1]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 11 ∧ s'.stack.length = 3 ∧ s'.stack[0]? = some ⟨0⟩ ∧ s'.stack[1]? = some ⟨0⟩ ∧ s'.stack[2]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 13 ∧ s'.stack.length = 4 ∧ s'.stack[0]? = some ⟨0⟩ ∧ s'.stack[1]? = some ⟨0⟩ ∧ s'.stack[2]? = some ⟨0⟩ ∧ s'.stack[3]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 15 ∧ s'.stack.length = 5 ∧ s'.stack[0]? = some ⟨0⟩ ∧ s'.stack[1]? = some ⟨0⟩ ∧ s'.stack[2]? = some ⟨0⟩ ∧ s'.stack[3]? = some ⟨0⟩ ∧ s'.stack[4]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 16 ∧ s'.stack.length = 6 ∧ s'.stack[1]? = some ⟨0⟩ ∧ s'.stack[2]? = some ⟨0⟩ ∧ s'.stack[3]? = some ⟨0⟩ ∧ s'.stack[4]? = some ⟨0⟩ ∧ s'.stack[5]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 17 ∧ s'.stack.length = 7 ∧ s'.stack[2]? = some ⟨0⟩ ∧ s'.stack[3]? = some ⟨0⟩ ∧ s'.stack[4]? = some ⟨0⟩ ∧ s'.stack[5]? = some ⟨0⟩ ∧ s'.stack[6]? = some ⟨0⟩) ∨
+       (s'.pc.toNat = 18 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 19 ∧ s'.stack.length = 0)) :
+    RegisterTrace C s' :=
+  ⟨by rw [hEE']; exact hCO, by rw [hEE']; exact hCode, hPC⟩
+
 private theorem RegisterTrace_step_preserves
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
@@ -372,16 +372,12 @@ private theorem RegisterTrace_step_preserves
   -- Case PC=0 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_0 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; left
-      refine ⟨?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 0 2 (by decide) (by decide) (by decide)
-      · rw [hStk']
-        show List.length (UInt256.ofNat 0 :: s.stack) = 1
-        simp [hLen]
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inl ⟨?_, ?_⟩))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 0 2 (by decide) (by decide) (by decide)
+    · rw [hStk']
+      show List.length (UInt256.ofNat 0 :: s.stack) = 1
+      simp [hLen]
   -- Case PC=2 (CALLDATALOAD).
   · match hStk_eq : s.stack, hLen with
     | hd :: tl, hLen2 =>
@@ -391,29 +387,21 @@ private theorem RegisterTrace_step_preserves
       obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
         step_CALLDATALOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
           hFetch hCode hpcEq decode_bytecode_at_2 hStep
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hEE']; exact hCO
-      · rw [hEE']; exact hCode
-      · right; right; left
-        refine ⟨?_, ?_⟩
-        · rw [hPC', hpcEq]
-          exact ofNat_add_ofNat_toNat 2 1 (by decide) (by decide) (by decide)
-        · rw [hStk']
-          show (v :: tl).length = 1
-          simp [hLen3]
+      refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inl ⟨?_, ?_⟩)))
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 2 1 (by decide) (by decide) (by decide)
+      · rw [hStk']
+        show (v :: tl).length = 1
+        simp [hLen3]
   -- Case PC=3 (CALLER).
   · obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
       step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_3 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; left
-      refine ⟨?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 3 1 (by decide) (by decide) (by decide)
-      · rw [hStk']
-        show (v :: s.stack).length = 2
-        simp [hLen]
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_⟩))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 3 1 (by decide) (by decide) (by decide)
+    · rw [hStk']
+      show (v :: s.stack).length = 2
+      simp [hLen]
   -- Case PC=4 (SSTORE).
   · match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, hLen2 =>
@@ -423,127 +411,96 @@ private theorem RegisterTrace_step_preserves
       obtain ⟨hPC', hStk', hEE'⟩ :=
         step_SSTORE_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
           hFetch hCode hpcEq decode_bytecode_at_4 hStep
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hEE']; exact hCO
-      · rw [hEE']; exact hCode
-      · right; right; right; right; left
-        refine ⟨?_, ?_⟩
-        · rw [hPC', hpcEq]
-          exact ofNat_add_ofNat_toNat 4 1 (by decide) (by decide) (by decide)
-        · rw [hStk']; exact hLen3
+      refine mk_registerTrace hCO hCode hEE'
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_⟩)))))
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 4 1 (by decide) (by decide) (by decide)
+      · rw [hStk']; exact hLen3
   -- Case PC=5 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_5 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 5 2 (by decide) (by decide) (by decide)
-      · rw [hStk']
-        show List.length (UInt256.ofNat 0 :: s.stack) = 1
-        simp [hLen]
-      · rw [hStk']
-        show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
-        rfl
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_⟩))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 5 2 (by decide) (by decide) (by decide)
+    · rw [hStk']
+      show List.length (UInt256.ofNat 0 :: s.stack) = 1
+      simp [hLen]
+    · rw [hStk']
+      show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
+      rfl
   -- Case PC=7 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_7 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 7 2 (by decide) (by decide) (by decide)
-      · rw [hStk']
-        show List.length (UInt256.ofNat 0 :: s.stack) = 2
-        simp [hLen]
-      · rw [hStk']
-        show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
-        rfl
-      · rw [hStk']
-        show (UInt256.ofNat 0 :: s.stack)[1]? = some ⟨0⟩
-        simp [List.getElem?_cons_succ]
-        exact hs0
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_⟩)))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 7 2 (by decide) (by decide) (by decide)
+    · rw [hStk']
+      show List.length (UInt256.ofNat 0 :: s.stack) = 2
+      simp [hLen]
+    · rw [hStk']
+      show (UInt256.ofNat 0 :: s.stack)[0]? = some ⟨0⟩
+      rfl
+    · rw [hStk']
+      show (UInt256.ofNat 0 :: s.stack)[1]? = some ⟨0⟩
+      simp [List.getElem?_cons_succ]
+      exact hs0
   -- Case PC=9 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_9 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 9 2 (by decide) (by decide) (by decide)
-      · rw [hStk']; show List.length (_ :: s.stack) = 3; simp [hLen]
-      · rw [hStk']; rfl
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_, ?_⟩))))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 9 2 (by decide) (by decide) (by decide)
+    · rw [hStk']; show List.length (_ :: s.stack) = 3; simp [hLen]
+    · rw [hStk']; rfl
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
   -- Case PC=11 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_11 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 11 2 (by decide) (by decide) (by decide)
-      · rw [hStk']; show List.length (_ :: s.stack) = 4; simp [hLen]
-      · rw [hStk']; rfl
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_, ?_, ?_⟩)))))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 11 2 (by decide) (by decide) (by decide)
+    · rw [hStk']; show List.length (_ :: s.stack) = 4; simp [hLen]
+    · rw [hStk']; rfl
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
   -- Case PC=13 (PUSH1 0).
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_13 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 13 2 (by decide) (by decide) (by decide)
-      · rw [hStk']; show List.length (_ :: s.stack) = 5; simp [hLen]
-      · rw [hStk']; rfl
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩))))))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 13 2 (by decide) (by decide) (by decide)
+    · rw [hStk']; show List.length (_ :: s.stack) = 5; simp [hLen]
+    · rw [hStk']; rfl
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
   -- Case PC=15 (CALLER).
   · obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
       step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_15 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 15 1 (by decide) (by decide) (by decide)
-      · rw [hStk']; show List.length (v :: s.stack) = 6; simp [hLen]
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩)))))))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 15 1 (by decide) (by decide) (by decide)
+    · rw [hStk']; show List.length (v :: s.stack) = 6; simp [hLen]
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs0
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
   -- Case PC=16 (GAS).
   · obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
       step_GAS_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_16 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; right; right; right; right; left
-      refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]
-        exact ofNat_add_ofNat_toNat 16 1 (by decide) (by decide) (by decide)
-      · rw [hStk']; show List.length (v :: s.stack) = 7; simp [hLen]
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
-      · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs5
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩))))))))))))
+    · rw [hPC', hpcEq]
+      exact ofNat_add_ofNat_toNat 16 1 (by decide) (by decide) (by decide)
+    · rw [hStk']; show List.length (v :: s.stack) = 7; simp [hLen]
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs1
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs2
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs3
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs4
+    · rw [hStk']; simp [List.getElem?_cons_succ]; exact hs5
   -- Case PC=17 (CALL).
   · match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl, hLen2 =>
@@ -555,14 +512,10 @@ private theorem RegisterTrace_step_preserves
       obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
         step_CALL_at_pc s s' f' cost op arg _ hd1 hd2 hd3 hd4 hd5 hd6 hd7 tl hStk_eq
           hFetch hCode hpcEq decode_bytecode_at_17 hStep
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hEE']; exact hCO
-      · rw [hEE']; exact hCode
-      · right; right; right; right; right; right; right; right; right; right; right; right; left
-        refine ⟨?_, ?_⟩
-        · rw [hPC', hpcEq]
-          exact ofNat_add_ofNat_toNat 17 1 (by decide) (by decide) (by decide)
-        · rw [hStk', hTl]; rfl
+      refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨?_, ?_⟩)))))))))))))
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 17 1 (by decide) (by decide) (by decide)
+      · rw [hStk', hTl]; rfl
   -- Case PC=18 (POP).
   · match hStk_eq : s.stack, hLen with
     | hd :: tl, hLen2 =>
@@ -572,24 +525,16 @@ private theorem RegisterTrace_step_preserves
       obtain ⟨hPC', hStk', hEE'⟩ :=
         step_POP_at_pc s s' f' cost op arg _ hd tl hStk_eq
           hFetch hCode hpcEq decode_bytecode_at_18 hStep
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hEE']; exact hCO
-      · rw [hEE']; exact hCode
-      · right; right; right; right; right; right; right; right; right; right; right; right; right
-        refine ⟨?_, ?_⟩
-        · rw [hPC', hpcEq]
-          exact ofNat_add_ofNat_toNat 18 1 (by decide) (by decide) (by decide)
-        · rw [hStk']; exact hLen3
+      refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (⟨?_, ?_⟩))))))))))))))
+      · rw [hPC', hpcEq]
+        exact ofNat_add_ofNat_toNat 18 1 (by decide) (by decide) (by decide)
+      · rw [hStk']; exact hLen3
   -- Case PC=19 (STOP). Halt — disjunct stays at PC=19 length=0.
   · obtain ⟨hPC', hStk', hEE'⟩ :=
       step_STOP_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_19 hStep
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hEE']; exact hCO
-    · rw [hEE']; exact hCode
-    · right; right; right; right; right; right; right; right; right; right; right; right; right
-      refine ⟨?_, ?_⟩
-      · rw [hPC']; exact hpc
-      · rw [hStk']; exact hLen
+    refine mk_registerTrace hCO hCode hEE' (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (⟨?_, ?_⟩))))))))))))))
+    · rw [hPC']; exact hpc
+    · rw [hStk']; exact hLen
 
 /-! ## Bytecode-preservation theorem -/
 
