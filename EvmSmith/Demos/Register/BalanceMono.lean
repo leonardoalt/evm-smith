@@ -69,15 +69,25 @@ Phase A predicate scaffolding now also includes:
   unstrengthened frame conclusion at any call site that supplies
   an SD-exclusive input substate.
 
+Phase A also lands the **per-step SD-tracking ingredient**:
+* `EvmYul.step_preserves_selfDestructSet` (in `StepFrame.lean`):
+  every handled non-SELFDESTRUCT op preserves
+  `s.substate.selfDestructSet` literally.
+* `EvmYul_step_preserves_SD_exclude_at_C` (in `MutualFrame.lean`):
+  unifies (i) the non-SD case via the literal preservation and (ii)
+  the SD-at-Iₐ≠C case via `selfdestruct_preserves_SD_exclude_C`.
+
 Once a `bytecodePreservesBalanceStrong C : ΞPreservesAtCStrong C`
 witness is provided AND the strong sibling of
 `Ξ_balanceOf_ge_bundled` (i.e. `ΞFrameAtCStrong C maxFuel` from
 the strong witness) is closed (closing the SD-set tracking through
-the entire mutual closure — the bulk of Phase A's remaining work),
-the `RegSDExclusion` hypothesis here will be derivable inside Lean
-via `Υ`'s body factorisation plus the strengthened framework
-outputs. The leaf SELFDESTRUCT preservation is already proved in
-`SelfdestructFrame.lean` (`selfdestruct_preserves_SD_exclude_C`).
+the entire mutual closure — the bulk of Phase A's remaining work,
+which would compose the per-step SD-helper through the joint
+Θ/Λ/Ξ fuel induction), the `RegSDExclusion` hypothesis here will
+be derivable inside Lean via `Υ`'s body factorisation plus the
+strengthened framework outputs. The leaf SELFDESTRUCT preservation
+is already proved in `SelfdestructFrame.lean`
+(`selfdestruct_preserves_SD_exclude_C`).
 -/
 
 /-- Hypothesis on Υ's run output: the resulting substate's
@@ -346,7 +356,7 @@ derivable from the closed `Θ_balanceOf_ge`/`Λ_balanceOf_ge` outputs:
     final substate's selfDestructSet. Holds because Register's
     bytecode contains no SELFDESTRUCT and SELFDESTRUCT only inserts
     its own executing-frame address `Iₐ` into the SD-set, which by
-    `I_code_at_C_is_Register_bytecode` is `≠ C` whenever code at
+    `DeployedAtC` is `≠ C` whenever code at
     that address is not Register's bytecode.
 
   * `RegDeadAtσP`: `C`'s account in σ_P (the Θ/Λ output) has
