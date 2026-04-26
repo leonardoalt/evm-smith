@@ -295,49 +295,43 @@ private theorem register_Υ_body_factors
     (_hCode : codeAt σ C)
     (hDeadσP : RegDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     ΥBodyFactors σ fuel H_f H H_gen blocks tx S_T C := by
-  unfold ΥBodyFactors
-  unfold RegDeadAtσP at hDeadσP
-  unfold EVM.Υ
-  unfold EVM.Υ at hDeadσP
+  unfold ΥBodyFactors RegDeadAtσP at *
+  unfold EVM.Υ at *
   match hRec : tx.base.recipient with
   | none =>
     simp only
     rw [hRec] at hDeadσP
     simp only at hDeadσP
     split
+    case h_2 _ => trivial
     case h_1 σ' A' z' gUsed' hOk =>
       split at hOk
+      case h_2 e hΛ => simp [bind, Except.bind] at hOk
       case h_1 a cA σ_P g' A z gReturn hΛ =>
         rw [hΛ] at hDeadσP
         simp only at hDeadσP
         cases hOk
-        refine ⟨σ_P, g', rfl, ?_, ?_⟩
-        · exact σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
-            _ _ _ a cA σ_P g' A z gReturn hWF hS_T hValid hΛ
-        · exact hDeadσP σ_P g' rfl
-      case h_2 e hΛ =>
-        simp [bind, Except.bind] at hOk
-    case h_2 _ =>
-      trivial
+        exact ⟨σ_P, g', rfl,
+          σ_to_σP_balance_mono_Λ fuel σ H_f H H_gen blocks tx S_T C
+            _ _ _ a cA σ_P g' A z gReturn hWF hS_T hValid hΛ,
+          hDeadσP σ_P g' rfl⟩
   | some t =>
     simp only
     rw [hRec] at hDeadσP
     simp only at hDeadσP
     split
+    case h_2 _ => trivial
     case h_1 σ' A' z' gUsed' hOk =>
       split at hOk
+      case h_2 e hΘ => simp [bind, Except.bind] at hOk
       case h_1 cA σ_P g' A z gReturn hΘ =>
         rw [hΘ] at hDeadσP
         simp only at hDeadσP
         cases hOk
-        refine ⟨σ_P, g', rfl, ?_, ?_⟩
-        · exact σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
-            _ _ _ σ_P g' A z cA gReturn hWF hS_T hValid hΘ
-        · exact hDeadσP σ_P g' rfl
-      case h_2 e hΘ =>
-        simp [bind, Except.bind] at hOk
-    case h_2 _ =>
-      trivial
+        exact ⟨σ_P, g', rfl,
+          σ_to_σP_balance_mono_Θ fuel σ H_f H H_gen blocks tx S_T t C
+            _ _ _ σ_P g' A z cA gReturn hWF hS_T hValid hΘ,
+          hDeadσP σ_P g' rfl⟩
 
 /-- Register's balance is non-decreasing across any transaction, under
 the boundary hypotheses and real-world well-formedness.
