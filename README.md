@@ -8,7 +8,7 @@ Lean 4 proofs about the contract's behavior against the official EVM
 semantics. This repo is the scaffolding — a thin Lean framework that makes
 the "write + prove" loop ergonomic enough to automate.
 
-The EVM semantics come from [`NethermindEth/EVMYulLean`](https://github.com/NethermindEth/EVMYulLean), a Lean 4 formalization of the Ethereum Yellow Paper. EVM-Smith is a consumer of that formalization.
+The EVM semantics come from [`NethermindEth/EVMYulLean`](https://github.com/NethermindEth/EVMYulLean), a Lean 4 formalization of the Ethereum Yellow Paper. EVM-Smith is a consumer of that formalization. **This repo currently requires the `leonardoalt/EVMYulLean` fork** ([`main` branch](https://github.com/leonardoalt/EVMYulLean/tree/main)), which carries the Frame library — ~8,700 LoC of balance-frame infrastructure (per-opcode shape lemmas, Θ/Λ/Ξ joint mutual closure, Υ-level transaction frame, the `ΞPreservesAtC_of_Reachable` consumer entry point) that is not yet upstreamed. See [`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRARY.md) for what's in the fork.
 
 ## How it's meant to be used
 
@@ -123,11 +123,17 @@ Architecture overview: [`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRAR
 
 ## Building
 
-Clone the upstream semantics as a sibling directory:
+Clone the **`leonardoalt/EVMYulLean` fork** as a sibling directory:
 
 ```bash
-git clone https://github.com/NethermindEth/EVMYulLean.git
+git clone https://github.com/leonardoalt/EVMYulLean.git
 ```
+
+The fork's `main` branch is what this repo expects on disk; the
+NethermindEth upstream alone won't satisfy the imports. The fork's
+extra commits implement the Frame library (see
+[`EVMYulLean/FRAME_LIBRARY.md`](./EVMYulLean/FRAME_LIBRARY.md)) used
+by `register_balance_mono` and the `/prove-balance-invariant` skill.
 
 Then:
 

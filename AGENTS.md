@@ -107,15 +107,15 @@ The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills
 
 - **`EVMYulLean/` is a working fork**, not a read-only upstream. It's
   gitignored in this repo because it's a sibling clone with its own
-  git history. The active branch
-  (`evm-smith-frame-library` on `leonardoalt/EVMYulLean`) carries the
-  Frame library and step-shape extensions used here. When extending
-  the framework — new step shapes, new closure-frame conjuncts,
-  bytecode-walk machinery — modifications belong there. Use
-  `git -C EVMYulLean ...` for git ops; commit incrementally; push to
-  the `fork` remote (already configured). Modifications that should
-  return to upstream Nethermind/EVMYulLean are tracked in
-  `EVMYulLean/UPSTREAM_WISHLIST.md` (also gitignored).
+  git history. The fork is `leonardoalt/EVMYulLean`; clone its `main`
+  branch (which now carries the Frame library) — the NethermindEth
+  upstream alone won't satisfy the imports. When extending the
+  framework — new step shapes, new closure-frame conjuncts, bytecode-walk
+  machinery — modifications belong there. Use `git -C EVMYulLean ...`
+  for git ops; commit incrementally; push to the `fork` remote
+  (already configured). Modifications that should return to upstream
+  Nethermind/EVMYulLean are tracked in `EVMYulLean/UPSTREAM_WISHLIST.md`
+  (also gitignored).
 - **Do not commit `.lake/`, `EthereumTests/`, or `EVMYulLean/`.**
   They're in `.gitignore` for good reasons (build artifacts, empty
   workaround dir, external dep).
