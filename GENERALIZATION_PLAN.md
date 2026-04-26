@@ -221,28 +221,57 @@ Estimated total per new contract: ~300-500 LoC. Most of that is the
 
 If the goal is to make the next contract's proof cheap:
 
-1. **First** (small payoff, easy): pull `step_PUSH1_shape`, etc., out
-   of `BytecodeFrame.lean` into a new
-   `EVMYulLean/EvmYul/Frame/StepShapes.lean`. Make them public. ~1 hour.
+1. **DONE** — `EvmYul.Frame.StepShapes` lifts the per-opcode shape
+   lemmas out of Register's `BytecodeFrame.lean` into the framework
+   as public theorems. (Was: pull `step_PUSH1_shape` etc. into a new
+   `StepShapes.lean`.)
 
-2. **Second** (medium payoff, medium effort): cover more opcodes (DUP*,
-   SWAP*, JUMP, JUMPI, arithmetic, KECCAK256). ~6-12 hours.
+2. **DONE** — `StepShapes` covers 81 opcodes: pushes, arithmetic
+   primops, DUP/SWAP, control flow (JUMP/JUMPI/JUMPDEST/STOP),
+   storage/memory ops (MLOAD/MSTORE/MSTORE8/SLOAD/SSTORE/TLOAD/TSTORE),
+   environment readers (CALLER/ORIGIN/ADDRESS/etc.), copy ops,
+   KECCAK256, RETURN/REVERT, CALL, and most one/two-pop families.
 
-3. **Third** (big payoff, medium effort): write a `pc_walk` tactic
-   that handles the boilerplate of each PC case. This is the single
-   biggest LoC reduction. ~4-8 hours.
+3. **DONE** — `EvmYul.Frame.PcWalk` provides 54 `step_OP_at_pc`
+   wrappers combining `decode-bytecode-at-pc` extraction with the
+   matching shape lemma; each PC case in a contract walk compresses
+   to one tactic invocation. Register's `RegisterTrace_step_preserves`
+   was reworked to use these; net -77 LoC in `BytecodeFrame.lean`.
 
-4. **Fourth** (open-ended): support contracts with non-zero CALL value.
+4. **OPEN** (open-ended): support contracts with non-zero CALL value.
    This requires a different at-C invariant and a different
-   `step_CALL_arm` chain. Substantial.
+   `step_CALL_arm` chain. Substantial; not yet started.
 
-5. **Fifth** (open-ended): strengthen `Θ_balanceOf_ge` / `Λ_balanceOf_ge`
+5. **PARTIAL** (paused): strengthen `Θ_balanceOf_ge` / `Λ_balanceOf_ge`
    to expose substate-tracking + code-frame outputs, so
    `RegSDExclusion` / `RegDeadAtσP` become derivable inside Lean
-   instead of caller-supplied. This eliminates the last vestige of
-   "real-world structural fact"-style hypothesis on consumer theorems.
+   instead of caller-supplied. **Landed leaf infrastructure**:
+   * `SubstateSDExclude`, `ΞPreservesAtCStrong`, `ΞFrameAtCStrong`,
+     `ΞAtCFrameStrong` predicates (`MutualFrame.lean`).
+   * `ΞAtCFrameStrong_of_witness`, `ΞFrameAtC_of_Strong`,
+     `ΞFrameAtCStrong_mono` / `ΞAtCFrameStrong_mono` (projections +
+     monotonicity).
+   * `selfdestruct_preserves_SD_exclude_C` (leaf step lemma in
+     `SelfdestructFrame.lean`).
+   * Nine per-precompile substate-purity lemmas plus
+     `applyPrecompile_substate_eq_when_in_range` (`MutualFrame.lean`).
+     SNARKV is skipped because of the same Lean-kernel deep-recursion
+     issue the existing `Θ_balanceOf_ge_bdd` docstring documents.
 
-The first three lift Register-style proofs to "fill in a 50-100 LoC
-bytecode walk + declare hypotheses". Steps 4 and 5 broaden the scope
-to other invariant shapes and tighten the framework's ground
-assumptions.
+   **Remaining work**: a parallel rewrite of ~1500 LoC of existing
+   tactic proof in `MutualFrame.lean` — each weak frame theorem needs
+   a `_strong` sibling threading the 4th conjunct (SD-exclusion at C).
+   The cross-references (Θ → Ξ at fuel-1 → Θ/Λ bundled together)
+   force the layers to land in lockstep; multiple incremental sub-agent
+   attempts hit this wall consistently. Three plausible follow-up
+   strategies: (a) parallel sub-agent runs on independent
+   `_strong` sub-theorems with careful merge management;
+   (b) interactive grinding with a single dedicated proof session;
+   (c) accept the boundary hypotheses on consumer theorems and ship
+   the framework as-is.
+
+The first three lifts (DONE) reduce a Register-style proof to "fill
+in a ~250 LoC bytecode walk + declare two structural hypotheses".
+Step 4 broadens the scope to other invariant shapes; Step 5
+(remaining work) tightens the framework's ground assumptions by
+deriving the boundary hypotheses inside Lean.
