@@ -564,4 +564,105 @@ private theorem WethTrace_step_at_0
     show List.length (UInt256.ofNat 0 :: s.stack) = 1
     simp [hLen]
 
+/-! ### PC 2 — `CALLDATALOAD` -/
+
+private theorem WethTrace_step_at_2
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 2) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 2 := pc_eq_ofNat_of_toNat s 2 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd :: tl, hLen2 =>
+    have hLenTl : tl.length = 0 := by
+      have h1 : (hd :: tl).length = 1 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+      step_CALLDATALOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_2 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 2 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 2 1
+    · rw [hStk']; show (v :: tl).length = 1; simp [hLenTl]
+
+/-! ### PC 3 — `PUSH1 0xe0` -/
+
+private theorem WethTrace_step_at_3
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 3) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 3 := pc_eq_ofNat_of_toNat s 3 (by decide) hpc
+  obtain ⟨hPC', hStk', hEE'⟩ :=
+    step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_3 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 3 right
+  left
+  refine ⟨?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 3 2
+  · rw [hStk']
+    show List.length (UInt256.ofNat 0xe0 :: s.stack) = 2
+    simp [hLen]
+
+/-! ### PC 5 — `SHR` -/
+
+private theorem WethTrace_step_at_5
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 5) (hLen : s.stack.length = 2)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 5 := pc_eq_ofNat_of_toNat s 5 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd1 :: hd2 :: tl, hLen2 =>
+    have hLenTl : tl.length = 0 := by
+      have h1 : (hd1 :: hd2 :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+      step_SHR_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_5 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 4 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 5 1
+    · rw [hStk']; show (v :: tl).length = 1; simp [hLenTl]
+
+/-! ### PC 6 — `DUP1` -/
+
+private theorem WethTrace_step_at_6
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 6) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 6 := pc_eq_ofNat_of_toNat s 6 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd :: tl, hLen2 =>
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_DUP1_at_pc s s' f' cost op arg _ hd tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_6 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 5 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 6 1
+    · rw [hStk']; show (hd :: s.stack).length = 2; simp [hLen]
+
 end EvmSmith.Weth
