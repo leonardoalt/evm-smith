@@ -139,7 +139,14 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 57 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 58 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 59 ∧ s.stack.length = 3) ∨
-   (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧ True) ∨   -- pre-SSTORE [sender; newBal; x]; trailing `True` is a placeholder for cascade-fact threading
+   (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧
+     (∃ (_slot oldVal newVal : UInt256), newVal.toNat ≤ oldVal.toNat)) ∨
+     -- pre-SSTORE [sender; newBal; x]; the trailing existential is a SHAPED
+     -- placeholder for the cascade fact `WethPC60CascadeFacts` will need
+     -- (slot/oldVal/newVal witnesses + the `newVal ≤ oldVal` no-wrap bound).
+     -- Currently discharged with trivial witnesses (all zero); future
+     -- upstream-walk threading replaces these with the real
+     -- (sender_slot, stored_balance, stored_balance − x) trio.
   -- Withdraw block CALL setup (PCs 61..79).
    (s.pc.toNat = 61 ∧ s.stack.length = 1) ∨   -- post-SSTORE [x]
    (s.pc.toNat = 63 ∧ s.stack.length = 2) ∨
@@ -562,7 +569,8 @@ private theorem mk_wethTrace_aux
        (s'.pc.toNat = 57 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 58 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 59 ∧ s'.stack.length = 3) ∨
-       (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧ True) ∨
+       (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧
+         (∃ (_slot oldVal newVal : UInt256), newVal.toNat ≤ oldVal.toNat)) ∨
        (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
        (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
@@ -1676,9 +1684,13 @@ private theorem WethTrace_step_at_59
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 42 right
     left
-    refine ⟨?_, ?_, True.intro⟩
+    refine ⟨?_, ?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
     · rw [hStk']; show (hd2 :: hd1 :: tl).length = 3; simp [hLenTl]
+    · -- SHAPED placeholder: trivial witnesses (all zero). Future upstream
+      -- threading from PCs 46/48/51/58 replaces these with the real
+      -- (sender_slot, stored_balance, stored_balance − x) trio.
+      exact ⟨UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, Nat.le_refl _⟩
 
 /-! ### PC 60 — `SSTORE` (withdraw: write decremented `storage[sender]`)
 
