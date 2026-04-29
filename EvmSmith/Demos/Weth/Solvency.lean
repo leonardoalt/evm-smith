@@ -166,7 +166,10 @@ structure WethAssumptions
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- Per-state SSTORE invariant preservation (PCs 40, 60). -/
   sstore_preserves : WethSStorePreserves C
-  /-- Per-state CALL dispatch at PC 72 (v=0 or recipient ≠ C / slack). -/
+  /-- Per-state CALL slack precondition at PC 72 (slack-callback form:
+  no-wrap + sender funds + slack disjunction; routed through the
+  framework's `_call_slack_dispatch` entry, with IHs threaded
+  internally). -/
   call_slack       : WethCallSlack C
 
 /-! ## Conversion to framework predicates
