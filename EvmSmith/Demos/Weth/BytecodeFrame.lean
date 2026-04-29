@@ -2378,6 +2378,25 @@ def WethStepClosure (C : AccountAddress) : Prop :=
 -- (`WethOpReach` removed: discharged in-Lean by
 -- `WethReachable_op_in_allowed` above.)
 
+/-! ### Helpers for the step-closure aggregate
+
+Two helpers reduce the boilerplate inside `weth_step_closure`. Each per-PC
+case yields `WethTrace s'` (via the matching `WethTrace_step_at_N`) plus
+either `s'.pc.toNat ≠ 32` or `s'.stack.length ≠ 0` (from the per-PC step
+shape). The two helpers project these into `WethReachable s'`. -/
+
+private theorem WethReachable_of_WethTrace_pc_ne_32
+    {C : AccountAddress} {s : EVM.State}
+    (hT : WethTrace C s) (hpc_ne : s.pc.toNat ≠ 32) :
+    WethReachable C s :=
+  ⟨hT, fun ⟨h1, _⟩ => hpc_ne h1⟩
+
+private theorem WethReachable_of_WethTrace_len_ne_0
+    {C : AccountAddress} {s : EVM.State}
+    (hT : WethTrace C s) (hlen : s.stack.length ≠ 0) :
+    WethReachable C s :=
+  ⟨hT, fun ⟨_, h2⟩ => hlen h2⟩
+
 /-- Per-state SSTORE invariant preservation. At every reachable SSTORE
 state, the post-step `WethInvFr` holds. The two SSTORE PCs in Weth
 are PC 40 (deposit, slot += msg.value) and PC 60 (withdraw, slot −=
@@ -2436,6 +2455,672 @@ private theorem WethReachable_initial
   show ¬ ((⟨0⟩ : UInt256).toNat = 32 ∧ _)
   intro h
   exact absurd h.1 (by decide)
+
+/-! ## §H.2 — `WethStepClosure` discharger
+
+Aggregate the 61 per-PC `WethTrace_step_at_*` walks into a single
+`WethReachable`-respecting closure: given a Weth-reachable state and a
+non-halt step, the post-state is Weth-reachable. The `WethReachable`
+predicate is `WethTrace ∧ ¬(pc=32 ∧ len=0)` (the post-31-REVERT halt
+sink is excluded). Each non-halt PC walks to a destination PC ≠ 32
+(or PC = 32 with `len = 1` for the JUMPI-taken case at PC 16). Halt
+PCs (31, 41, 79, 85) are ruled out by the op-inequalities. -/
+
+/-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`. -/
+private theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
+  intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
+  obtain ⟨hT, _hNot⟩ := hR
+  have hT' := hT
+  obtain ⟨hCO, hCode, hPC⟩ := hT
+  -- Case split on the 64 `WethTrace` disjuncts.
+  rcases hPC with
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩
+  -- Case PC=0 (PUSH1 0). Lands at PC=2 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 0 := pc_eq_ofNat_of_toNat s 0 (by decide) hpc
+    obtain ⟨hPC', hStk', _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_0 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_0 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 0 2]; decide
+  -- Case PC=2 (CALLDATALOAD). Lands at PC=3 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 2 := pc_eq_ofNat_of_toNat s 2 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_2 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_CALLDATALOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_2 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 2 1]; decide
+  -- Case PC=3 (PUSH1 0xe0). Lands at PC=5 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 3 := pc_eq_ofNat_of_toNat s 3 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_3 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 3 2]; decide
+  -- Case PC=5 (SHR). Lands at PC=6 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 5 := pc_eq_ofNat_of_toNat s 5 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_5 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SHR_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_5 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 5 1]; decide
+  -- Case PC=6 (DUP1). Lands at PC=7 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 6 := pc_eq_ofNat_of_toNat s 6 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_6 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP1_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_6 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 6 1]; decide
+  -- Case PC=7 (PUSH4). Lands at PC=12 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 7 := pc_eq_ofNat_of_toNat s 7 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH4 (by decide) depositSelector 4
+        hFetch hCode hpcEq decode_bytecode_at_7 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_7 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 7 5]; decide
+  -- Case PC=12 (EQ). Lands at PC=13 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 12 := pc_eq_ofNat_of_toNat s 12 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_12 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_EQ_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_12 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 12 1]; decide
+  -- Case PC=13 (PUSH2). Lands at PC=16 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 13 := pc_eq_ofNat_of_toNat s 13 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) depositLbl 2
+        hFetch hCode hpcEq decode_bytecode_at_13 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_13 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 13 3]; decide
+  -- Case PC=16 (JUMPI). Two branches: taken→PC=32 len=1, not-taken→PC=17.
+  -- Either way `s'.stack.length = 1 ≠ 0` (post-state pops 2 from len=3).
+  · have hpcEq : s.pc = UInt256.ofNat 16 := pc_eq_ofNat_of_toNat s 16 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_16 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
+    refine WethReachable_of_WethTrace_len_ne_0 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      have hLenTl : tl.length = 1 := by
+        have h1 : (hd1 :: hd2 :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
+        simpa using h1
+      obtain ⟨_, hStk', _⟩ :=
+        step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_16 hStep
+      rw [hStk']; rw [hLenTl]; decide
+  -- Case PC=17 (PUSH4). Lands at PC=22 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 17 := pc_eq_ofNat_of_toNat s 17 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH4 (by decide) withdrawSelector 4
+        hFetch hCode hpcEq decode_bytecode_at_17 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_17 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 17 5]; decide
+  -- Case PC=22 (EQ). Lands at PC=23 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 22 := pc_eq_ofNat_of_toNat s 22 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_22 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_EQ_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_22 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 22 1]; decide
+  -- Case PC=23 (PUSH2). Lands at PC=26 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 23 := pc_eq_ofNat_of_toNat s 23 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) withdrawLbl 2
+        hFetch hCode hpcEq decode_bytecode_at_23 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_23 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 23 3]; decide
+  -- Case PC=26 (JUMPI). Two branches: taken→PC=42, not-taken→PC=27. Both ≠ 32.
+  -- Hmm, however the witness `s'.pc.toNat ≠ 32` requires casing. Easier: post-len = 0.
+  -- Wait, post-len is `tl.length = 0` (pops 2 from len=2). So `s'.stack.length = 0`,
+  -- which means we cannot use `len ≠ 0`. Use `pc ≠ 32` and case-split.
+  · have hpcEq : s.pc = UInt256.ofNat 26 := pc_eq_ofNat_of_toNat s 26 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_26 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      have hd1_eq : hd1 = withdrawLbl := by
+        have : (hd1 :: hd2 :: tl)[0]? = some withdrawLbl := by
+          rw [← hStk_eq]; exact hStk0
+        simpa using this
+      obtain ⟨hPC', _, _⟩ :=
+        step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_26 hStep
+      cases hb : (hd2 != ⟨0⟩) with
+      | true =>
+        rw [hPC']
+        simp only [hb, ↓reduceIte]
+        rw [hd1_eq]; show withdrawLbl.toNat ≠ 32; decide
+      | false =>
+        rw [hPC']
+        simp only [hb, Bool.false_eq_true, if_false]
+        rw [hpcEq]
+        native_decide
+  -- Case PC=27 (PUSH1 0). Lands at PC=29 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 27 := pc_eq_ofNat_of_toNat s 27 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_27 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_27 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 27 2]; decide
+  -- Case PC=29 (PUSH1 0). Lands at PC=31 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 29 := pc_eq_ofNat_of_toNat s 29 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_29 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_29 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 29 2]; decide
+  -- Case PC=31 (REVERT). Halt op — excluded by hRev.
+  · have hpcEq : s.pc = UInt256.ofNat 31 := pc_eq_ofNat_of_toNat s 31 (by decide) hpc
+    have hDec : decode s.executionEnv.code s.pc = some (.REVERT, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_31
+    have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    exact absurd hOp hRev
+  -- Case PC=32 length=0 (post-31-REVERT halt sink). Excluded by `hNot` — input
+  -- state is `WethReachable`, so `¬(pc=32 ∧ len=0)`.
+  · exact absurd ⟨hpc, hLen⟩ _hNot
+  -- Case PC=32 length=1 (deposit JUMPDEST entry). Lands at PC=33 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 32 := pc_eq_ofNat_of_toNat s 32 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_32 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_32 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 32 1]; decide
+  -- Case PC=33 (POP). Lands at PC=34 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 33 := pc_eq_ofNat_of_toNat s 33 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_33 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_POP_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_33 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 33 1]; decide
+  -- Case PC=34 (CALLER). Lands at PC=35 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 34 := pc_eq_ofNat_of_toNat s 34 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_34 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_34 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 34 1]; decide
+  -- Case PC=35 (DUP1). Lands at PC=36 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 35 := pc_eq_ofNat_of_toNat s 35 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_35 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP1_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_35 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 35 1]; decide
+  -- Case PC=36 (SLOAD). Lands at PC=37 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 36 := pc_eq_ofNat_of_toNat s 36 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_36 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SLOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_36 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 36 1]; decide
+  -- Case PC=37 (CALLVALUE). Lands at PC=38 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 37 := pc_eq_ofNat_of_toNat s 37 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_CALLVALUE_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_37 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_37 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 37 1]; decide
+  -- Case PC=38 (ADD). Lands at PC=39 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 38 := pc_eq_ofNat_of_toNat s 38 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_38 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_ADD_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_38 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 38 1]; decide
+  -- Case PC=39 (SWAP1). Lands at PC=40 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 39 := pc_eq_ofNat_of_toNat s 39 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_39 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_39 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 39 1]; decide
+  -- Case PC=40 (SSTORE). Lands at PC=41 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 40 := pc_eq_ofNat_of_toNat s 40 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_40 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SSTORE_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_40 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 40 1]; decide
+  -- Case PC=41 (STOP). Halt op — excluded by hStop.
+  · have hpcEq : s.pc = UInt256.ofNat 41 := pc_eq_ofNat_of_toNat s 41 (by decide) hpc
+    have hDec : decode s.executionEnv.code s.pc = some (.STOP, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_41
+    have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    exact absurd hOp hStop
+  -- Case PC=42 (JUMPDEST). Lands at PC=43 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 42 := pc_eq_ofNat_of_toNat s 42 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_42 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_42 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 42 1]; decide
+  -- Case PC=43 (PUSH1 4). Lands at PC=45 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 43 := pc_eq_ofNat_of_toNat s 43 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_43 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_43 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 43 2]; decide
+  -- Case PC=45 (CALLDATALOAD). Lands at PC=46 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 45 := pc_eq_ofNat_of_toNat s 45 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_45 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_CALLDATALOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_45 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 45 1]; decide
+  -- Case PC=46 (CALLER). Lands at PC=47 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 46 := pc_eq_ofNat_of_toNat s 46 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_46 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_46 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 46 1]; decide
+  -- Case PC=47 (DUP1). Lands at PC=48 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 47 := pc_eq_ofNat_of_toNat s 47 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_47 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP1_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_47 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 47 1]; decide
+  -- Case PC=48 (SLOAD). Lands at PC=49 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 48 := pc_eq_ofNat_of_toNat s 48 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_48 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SLOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_48 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 48 1]; decide
+  -- Case PC=49 (DUP3). Lands at PC=50 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 49 := pc_eq_ofNat_of_toNat s 49 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_49 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: hd3 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP3_at_pc s s' f' cost op arg _ hd1 hd2 hd3 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_49 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 49 1]; decide
+  -- Case PC=50 (DUP2). Lands at PC=51 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 50 := pc_eq_ofNat_of_toNat s 50 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_50 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP2_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_50 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 50 1]; decide
+  -- Case PC=51 (LT). Lands at PC=52 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 51 := pc_eq_ofNat_of_toNat s 51 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_51 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_LT_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_51 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 51 1]; decide
+  -- Case PC=52 (PUSH2). Lands at PC=55 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 52 := pc_eq_ofNat_of_toNat s 52 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) revertLbl 2
+        hFetch hCode hpcEq decode_bytecode_at_52 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_52 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 52 3]; decide
+  -- Case PC=55 (JUMPI). Branches: taken→PC=80, not-taken→PC=56. Both ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 55 := pc_eq_ofNat_of_toNat s 55 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_55 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      have hd1_eq : hd1 = revertLbl := by
+        have : (hd1 :: hd2 :: tl)[0]? = some revertLbl := by
+          rw [← hStk_eq]; exact hStk0
+        simpa using this
+      obtain ⟨hPC', _, _⟩ :=
+        step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_55 hStep
+      cases hb : (hd2 != ⟨0⟩) with
+      | true =>
+        rw [hPC']
+        simp only [hb, ↓reduceIte]
+        rw [hd1_eq]; show revertLbl.toNat ≠ 32; decide
+      | false =>
+        rw [hPC']
+        simp only [hb, Bool.false_eq_true, if_false]
+        rw [hpcEq]
+        native_decide
+  -- Case PC=56 (DUP3). Lands at PC=57 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 56 := pc_eq_ofNat_of_toNat s 56 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_56 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: hd3 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP3_at_pc s s' f' cost op arg _ hd1 hd2 hd3 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_56 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 56 1]; decide
+  -- Case PC=57 (SWAP1). Lands at PC=58 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 57 := pc_eq_ofNat_of_toNat s 57 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_57 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_57 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 57 1]; decide
+  -- Case PC=58 (SUB). Lands at PC=59 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 58 := pc_eq_ofNat_of_toNat s 58 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_58 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SUB_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_58 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 58 1]; decide
+  -- Case PC=59 (SWAP1). Lands at PC=60 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 59 := pc_eq_ofNat_of_toNat s 59 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_59 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_59 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 59 1]; decide
+  -- Case PC=60 (SSTORE). Lands at PC=61 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 60 := pc_eq_ofNat_of_toNat s 60 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_60 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_SSTORE_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_60 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 60 1]; decide
+  -- Case PC=61 (PUSH1 0). Lands at PC=63 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 61 := pc_eq_ofNat_of_toNat s 61 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_61 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_61 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 61 2]; decide
+  -- Case PC=63 (PUSH1 0). Lands at PC=65 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 63 := pc_eq_ofNat_of_toNat s 63 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_63 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_63 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 63 2]; decide
+  -- Case PC=65 (PUSH1 0). Lands at PC=67 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 65 := pc_eq_ofNat_of_toNat s 65 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_65 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_65 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 65 2]; decide
+  -- Case PC=67 (PUSH1 0). Lands at PC=69 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 67 := pc_eq_ofNat_of_toNat s 67 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_67 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_67 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 67 2]; decide
+  -- Case PC=69 (DUP5). Lands at PC=70 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 69 := pc_eq_ofNat_of_toNat s 69 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_69 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_DUP5_at_pc s s' f' cost op arg _ hd1 hd2 hd3 hd4 hd5 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_69 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 69 1]; decide
+  -- Case PC=70 (CALLER). Lands at PC=71 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 70 := pc_eq_ofNat_of_toNat s 70 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_70 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_70 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 70 1]; decide
+  -- Case PC=71 (GAS). Lands at PC=72 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 71 := pc_eq_ofNat_of_toNat s 71 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_GAS_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_71 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_71 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 71 1]; decide
+  -- Case PC=72 (CALL). Lands at PC=73 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 72 := pc_eq_ofNat_of_toNat s 72 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_72 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_CALL_at_pc s s' f' cost op arg _ hd1 hd2 hd3 hd4 hd5 hd6 hd7 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_72 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 72 1]; decide
+  -- Case PC=73 (ISZERO). Lands at PC=74 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 73 := pc_eq_ofNat_of_toNat s 73 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_73 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_ISZERO_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_73 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 73 1]; decide
+  -- Case PC=74 (PUSH2). Lands at PC=77 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 74 := pc_eq_ofNat_of_toNat s 74 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) revertLbl 2
+        hFetch hCode hpcEq decode_bytecode_at_74 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_74 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 74 3]; decide
+  -- Case PC=77 (JUMPI). Branches: taken→PC=80, not-taken→PC=78. Both ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 77 := pc_eq_ofNat_of_toNat s 77 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_77 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd1 :: hd2 :: tl, _hLen2 =>
+      have hd1_eq : hd1 = revertLbl := by
+        have : (hd1 :: hd2 :: tl)[0]? = some revertLbl := by
+          rw [← hStk_eq]; exact hStk0
+        simpa using this
+      obtain ⟨hPC', _, _⟩ :=
+        step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_77 hStep
+      cases hb : (hd2 != ⟨0⟩) with
+      | true =>
+        rw [hPC']
+        simp only [hb, ↓reduceIte]
+        rw [hd1_eq]; show revertLbl.toNat ≠ 32; decide
+      | false =>
+        rw [hPC']
+        simp only [hb, Bool.false_eq_true, if_false]
+        rw [hpcEq]
+        native_decide
+  -- Case PC=78 (POP). Lands at PC=79 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 78 := pc_eq_ofNat_of_toNat s 78 (by decide) hpc
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_78 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    match hStk_eq : s.stack, hLen with
+    | hd :: tl, _hLen2 =>
+      obtain ⟨hPC', _, _⟩ :=
+        step_POP_at_pc s s' f' cost op arg _ hd tl hStk_eq
+          hFetch hCode hpcEq decode_bytecode_at_78 hStep
+      rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 78 1]; decide
+  -- Case PC=79 (STOP). Halt op — excluded by hStop.
+  · have hpcEq : s.pc = UInt256.ofNat 79 := pc_eq_ofNat_of_toNat s 79 (by decide) hpc
+    have hDec : decode s.executionEnv.code s.pc = some (.STOP, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_79
+    have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    exact absurd hOp hStop
+  -- Case PC=80 length=3 (JUMPDEST). Lands at PC=81 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 80 := pc_eq_ofNat_of_toNat s 80 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_80 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_80_len3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 80 1]; decide
+  -- Case PC=80 length=1 (JUMPDEST). Lands at PC=81 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 80 := pc_eq_ofNat_of_toNat s 80 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_80 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_80_len1 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 80 1]; decide
+  -- Case PC=81 length=3 (PUSH1 0). Lands at PC=83 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 81 := pc_eq_ofNat_of_toNat s 81 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_81 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_81_len3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 81 2]; decide
+  -- Case PC=81 length=1 (PUSH1 0). Lands at PC=83 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 81 := pc_eq_ofNat_of_toNat s 81 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_81 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_81_len1 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 81 2]; decide
+  -- Case PC=83 length=4 (PUSH1 0). Lands at PC=85 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 83 := pc_eq_ofNat_of_toNat s 83 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_83 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_83_len4 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 83 2]; decide
+  -- Case PC=83 length=2 (PUSH1 0). Lands at PC=85 ≠ 32.
+  · have hpcEq : s.pc = UInt256.ofNat 83 := pc_eq_ofNat_of_toNat s 83 (by decide) hpc
+    obtain ⟨hPC', _, _⟩ :=
+      step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_83 hStep
+    have hT_s' : WethTrace C s' :=
+      WethTrace_step_at_83_len2 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+    refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
+    rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 83 2]; decide
+  -- Case PC=85 length=5 (REVERT). Halt op — excluded by hRev.
+  · have hpcEq : s.pc = UInt256.ofNat 85 := pc_eq_ofNat_of_toNat s 85 (by decide) hpc
+    have hDec : decode s.executionEnv.code s.pc = some (.REVERT, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_85
+    have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    exact absurd hOp hRev
+  -- Case PC=85 length=3 (REVERT). Halt op — excluded by hRev.
+  · have hpcEq : s.pc = UInt256.ofNat 85 := pc_eq_ofNat_of_toNat s 85 (by decide) hpc
+    have hDec : decode s.executionEnv.code s.pc = some (.REVERT, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_85
+    have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+    exact absurd hOp hRev
 
 /-- **`bytecodePreservesInvariant` — Weth's bytecode-level §H.2 entry.**
 
