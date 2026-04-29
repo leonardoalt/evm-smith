@@ -102,15 +102,16 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 7  ∧ s.stack.length = 2) ∨
    (s.pc.toNat = 12 ∧ s.stack.length = 3) ∨
    (s.pc.toNat = 13 ∧ s.stack.length = 2) ∨
-   (s.pc.toNat = 16 ∧ s.stack.length = 3) ∨
+   (s.pc.toNat = 16 ∧ s.stack.length = 3 ∧ s.stack[0]? = some depositLbl) ∨
    (s.pc.toNat = 17 ∧ s.stack.length = 1) ∨   -- JUMPI not-taken
    (s.pc.toNat = 22 ∧ s.stack.length = 2) ∨
    (s.pc.toNat = 23 ∧ s.stack.length = 1) ∨
-   (s.pc.toNat = 26 ∧ s.stack.length = 2) ∨
+   (s.pc.toNat = 26 ∧ s.stack.length = 2 ∧ s.stack[0]? = some withdrawLbl) ∨
    (s.pc.toNat = 27 ∧ s.stack.length = 0) ∨   -- JUMPI not-taken (revert path)
    (s.pc.toNat = 29 ∧ s.stack.length = 1) ∨
    (s.pc.toNat = 31 ∧ s.stack.length = 2) ∨
   -- Deposit block (PCs 32..41), entered from PC 16 JUMPI taken.
+   (s.pc.toNat = 32 ∧ s.stack.length = 0) ∨   -- post-PC-31-REVERT halt sink
    (s.pc.toNat = 32 ∧ s.stack.length = 1) ∨   -- JUMPDEST entry (selector still)
    (s.pc.toNat = 33 ∧ s.stack.length = 1) ∨
    (s.pc.toNat = 34 ∧ s.stack.length = 0) ∨
@@ -132,7 +133,7 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 50 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 51 ∧ s.stack.length = 5) ∨
    (s.pc.toNat = 52 ∧ s.stack.length = 4) ∨
-   (s.pc.toNat = 55 ∧ s.stack.length = 5) ∨
+   (s.pc.toNat = 55 ∧ s.stack.length = 5 ∧ s.stack[0]? = some revertLbl) ∨
    (s.pc.toNat = 56 ∧ s.stack.length = 3) ∨   -- JUMPI not-taken
    (s.pc.toNat = 57 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 58 ∧ s.stack.length = 4) ∨
@@ -149,17 +150,14 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 72 ∧ s.stack.length = 8) ∨   -- pre-CALL: gas, to, val, ao, as, ro, rs, x
    (s.pc.toNat = 73 ∧ s.stack.length = 2) ∨   -- post-CALL: success, x
    (s.pc.toNat = 74 ∧ s.stack.length = 2) ∨
-   (s.pc.toNat = 77 ∧ s.stack.length = 3) ∨
+   (s.pc.toNat = 77 ∧ s.stack.length = 3 ∧ s.stack[0]? = some revertLbl) ∨
    (s.pc.toNat = 78 ∧ s.stack.length = 1) ∨   -- JUMPI not-taken
    (s.pc.toNat = 79 ∧ s.stack.length = 0) ∨   -- post-POP; STOP next
   -- Revert tail (PCs 80..85).
    (s.pc.toNat = 80 ∧ s.stack.length = 3) ∨   -- JUMPI taken from PC 55 (revert from LT)
    (s.pc.toNat = 81 ∧ s.stack.length = 0) ∨   -- alt. taken from PC 77 (revert from CALL fail)
    (s.pc.toNat = 83 ∧ s.stack.length = 1) ∨
-   (s.pc.toNat = 85 ∧ s.stack.length = 2) ∨
-  -- Halt sinks (post-REVERT). The X loop exits on REVERT, but the
-  -- post-step state must still inhabit some disjunct.
-   (s.pc.toNat = 86 ∧ s.stack.length = 0))
+   (s.pc.toNat = 85 ∧ s.stack.length = 2))
 
 /-! ## Decode lemmas: each Weth PC's decoded instruction
 
@@ -361,5 +359,101 @@ private theorem decode_bytecode_at_83 :
 
 private theorem decode_bytecode_at_85 :
     decode bytecode (UInt256.ofNat 85) = some (.REVERT, none) := by native_decide
+
+/-! ## Helpers
+
+`pc_eq_ofNat_of_toNat` lifts the `s.pc.toNat = n` hypothesis into
+`s.pc = UInt256.ofNat n` for `n < 256` (every Weth PC fits). -/
+
+/-- A trace state `s` always has `s.pc` equal to `UInt256.ofNat n` for
+its declared `n` (since `pc.toNat = n` and `n < 256 < UInt256.size`). -/
+private theorem pc_eq_ofNat_of_toNat
+    (s : EVM.State) (n : ℕ) (hn : n < 256)
+    (h : s.pc.toNat = n) :
+    s.pc = UInt256.ofNat n :=
+  EvmYul.Frame.pc_eq_ofNat_of_toNat s n (by unfold UInt256.size; omega) h
+
+/-- For nats `a, b < UInt256.size` whose sum is also `< UInt256.size`,
+the toNat of `UInt256.ofNat a + UInt256.ofNat b` equals `a + b`. -/
+private theorem ofNat_add_ofNat_toNat
+    (a b : ℕ) (ha : a < UInt256.size) (hb : b < UInt256.size)
+    (hab : a + b < UInt256.size) :
+    (UInt256.ofNat a + UInt256.ofNat b).toNat = a + b := by
+  show (UInt256.ofNat a + UInt256.ofNat b).val.val = a + b
+  rw [show (UInt256.ofNat a + UInt256.ofNat b).val
+        = (UInt256.ofNat a).val + (UInt256.ofNat b).val from rfl,
+      Fin.val_add,
+      show (UInt256.ofNat a).val.val = a from Nat.mod_eq_of_lt ha,
+      show (UInt256.ofNat b).val.val = b from Nat.mod_eq_of_lt hb]
+  exact Nat.mod_eq_of_lt hab
+
+/-- Convenience wrapper: for `a, b < 256` (always true for Weth's PCs), the
+toNat of the sum is `a + b` provided `a + b < 256`. -/
+private theorem ofNat_add_ofNat_toNat_lt256
+    (a b : ℕ) (_ha : a < 256 := by decide) (_hb : b < 256 := by decide)
+    (_hab : a + b < 256 := by decide) :
+    (UInt256.ofNat a + UInt256.ofNat b).toNat = a + b :=
+  ofNat_add_ofNat_toNat a b
+    (by unfold UInt256.size; omega) (by unfold UInt256.size; omega)
+    (by unfold UInt256.size; omega)
+
+/-! ## Closure obligations: Z, decodeSome -/
+
+/-- Z (gas-only update) preserves `WethTrace`. -/
+private theorem WethTrace_Z_preserves
+    (C : AccountAddress) (s : EVM.State) (g : UInt256)
+    (h : WethTrace C s) :
+    WethTrace C { s with gasAvailable := g } := h
+
+/-- Each reachable state has decode = some pair. -/
+private theorem WethTrace_decodeSome
+    (C : AccountAddress) (s : EVM.State)
+    (h : WethTrace C s) :
+    ∃ pair, decode s.executionEnv.code s.pc = some pair := by
+  obtain ⟨_, hCode, hPC⟩ := h
+  rw [hCode]
+  -- 60 disjuncts; PCs 16, 26, 55, 77 carry a stack[0]? witness so are
+  -- 3-conjunct (need ⟨hpc, _, _⟩); the rest are 2-conjunct.
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc])
+  exacts [⟨_, decode_bytecode_at_0⟩, ⟨_, decode_bytecode_at_2⟩,
+          ⟨_, decode_bytecode_at_3⟩, ⟨_, decode_bytecode_at_5⟩,
+          ⟨_, decode_bytecode_at_6⟩, ⟨_, decode_bytecode_at_7⟩,
+          ⟨_, decode_bytecode_at_12⟩, ⟨_, decode_bytecode_at_13⟩,
+          ⟨_, decode_bytecode_at_16⟩, ⟨_, decode_bytecode_at_17⟩,
+          ⟨_, decode_bytecode_at_22⟩, ⟨_, decode_bytecode_at_23⟩,
+          ⟨_, decode_bytecode_at_26⟩, ⟨_, decode_bytecode_at_27⟩,
+          ⟨_, decode_bytecode_at_29⟩, ⟨_, decode_bytecode_at_31⟩,
+          ⟨_, decode_bytecode_at_32⟩, ⟨_, decode_bytecode_at_32⟩,
+          ⟨_, decode_bytecode_at_33⟩,
+          ⟨_, decode_bytecode_at_34⟩, ⟨_, decode_bytecode_at_35⟩,
+          ⟨_, decode_bytecode_at_36⟩, ⟨_, decode_bytecode_at_37⟩,
+          ⟨_, decode_bytecode_at_38⟩, ⟨_, decode_bytecode_at_39⟩,
+          ⟨_, decode_bytecode_at_40⟩, ⟨_, decode_bytecode_at_41⟩,
+          ⟨_, decode_bytecode_at_42⟩, ⟨_, decode_bytecode_at_43⟩,
+          ⟨_, decode_bytecode_at_45⟩, ⟨_, decode_bytecode_at_46⟩,
+          ⟨_, decode_bytecode_at_47⟩, ⟨_, decode_bytecode_at_48⟩,
+          ⟨_, decode_bytecode_at_49⟩, ⟨_, decode_bytecode_at_50⟩,
+          ⟨_, decode_bytecode_at_51⟩, ⟨_, decode_bytecode_at_52⟩,
+          ⟨_, decode_bytecode_at_55⟩, ⟨_, decode_bytecode_at_56⟩,
+          ⟨_, decode_bytecode_at_57⟩, ⟨_, decode_bytecode_at_58⟩,
+          ⟨_, decode_bytecode_at_59⟩, ⟨_, decode_bytecode_at_60⟩,
+          ⟨_, decode_bytecode_at_61⟩, ⟨_, decode_bytecode_at_63⟩,
+          ⟨_, decode_bytecode_at_65⟩, ⟨_, decode_bytecode_at_67⟩,
+          ⟨_, decode_bytecode_at_69⟩, ⟨_, decode_bytecode_at_70⟩,
+          ⟨_, decode_bytecode_at_71⟩, ⟨_, decode_bytecode_at_72⟩,
+          ⟨_, decode_bytecode_at_73⟩, ⟨_, decode_bytecode_at_74⟩,
+          ⟨_, decode_bytecode_at_77⟩, ⟨_, decode_bytecode_at_78⟩,
+          ⟨_, decode_bytecode_at_79⟩, ⟨_, decode_bytecode_at_80⟩,
+          ⟨_, decode_bytecode_at_81⟩, ⟨_, decode_bytecode_at_83⟩,
+          ⟨_, decode_bytecode_at_85⟩]
 
 end EvmSmith.Weth
