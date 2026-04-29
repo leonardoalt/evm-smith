@@ -2247,12 +2247,15 @@ The three structural hypotheses are the **load-bearing pieces**:
   incremented by `msg.value`, but the at-C Ξ pre-state already had
   `msg.value` slack from Θ's pre-credit; threading this through
   `Reachable` requires extending the trace shape.
-* `WethCallSlack` — per-state CALL dispatch at PC 72: the recipient
-  is `caller ≠ C` (from `weth_caller_ne_C`), so
-  `call_invariant_preserved`'s slack disjunct `C ≠ src` discharges
-  via re-routing `src` interpretation. Or, alternatively, the slack
-  `v.toNat + storageSum σ C ≤ balanceOf σ C` from PC 60's SSTORE
-  decrement.
+* `WethCallSlack` — per-state CALL slack precondition at PC 72.
+  Slack-callback form (consumer of the framework's
+  `_call_slack_dispatch` entry): given the seven popped CALL parameters
+  and the residual stack tail, supply the three preconditions of
+  `call_invariant_preserved` (no-wrap, sender funds, slack disjunction).
+  The slack inequality `v.toNat + storageSum σ C ≤ balanceOf σ C` is
+  threaded from PC 60's SSTORE-decrement fact; alternatively the
+  recipient ≠ C disjunct discharges via `weth_caller_ne_C`. The IHs
+  are threaded internally — the consumer never sees them.
 
 Together with the deployment witness (`hDeployed`), these reduce
 `ΞPreservesInvariantAtC C` to a closed-form Lean proof, eliminating
