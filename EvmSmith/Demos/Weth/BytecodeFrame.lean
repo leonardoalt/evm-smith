@@ -139,7 +139,7 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 57 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 58 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 59 ∧ s.stack.length = 3) ∨
-   (s.pc.toNat = 60 ∧ s.stack.length = 3) ∨   -- pre-SSTORE [sender; newBal; x]
+   (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧ True) ∨   -- pre-SSTORE [sender; newBal; x]; trailing `True` is a placeholder for cascade-fact threading
   -- Withdraw block CALL setup (PCs 61..79).
    (s.pc.toNat = 61 ∧ s.stack.length = 1) ∨   -- post-SSTORE [x]
    (s.pc.toNat = 63 ∧ s.stack.length = 2) ∨
@@ -449,16 +449,17 @@ private theorem WethTrace_decodeSome
   obtain ⟨_, hCode, hPC⟩ := h
   rw [hCode]
   -- 64 disjuncts; PCs 16, 26, 55, 77 carry a stack[0]? witness so are
-  -- 3-conjunct (need ⟨hpc, _, _⟩); the rest are 2-conjunct. PCs 80, 81,
-  -- 83, 85 each appear twice (different stack lengths from PC 55/77
-  -- entry); both are 2-conjunct.
+  -- 3-conjunct (need ⟨hpc, _, _⟩); PC 60 carries a `True` placeholder
+  -- (for future cascade-fact threading) so is also 3-conjunct. The rest
+  -- are 2-conjunct. PCs 80, 81, 83, 85 each appear twice (different
+  -- stack lengths from PC 55/77 entry); both are 2-conjunct.
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc])
@@ -561,7 +562,7 @@ private theorem mk_wethTrace_aux
        (s'.pc.toNat = 57 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 58 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 59 ∧ s'.stack.length = 3) ∨
-       (s'.pc.toNat = 60 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧ True) ∨
        (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
        (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
@@ -1675,7 +1676,7 @@ private theorem WethTrace_step_at_59
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 42 right
     left
-    refine ⟨?_, ?_⟩
+    refine ⟨?_, ?_, True.intro⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
     · rw [hStk']; show (hd2 :: hd1 :: tl).length = 3; simp [hLenTl]
 
@@ -2592,7 +2593,7 @@ private theorem WethReachable_op_in_allowed
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch)
@@ -2702,7 +2703,7 @@ private theorem WethReachable_sstore_pc
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   -- Every disjunct rewrites the PC and the decoded op. SSTORE only at
@@ -3164,7 +3165,7 @@ private theorem WethReachable_call_pc
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   -- Every disjunct rewrites the PC and the decoded op. CALL only at
@@ -3666,7 +3667,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
-    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, _⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩
   -- Case PC=0 (PUSH1 0). Lands at PC=2 ≠ 32.
