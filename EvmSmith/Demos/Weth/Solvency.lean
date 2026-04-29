@@ -334,21 +334,17 @@ theorem weth_solvency_invariant
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
-  -- Derive the larger SSTORE / CALL closure predicates from the
-  -- narrower per-PC cascade-fact predicates via the closed-form
-  -- glue lemmas (`weth_sstore_preserves_from_cascades`,
-  -- `weth_call_slack_from_cascade`).
-  have hSStore : WethSStorePreserves C :=
-    weth_sstore_preserves_from_cascades C
-      hAssumptions.pc40_cascade hAssumptions.pc60_cascade
-  have hCall : WethCallSlack C :=
-    weth_call_slack_from_cascade C hAssumptions.pc72_cascade
-  -- Derive ΞPreservesInvariantAtC C from the bytecode-level structural
-  -- hypotheses via `bytecodePreservesInvariant`. The non-halt step
-  -- closure is derived in-Lean by `weth_step_closure C` inside the
-  -- discharger, so consumers no longer supply it.
+  -- Derive ΞPreservesInvariantAtC C directly from the per-PC
+  -- cascade-fact predicates via `bytecodePreservesInvariant_from_cascades`,
+  -- which composes the closed-form glue lemmas
+  -- (`weth_sstore_preserves_from_cascades`,
+  -- `weth_call_slack_from_cascade`) with `bytecodePreservesInvariant`.
+  -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
+  -- inside the discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant C hAssumptions.deployed hSStore hCall
+    bytecodePreservesInvariant_from_cascades C hAssumptions.deployed
+      hAssumptions.pc40_cascade hAssumptions.pc60_cascade
+      hAssumptions.pc72_cascade
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C

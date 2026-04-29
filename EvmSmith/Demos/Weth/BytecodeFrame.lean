@@ -4346,4 +4346,24 @@ theorem bytecodePreservesInvariant
     intro cA gbh bs σ σ₀ g A I hCO
     exact WethReachable_initial C hDeployed cA gbh bs σ σ₀ g A I hCO
 
+/-- **`bytecodePreservesInvariant_from_cascades` — convenience entry that
+takes the per-PC cascade-fact predicates directly.**
+
+Composes `bytecodePreservesInvariant` with `weth_sstore_preserves_from_cascades`
+and `weth_call_slack_from_cascade`. This is the natural entry point
+once the trace cascade extension lands: instead of asking the consumer
+for the broader `WethSStorePreserves` / `WethCallSlack` predicates,
+they supply the narrower per-PC cascade-fact predicates that the
+trace cascade extension would establish from the per-PC `WethTrace`
+disjuncts at PCs 40, 60, 72. -/
+theorem bytecodePreservesInvariant_from_cascades
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (h40 : WethPC40CascadeFacts C)
+    (h60 : WethPC60CascadeFacts C)
+    (h72 : WethPC72CascadeFacts C) :
+    ΞPreservesInvariantAtC C :=
+  bytecodePreservesInvariant C hDeployed
+    (weth_sstore_preserves_from_cascades C h40 h60)
+    (weth_call_slack_from_cascade C h72)
+
 end EvmSmith.Weth
