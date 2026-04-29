@@ -129,22 +129,6 @@ def WethInvAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
         WethInvFr σ_P C
   | _ => True
 
-/-- Hypothesis: the call-tree-level body factorisation exists.
-There exists `(σ_P, g')` decomposing σ' as `Υ_tail_state σ_P g' A …`.
-
-This existence claim is structural — Υ's `.ok` output is shaped
-exactly as `do (σ_P, g', A, z) ← Θ/Λ-dispatch σ₀; .ok (Υ_tail_state
-…, A, z, _)`, so a decomposition always exists. Bundled here so the
-caller doesn't need to inspect Υ's internals. -/
-def WethBodyDecomposes (σ : AccountMap .EVM) (fuel H_f : ℕ)
-    (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
-    (S_T : AccountAddress) (H_target : BlockHeader) : Prop :=
-  match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
-  | .ok (σ', A', _, _) =>
-      ∃ σ_P g',
-        σ' = Υ_tail_state σ_P g' A' H_target H_f tx S_T
-  | _ => True
-
 /-- **Weth assumptions bundle.** Packages the structural hypotheses
 for the top-level solvency theorem.
 
@@ -155,9 +139,9 @@ two additional Weth-specific hypotheses:
 * `inv_at_σP` — σ_P preserves the invariant.
 
 The decomposition existence (`σ' = Υ_tail_state σ_P g' …`) is
-folded into `body_decomp`; combined with `inv_at_σP` and `dead_at_σP`
-they form the `ΥBodyFactorsInvariant` predicate Υ_invariant_preserved
-consumes. -/
+mechanical and is derived inline by `weth_Υ_body_factors`; combined
+with `inv_at_σP` and `dead_at_σP` they form the
+`ΥBodyFactorsInvariant` predicate `Υ_invariant_preserved` consumes. -/
 structure WethAssumptions
     (σ : AccountMap .EVM) (fuel H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
@@ -170,8 +154,6 @@ structure WethAssumptions
   dead_at_σP   : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP    : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- Υ's body decomposes as `Υ_tail_state σ_P g' …`. -/
-  body_decomp  : WethBodyDecomposes σ fuel H_f H H_gen blocks tx S_T H
   /-- The framework-level at-`C` Ξ closure witness. The load-bearing
   piece; provided structurally here. -/
   xi_inv       : ΞPreservesInvariantAtC C
@@ -210,31 +192,51 @@ private theorem weth_Υ_tail_invariant
     rw [hDead] at hpk
     cases hpk
 
-/-- Project the `WethDeadAtσP` + `WethInvAtσP` + `WethBodyDecomposes`
-hypotheses to the framework's `ΥBodyFactorsInvariant`.
+/-- Project the `WethDeadAtσP` + `WethInvAtσP` hypotheses to the
+framework's `ΥBodyFactorsInvariant`.
 
-Mirror of Register's `register_Υ_body_factors`, but rather than
-re-deriving σ_P's invariant via Θ/Λ frame helpers (which are private
-in MutualFrame.lean), we take it as a structural input. -/
+Mirror of Register's `register_Υ_body_factors`. The body decomposition
+existence (`σ' = Υ_tail_state σ_P g' …`) is derived mechanically by
+inspecting Υ's `.ok` output structure — it's syntactically a `do
+(σ_P, g', A, z) ← Θ/Λ-dispatch σ₀; .ok (Υ_tail_state …, A, z, _)`. -/
 private theorem weth_Υ_body_factors
     (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
     (tx : Transaction) (S_T C : AccountAddress)
-    (hBody : WethBodyDecomposes σ fuel H_f H H_gen blocks tx S_T H)
     (hInv  : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C)
     (hDead : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C) :
     ΥBodyFactorsInvariant σ fuel H_f H H_gen blocks tx S_T C := by
-  unfold ΥBodyFactorsInvariant
-    WethBodyDecomposes WethInvAtσP WethDeadAtσP at *
-  cases hΥ : EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
-  | error e => trivial
-  | ok r =>
-    obtain ⟨σ', A, z, gUsed⟩ := r
-    rw [hΥ] at hBody hInv hDead
-    obtain ⟨σ_P, g', hEq⟩ := hBody
-    refine ⟨σ_P, g', hEq, ?_, ?_⟩
-    · exact hInv σ_P g' hEq
-    · exact hDead σ_P g' hEq
+  unfold ΥBodyFactorsInvariant WethInvAtσP WethDeadAtσP at *
+  unfold EVM.Υ at *
+  match hRec : tx.base.recipient with
+  | none =>
+    simp only
+    rw [hRec] at hInv hDead
+    simp only at hInv hDead
+    split
+    case h_2 _ => trivial
+    case h_1 σ' A' z' gUsed' hOk =>
+      split at hOk
+      case h_2 e hΛ => simp [bind, Except.bind] at hOk
+      case h_1 a cA σ_P g' A z gReturn hΛ =>
+        rw [hΛ] at hInv hDead
+        simp only at hInv hDead
+        cases hOk
+        exact ⟨σ_P, g', rfl, hInv σ_P g' rfl, hDead σ_P g' rfl⟩
+  | some t =>
+    simp only
+    rw [hRec] at hInv hDead
+    simp only at hInv hDead
+    split
+    case h_2 _ => trivial
+    case h_1 σ' A' z' gUsed' hOk =>
+      split at hOk
+      case h_2 e hΘ => simp [bind, Except.bind] at hOk
+      case h_1 cA σ_P g' A z gReturn hΘ =>
+        rw [hΘ] at hInv hDead
+        simp only at hInv hDead
+        cases hOk
+        exact ⟨σ_P, g', rfl, hInv σ_P g' rfl, hDead σ_P g' rfl⟩
 
 /-! ## Top-level solvency theorem
 
@@ -289,7 +291,7 @@ theorem weth_solvency_invariant
     weth_Υ_tail_invariant σ fuel H_f H H_gen blocks tx S_T C hAssumptions.sd_excl
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
-      hAssumptions.body_decomp hAssumptions.inv_at_σP hAssumptions.dead_at_σP
+      hAssumptions.inv_at_σP hAssumptions.dead_at_σP
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
