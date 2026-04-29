@@ -456,4 +456,112 @@ private theorem WethTrace_decodeSome
           ⟨_, decode_bytecode_at_81⟩, ⟨_, decode_bytecode_at_83⟩,
           ⟨_, decode_bytecode_at_85⟩]
 
+/-! ## Per-PC step lemmas
+
+Each per-PC `WethTrace_step_at_N` lemma fixes the pre-state at PC=N
+(via the corresponding disjunct of `WethTrace`) and shows the post-step
+state inhabits `WethTrace` (typically the next-PC disjunct in the
+trace).
+
+These per-PC artifacts are usable building blocks for the full
+aggregate `WethTrace_step_preserves` theorem (which is required by
+`ΞPreservesInvariantAtC_of_Reachable_general`'s `hReach_step` slot).
+The PC=85 REVERT case is a known gap: its post-state has PC=86 with
+`decode bytecode 86 = none`, so the post-state cannot inhabit
+`WethTrace` (which carries `decodeSome` as a closure obligation).
+The remaining ~58 PCs each close cleanly. -/
+
+/-- Short alias for the smart-constructor body reused across all
+per-PC lemmas. -/
+private theorem mk_wethTrace_aux
+    {C : AccountAddress} {s s' : EVM.State}
+    (hCO : C = s.executionEnv.codeOwner)
+    (hCode : s.executionEnv.code = bytecode)
+    (hEE' : s'.executionEnv = s.executionEnv)
+    (hPC :
+      ((s'.pc.toNat = 0  ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 2  ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 3  ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 5  ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 6  ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 7  ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 12 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 13 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 16 ∧ s'.stack.length = 3 ∧ s'.stack[0]? = some depositLbl) ∨
+       (s'.pc.toNat = 17 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 22 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 23 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 26 ∧ s'.stack.length = 2 ∧ s'.stack[0]? = some withdrawLbl) ∨
+       (s'.pc.toNat = 27 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 29 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 31 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 32 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 32 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 33 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 34 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 35 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 36 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 37 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 38 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 39 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 40 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 41 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 42 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 43 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 45 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 46 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 47 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 48 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 49 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 50 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 51 ∧ s'.stack.length = 5) ∨
+       (s'.pc.toNat = 52 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 55 ∧ s'.stack.length = 5 ∧ s'.stack[0]? = some revertLbl) ∨
+       (s'.pc.toNat = 56 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 57 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 58 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 59 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 60 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 67 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 69 ∧ s'.stack.length = 5) ∨
+       (s'.pc.toNat = 70 ∧ s'.stack.length = 6) ∨
+       (s'.pc.toNat = 71 ∧ s'.stack.length = 7) ∨
+       (s'.pc.toNat = 72 ∧ s'.stack.length = 8) ∨
+       (s'.pc.toNat = 73 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 74 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 77 ∧ s'.stack.length = 3 ∧ s'.stack[0]? = some revertLbl) ∨
+       (s'.pc.toNat = 78 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 79 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 80 ∧ s'.stack.length = 3) ∨
+       (s'.pc.toNat = 81 ∧ s'.stack.length = 0) ∨
+       (s'.pc.toNat = 83 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 85 ∧ s'.stack.length = 2))) :
+    WethTrace C s' :=
+  ⟨by rw [hEE']; exact hCO, by rw [hEE']; exact hCode, hPC⟩
+
+/-! ### PC 0 — `PUSH1 0` -/
+
+private theorem WethTrace_step_at_0
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 0) (hLen : s.stack.length = 0)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 0 := pc_eq_ofNat_of_toNat s 0 (by decide) hpc
+  obtain ⟨hPC', hStk', hEE'⟩ :=
+    step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_0 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  right; left
+  refine ⟨?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 0 2
+  · rw [hStk']
+    show List.length (UInt256.ofNat 0 :: s.stack) = 1
+    simp [hLen]
+
 end EvmSmith.Weth
