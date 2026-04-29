@@ -2424,19 +2424,40 @@ The three structural hypotheses are the **load-bearing pieces**:
 
 The narrowing lemmas `WethReachable_sstore_pc` (PCs 40, 60) and
 `WethReachable_call_pc` (PC 72) reduce per-state case analysis to
-the single-PC discharge form. The remaining work to drop these two
+the single-PC discharge form. **The framework SSTORE-delta laws
+(`storageSum_sstore_replace_eq`, `storageSum_sstore_erase_eq`) are
+already closed-form**, and the **EVM-step bridges**
+(`WethInvFr_step_SSTORE_at_C_replace_decr`, `_erase`) compose them
+with the SSTORE step shape. The remaining work to drop these two
 hypotheses from `WethAssumptions` is:
 
-  1. Extend `EVMYulLean/.../StorageSum.lean` with the SSTORE delta
-     bounds (`storageSum_sstore_decrement` / `_increment`). These
-     require multiset-level reasoning over the RBMap toList, lifting
-     the membership-level `mem_toList_insert` characterisation.
-  2. Thread the trace at PCs 40 / 60 / 72 to expose the load-bearing
-     stack-shape facts (sender uint at stack[0]?/stack[1]?, slot's
-     old value, x ≤ balance from the PC 51 LT + PC 55 JUMPI not-taken
-     branch). These feed the slack-disjunction's third clause.
-  3. Compose 1 + 2 to discharge `WethSStorePreserves` and
-     `WethCallSlack` via case-split on the narrowing lemmas.
+  1. **Trace cascade for SSTORE storage facts**: PC 60's discharge
+     requires knowing `acc.storage.find? slot = some old` and
+     `newVal.toNat ≤ old.toNat`. The SLOAD at PC 48 establishes the
+     storage fact; carrying it forward through the 12 intermediate
+     steps (PCs 49–59) requires extending each disjunct with a
+     `(σ.find? C).bind (·.storage.find? slot) = some oldVal` clause
+     (preserved by all non-SSTORE steps). The walks landing on these
+     PCs (~12 of them) must establish the new clause; downstream
+     consumers (aggregate `weth_step_closure`, narrowing lemmas) must
+     handle it.
+  2. **Trace cascade for SSTORE arithmetic facts**: at PC 60 we need
+     `x ≤ balance` (UInt256). The PC 51 LT + PC 55 JUMPI not-taken
+     fall-through establishes this; carrying it forward is similar to
+     (1).
+  3. **PC 40 (deposit) increment slack**: at PC 40 we need
+     `S(C) + msg.value ≤ β(C)`. This isn't local to the trace — it
+     comes from Θ's pre-credit at the Ξ entry point. Threading
+     requires lifting the at-`C` Ξ pre-state's β-credit through to
+     the `WethReachable` predicate.
+  4. **PC 72 (CALL) slack**: requires the SSTORE-decrement fact at
+     PC 60 propagated through the 12 intermediate steps (PCs 61–71).
+     Same cascade pattern as (1).
+
+The closed-form templates `WethSStorePreserves_PC60_decr`,
+`WethSStorePreserves_erase` are ready-to-call once (1)+(2) land.
+The PC 40 case (3) requires additional Θ-side reasoning. The PC 72
+case (4) reuses (1) and is straightforward once that's in place.
 
 Together with the deployment witness (`hDeployed`), these reduce
 `ΞPreservesInvariantAtC C` to a closed-form Lean proof, eliminating
