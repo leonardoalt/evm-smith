@@ -360,6 +360,32 @@ private theorem decode_bytecode_at_83 :
 private theorem decode_bytecode_at_85 :
     decode bytecode (UInt256.ofNat 85) = some (.REVERT, none) := by native_decide
 
+/-! ## Local PC-walk wrapper for SWAP1
+
+`EvmYul.Frame.PcWalk` doesn't expose a `step_SWAP1_at_pc` wrapper, but
+Weth's bytecode uses SWAP1 at PCs 39, 57, 59. We mirror the standard
+pattern: align `op`/`arg` from `hFetch`+`hDecode` and apply the
+underlying `step_SWAP1_shape`. -/
+
+private theorem step_SWAP1_at_pc_local {code : ByteArray} {N : ℕ}
+    (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (expArg : Option (UInt256 × Nat))
+    (hd1 hd2 : UInt256) (tl : Stack UInt256) (hStk : s.stack = hd1 :: hd2 :: tl)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hCode : s.executionEnv.code = code)
+    (hpc : s.pc = UInt256.ofNat N)
+    (hDecode : decode code (UInt256.ofNat N) = some (.SWAP1, expArg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧
+    s'.stack = hd2 :: hd1 :: tl ∧
+    s'.executionEnv = s.executionEnv := by
+  have hDec : decode s.executionEnv.code s.pc = some (.SWAP1, expArg) := by
+    rw [hCode, hpc]; exact hDecode
+  obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
+  subst hOp; subst hArg
+  exact step_SWAP1_shape s s' f' cost arg hd1 hd2 tl hStk hStep
+
 /-! ## Helpers
 
 `pc_eq_ofNat_of_toNat` lifts the `s.pc.toNat = n` hypothesis into
@@ -1162,5 +1188,83 @@ private theorem WethTrace_step_at_38
     refine ⟨?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 38 1
     · rw [hStk']; show (v :: tl).length = 2; simp [hLenTl]
+
+/-! ### PC 39 — `SWAP1` (deposit: swap newBalance and sender) -/
+
+private theorem WethTrace_step_at_39
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 39) (hLen : s.stack.length = 2)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 39 := pc_eq_ofNat_of_toNat s 39 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd1 :: hd2 :: tl, hLen2 =>
+    have hLenTl : tl.length = 0 := by
+      have h1 : (hd1 :: hd2 :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_39 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 25 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 39 1
+    · rw [hStk']; show (hd2 :: hd1 :: tl).length = 2; simp [hLenTl]
+
+/-! ### PC 40 — `SSTORE` (deposit: write storage[sender]) -/
+
+private theorem WethTrace_step_at_40
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 40) (hLen : s.stack.length = 2)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 40 := pc_eq_ofNat_of_toNat s 40 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd1 :: hd2 :: tl, hLen2 =>
+    have hLenTl : tl.length = 0 := by
+      have h1 : (hd1 :: hd2 :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_SSTORE_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_40 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 26 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 40 1
+    · rw [hStk']; exact hLenTl
+
+/-! ### PC 41 — `STOP` (deposit success)
+
+STOP keeps pc the same and preserves stack — fixed point at PC=41
+length=0. -/
+
+private theorem WethTrace_step_at_41
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 41) (hLen : s.stack.length = 0)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 41 := pc_eq_ofNat_of_toNat s 41 (by decide) hpc
+  obtain ⟨hPC', hStk', hEE'⟩ :=
+    step_STOP_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_41 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 26 right
+  left
+  refine ⟨?_, ?_⟩
+  · rw [hPC']; exact hpc
+  · rw [hStk']; exact hLen
 
 end EvmSmith.Weth
