@@ -58,24 +58,29 @@ in `WethAssumptions`:
    decrement). The bytecode walk ingredients are in
    `BytecodeFrame.lean`.
 
-5. **`WethBodyFactors`** — Υ's body factorisation in invariant
-   flavour: σ' decomposes as `Υ_tail_state σ_P g' A …` for some
-   `(σ_P, g')` with `WethInvFr σ_P C` and `dead σ_P C = false`.
-   Mirror of Register's `RegDeadAtσP` plus the σ-to-σ_P invariant
-   propagation. Discharging from Lean requires exposed
-   `Θ_invariant_preserved` / `Λ_invariant_preserved` framework
-   theorems; bundled here as a structural hypothesis.
+5. **`WethInvAtσP`** — σ_P (Υ's post-Θ/Λ-dispatch state) preserves
+   the relational solvency invariant `storageSum σ_P C ≤ balanceOf
+   σ_P C`. Mirror of Register's `σ_to_σP_balance_mono_Θ`/`Λ` chain
+   for the relational invariant. Discharging from Lean requires
+   exposed `Θ_invariant_preserved` / `Λ_invariant_preserved`
+   framework theorems (currently private inside MutualFrame.lean);
+   bundled here as a structural hypothesis.
 
-The decomposition into structural hypotheses follows Register's
-posture: real-world facts captured precisely, with discharge
-deferred to the relevant framework strengthening pass.
+The body decomposition existence (`σ' = Υ_tail_state σ_P g' A …`)
+is **NOT** a structural hypothesis — it is derived mechanically
+inline by `weth_Υ_body_factors` from inspecting Υ's `.ok` output
+shape, exactly as in Register's `register_Υ_body_factors`.
+
+The remaining decomposition into structural hypotheses follows
+Register's posture: real-world facts captured precisely, with
+discharge deferred to the relevant framework strengthening pass.
 
 ## Top-level theorem composition
 
   WethInv σ C  ∧ DeployedAtC C  ∧ WethSDExclusion ∧ WethDeadAtσP
-              ∧ WethXiPreservesInvariant ∧ WethBodyFactors
-  ────────────────────────────────────────────────────────────  Υ_invariant_preserved
-                  WethInv (Υ σ).σ' C
+              ∧ WethInvAtσP    ∧ ΞPreservesInvariantAtC C
+  ───────────────────────────────────────────────────────  Υ_invariant_preserved
+                    WethInv (Υ σ).σ' C
 -/
 
 namespace EvmSmith.Weth
@@ -257,8 +262,8 @@ Given:
 * `hValid`        — strengthened transaction-validity (sender funds
                     cover gasLimit·p + value).
 * `hAssumptions`  — the `WethAssumptions` bundle (deployed code,
-                    SD-exclusion, dead-at-σP, σ_P-invariant, body
-                    decomposition, at-C Ξ closure witness).
+                    SD-exclusion, dead-at-σP, σ_P-invariant, at-C
+                    Ξ closure witness).
 
 Conclusion: Υ's post-state σ' satisfies `WethInv σ' C` (or Υ
 returned `.error`, in which case the conclusion is vacuous).
