@@ -44,19 +44,16 @@ in `WethAssumptions`:
    `lambda_derived_address_ne_C` rules out CREATE-derivation of `C`.
    Same shape as `RegDeadAtσP`.
 
-4. **`WethXiPreservesInvariant`** — the framework-level
-   `ΞPreservesInvariantAtC C` witness. This captures the at-`C`
-   closure: when `Ξ` runs at `I.codeOwner = C` (executing Weth's
-   bytecode), the relational invariant `storageSum σ C ≤ balanceOf
-   σ C` is preserved. The witness is the load-bearing piece of the
-   solvency proof; it is supplied as a structural hypothesis here
-   to keep the top-level composition Weth-local. Discharging it
-   inside Lean requires the full at-`C` bytecode walk through
-   `ΞPreservesInvariantAtC_of_Reachable_general` (§H.2 entry point
-   in `MutualFrame.lean`), specialised with a per-state slack
-   discharger at PC 72's CALL (`v ≠ 0`, slack from PC 60's SSTORE
-   decrement). The bytecode walk ingredients are in
-   `BytecodeFrame.lean`.
+4. **Bytecode-level closure hypotheses** (`step_closure`,
+   `op_reach`, `sstore_preserves`, `call_slack`) — the
+   `ΞPreservesInvariantAtC C` witness is now derived inline by
+   `bytecodePreservesInvariant` (in `BytecodeFrame.lean`) from these
+   four structural facts. The discharger routes through the
+   framework's `ΞPreservesInvariantAtC_of_Reachable_general_call_dispatch`
+   (the new dispatch entry that allows non-zero CALL via a per-state
+   slack disjunction at PC 72). This replaces the previous opaque
+   `xi_inv : ΞPreservesInvariantAtC C` field with finer per-state
+   bytecode hypotheses.
 
 5. **`WethInvAtσP`** — σ_P (Υ's post-Θ/Λ-dispatch state) preserves
    the relational solvency invariant `storageSum σ_P C ≤ balanceOf
@@ -138,10 +135,13 @@ def WethInvAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
 for the top-level solvency theorem.
 
 Mirror of Register's `(hDeployed, hSDExcl, hDeadAtσP)` triple, with
-two additional Weth-specific hypotheses:
+Weth-specific additions:
 
-* `xi_inv` — the framework-level `ΞPreservesInvariantAtC C` witness.
 * `inv_at_σP` — σ_P preserves the invariant.
+* `step_closure`, `op_reach`, `sstore_preserves`, `call_slack` —
+  the structural bytecode-level hypotheses that derive the framework
+  `ΞPreservesInvariantAtC C` witness via `bytecodePreservesInvariant`
+  (replaces the previous opaque `xi_inv` field).
 
 The decomposition existence (`σ' = Υ_tail_state σ_P g' …`) is
 mechanical and is derived inline by `weth_Υ_body_factors`; combined
@@ -152,16 +152,22 @@ structure WethAssumptions
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
     (S_T C : AccountAddress) : Prop where
   /-- Weth's bytecode is installed at `C`. -/
-  deployed     : DeployedAtC C
+  deployed         : DeployedAtC C
   /-- No SELFDESTRUCT in the run inserts `C` into the SD-set. -/
-  sd_excl      : WethSDExclusion σ fuel H_f H H_gen blocks tx S_T C
+  sd_excl          : WethSDExclusion σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P has `dead σ_P C = false`. -/
-  dead_at_σP   : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
+  dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
-  inv_at_σP    : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- The framework-level at-`C` Ξ closure witness. The load-bearing
-  piece; provided structurally here. -/
-  xi_inv       : ΞPreservesInvariantAtC C
+  inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
+  /-- Non-halt-op trace closure of `WethReachable`. Aggregates the
+  per-PC walks (`WethTrace_step_at_*`). -/
+  step_closure     : WethStepClosure C
+  /-- Reachable Weth ops fall in `WethOpAllowed`. -/
+  op_reach         : WethOpReach C
+  /-- Per-state SSTORE invariant preservation (PCs 40, 60). -/
+  sstore_preserves : WethSStorePreserves C
+  /-- Per-state CALL dispatch at PC 72 (v=0 or recipient ≠ C / slack). -/
+  call_slack       : WethCallSlack C
 
 /-! ## Conversion to framework predicates
 
@@ -262,8 +268,9 @@ Given:
 * `hValid`        — strengthened transaction-validity (sender funds
                     cover gasLimit·p + value).
 * `hAssumptions`  — the `WethAssumptions` bundle (deployed code,
-                    SD-exclusion, dead-at-σP, σ_P-invariant, at-C
-                    Ξ closure witness).
+                    SD-exclusion, dead-at-σP, σ_P-invariant, plus
+                    bytecode-level closure hypotheses for
+                    step / op-classification / SSTORE / CALL).
 
 Conclusion: Υ's post-state σ' satisfies `WethInv σ' C` (or Υ
 returned `.error`, in which case the conclusion is vacuous).
@@ -297,10 +304,16 @@ theorem weth_solvency_invariant
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
+  -- Derive ΞPreservesInvariantAtC C from the bytecode-level structural
+  -- hypotheses via `bytecodePreservesInvariant`.
+  have hXi : ΞPreservesInvariantAtC C :=
+    bytecodePreservesInvariant C hAssumptions.deployed
+      hAssumptions.step_closure hAssumptions.op_reach
+      hAssumptions.sstore_preserves hAssumptions.call_slack
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
-      hWF hInvFr hS_T hBen hAssumptions.xi_inv hTail hFactor
+      hWF hInvFr hS_T hBen hXi hTail hFactor
   -- Re-thread the match: the framework returns WethInvFr; restate as WethInv.
   cases hΥ : EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
   | error _ => trivial
