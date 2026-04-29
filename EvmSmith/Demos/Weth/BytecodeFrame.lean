@@ -2299,6 +2299,98 @@ theorem WethInvFr_of_sstore_erase
     omega
   exact Nat.le_trans hnew_le_old hInv
 
+/-! ### Closed-form bridge: EVM SSTORE-step → `WethInvFr` preservation
+
+The two `WethInvFr_of_sstore_*` lemmas above operate on
+`σ.insert C (acc.updateStorage slot newVal)` — the post-state shape
+of `EvmYul.State.sstore`. To use them on the output of `EVM.step`,
+we need to bridge `s'.accountMap` (EVM step's output) to that shape.
+
+`step_SSTORE_accountMap` does exactly that: given the EVM SSTORE
+step + the pre-state stack shape `(slot :: newVal :: tl)` and the
+`s.accountMap.find? C = some acc` lookup, the post-state's
+`accountMap` is `s.accountMap.insert C (acc.updateStorage slot
+newVal)`. -/
+
+/-- Closed-form post-state `accountMap` shape for an EVM SSTORE step
+at the codeOwner. The two popped values `(slot, newVal)` index the
+storage update: post-state's accountMap inserts `acc.updateStorage
+slot newVal` at the codeOwner. -/
+private theorem step_SSTORE_accountMap
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (slot newVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? s.executionEnv.codeOwner = some acc)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    s'.accountMap
+      = s.accountMap.insert s.executionEnv.codeOwner
+          (acc.updateStorage slot newVal) := by
+  -- Reduce EVM.step to the binaryStateOp dispatch.
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  -- Reduce: s' = ({ s with toState := State.sstore s.toState ... }).replaceStackAndIncrPC tl.
+  -- Its `.accountMap` is the inserted-storage map.
+  simp only [accountMap_replaceStackAndIncrPC]
+  show (EvmYul.State.sstore s.toState slot newVal).accountMap
+       = s.accountMap.insert s.executionEnv.codeOwner
+           (acc.updateStorage slot newVal)
+  unfold EvmYul.State.sstore
+  simp only [EvmYul.State.lookupAccount, h_find, Option.option]
+  -- The remaining transformation: setAccount + addAccessedStorageKey + substate.refundBalance.
+  -- All but setAccount preserve accountMap.
+  rfl
+
+/-- **Closed-form decrement bridge.** Given an EVM SSTORE step at
+the codeOwner with stack `(slot :: newVal :: tl)` where the slot's
+pre-storage value is `oldVal` and `newVal ≤ oldVal` (and `newVal ≠ 0`),
+the post-state preserves `WethInvFr`. -/
+theorem WethInvFr_step_SSTORE_at_C_replace_decr
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (slot newVal oldVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (hCO : C = s.executionEnv.codeOwner)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (h_le  : newVal.toNat ≤ oldVal.toNat)
+    (h_newVal_ne_zero : (newVal == default) = false)
+    (hInv : WethInvFr s.accountMap C)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C := by
+  have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+    rw [← hCO]; exact h_find
+  have h_am := step_SSTORE_accountMap s s' f' cost arg slot newVal tl hStk acc h_find_CO hStep
+  rw [h_am, ← hCO]
+  exact WethInvFr_of_sstore_replace_decr s.accountMap C slot newVal oldVal
+    h_newVal_ne_zero acc h_find h_old h_le hInv
+
+/-- **Closed-form erase bridge.** Given an EVM SSTORE step at the
+codeOwner with stack `(slot :: ⟨0⟩ :: tl)` where the slot's
+pre-storage value is `oldVal`, the post-state preserves `WethInvFr`. -/
+theorem WethInvFr_step_SSTORE_at_C_erase
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (slot oldVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: ⟨0⟩ :: tl)
+    (hCO : C = s.executionEnv.codeOwner)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (hInv : WethInvFr s.accountMap C)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C := by
+  have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+    rw [← hCO]; exact h_find
+  have h_am := step_SSTORE_accountMap s s' f' cost arg slot ⟨0⟩ tl hStk acc h_find_CO hStep
+  rw [h_am, ← hCO]
+  exact WethInvFr_of_sstore_erase s.accountMap C slot oldVal acc h_find h_old hInv
+
 /-! ## §H.2 wiring — `bytecodePreservesInvariant`
 
 Combines the per-PC walks and `WethTrace` predicate with three
