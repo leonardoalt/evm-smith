@@ -2400,6 +2400,571 @@ private theorem WethReachable_of_WethTrace_len_ne_0
     WethReachable C s :=
   ⟨hT, fun ⟨_, h2⟩ => hlen h2⟩
 
+/-! ### PC-narrowing lemmas for SSTORE / CALL
+
+The `WethSStorePreserves` and `WethCallSlack` predicates quantify over
+all reachable states where `fetchInstr` returns SSTORE / CALL. By the
+bytecode walk, the only such states are at PC 40 / 60 (SSTORE) and
+PC 72 (CALL). These narrowing lemmas extract that fact in closed form
+from the `WethReachable` predicate, providing a clean entry point for
+future per-state dischargers (which must then case-split on PC 40 vs
+PC 60 for SSTORE; PC 72 is the unique CALL site).
+
+Both lemmas are pure case-analysis on `WethTrace`'s 64 disjuncts,
+using the per-PC `decode_bytecode_at_*` lemmas to rule out non-SSTORE /
+non-CALL PCs by op-mismatch in `fetchInstr`. -/
+
+/-- A reachable Weth state with `fetchInstr` returning SSTORE has
+`s.pc.toNat = 40 ∨ s.pc.toNat = 60`. Used by `WethSStorePreserves`
+dischargers to narrow the case split to the two SSTORE PCs. -/
+private theorem WethReachable_sstore_pc
+    {C : AccountAddress} {s : EVM.State} {arg : Option (UInt256 × Nat)}
+    (hR : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (.StackMemFlow .SSTORE, arg)) :
+    s.pc.toNat = 40 ∨ s.pc.toNat = 60 := by
+  obtain ⟨⟨_, hCode, hPC⟩, _⟩ := hR
+  unfold fetchInstr at hFetch
+  rw [hCode] at hFetch
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  -- Every disjunct rewrites the PC and the decoded op. SSTORE only at
+  -- PCs 40 and 60. All other disjuncts produce a fetch-decoded op
+  -- inequality (their op is not SSTORE), refuted by `injection`.
+  case _ => -- PC 0
+    rw [pc_eq_ofNat_of_toNat s 0 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_0] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 2
+    rw [pc_eq_ofNat_of_toNat s 2 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_2] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 3
+    rw [pc_eq_ofNat_of_toNat s 3 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_3] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 5
+    rw [pc_eq_ofNat_of_toNat s 5 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_5] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 6
+    rw [pc_eq_ofNat_of_toNat s 6 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_6] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 7
+    rw [pc_eq_ofNat_of_toNat s 7 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_7] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 12
+    rw [pc_eq_ofNat_of_toNat s 12 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_12] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 13
+    rw [pc_eq_ofNat_of_toNat s 13 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_13] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 16
+    rw [pc_eq_ofNat_of_toNat s 16 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_16] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 17
+    rw [pc_eq_ofNat_of_toNat s 17 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_17] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 22
+    rw [pc_eq_ofNat_of_toNat s 22 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_22] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 23
+    rw [pc_eq_ofNat_of_toNat s 23 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_23] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 26
+    rw [pc_eq_ofNat_of_toNat s 26 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_26] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 27
+    rw [pc_eq_ofNat_of_toNat s 27 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_27] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 29
+    rw [pc_eq_ofNat_of_toNat s 29 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_29] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 31 (REVERT)
+    rw [pc_eq_ofNat_of_toNat s 31 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_31] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 32 length 0
+    rw [pc_eq_ofNat_of_toNat s 32 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_32] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 32 length 1
+    rw [pc_eq_ofNat_of_toNat s 32 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_32] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 33
+    rw [pc_eq_ofNat_of_toNat s 33 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_33] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 34
+    rw [pc_eq_ofNat_of_toNat s 34 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_34] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 35
+    rw [pc_eq_ofNat_of_toNat s 35 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_35] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 36
+    rw [pc_eq_ofNat_of_toNat s 36 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_36] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 37
+    rw [pc_eq_ofNat_of_toNat s 37 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_37] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 38
+    rw [pc_eq_ofNat_of_toNat s 38 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_38] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 39
+    rw [pc_eq_ofNat_of_toNat s 39 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_39] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 40 (SSTORE)
+    left; exact hpc
+  case _ => -- PC 41 (STOP)
+    rw [pc_eq_ofNat_of_toNat s 41 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_41] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 42
+    rw [pc_eq_ofNat_of_toNat s 42 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_42] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 43
+    rw [pc_eq_ofNat_of_toNat s 43 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_43] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 45
+    rw [pc_eq_ofNat_of_toNat s 45 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_45] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 46
+    rw [pc_eq_ofNat_of_toNat s 46 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_46] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 47
+    rw [pc_eq_ofNat_of_toNat s 47 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_47] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 48
+    rw [pc_eq_ofNat_of_toNat s 48 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_48] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 49
+    rw [pc_eq_ofNat_of_toNat s 49 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_49] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 50
+    rw [pc_eq_ofNat_of_toNat s 50 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_50] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 51
+    rw [pc_eq_ofNat_of_toNat s 51 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_51] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 52
+    rw [pc_eq_ofNat_of_toNat s 52 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_52] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 55
+    rw [pc_eq_ofNat_of_toNat s 55 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_55] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 56
+    rw [pc_eq_ofNat_of_toNat s 56 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_56] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 57
+    rw [pc_eq_ofNat_of_toNat s 57 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_57] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 58
+    rw [pc_eq_ofNat_of_toNat s 58 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_58] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 59
+    rw [pc_eq_ofNat_of_toNat s 59 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_59] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 60 (SSTORE)
+    right; exact hpc
+  case _ => -- PC 61
+    rw [pc_eq_ofNat_of_toNat s 61 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_61] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 63
+    rw [pc_eq_ofNat_of_toNat s 63 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_63] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 65
+    rw [pc_eq_ofNat_of_toNat s 65 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_65] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 67
+    rw [pc_eq_ofNat_of_toNat s 67 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_67] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 69
+    rw [pc_eq_ofNat_of_toNat s 69 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_69] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 70
+    rw [pc_eq_ofNat_of_toNat s 70 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_70] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 71
+    rw [pc_eq_ofNat_of_toNat s 71 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_71] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 72 (CALL)
+    rw [pc_eq_ofNat_of_toNat s 72 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_72] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 73
+    rw [pc_eq_ofNat_of_toNat s 73 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_73] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 74
+    rw [pc_eq_ofNat_of_toNat s 74 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_74] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 77
+    rw [pc_eq_ofNat_of_toNat s 77 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_77] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 78
+    rw [pc_eq_ofNat_of_toNat s 78 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_78] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 79
+    rw [pc_eq_ofNat_of_toNat s 79 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_79] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 80 length 3
+    rw [pc_eq_ofNat_of_toNat s 80 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_80] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 80 length 1
+    rw [pc_eq_ofNat_of_toNat s 80 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_80] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 81 length 3
+    rw [pc_eq_ofNat_of_toNat s 81 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_81] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 81 length 1
+    rw [pc_eq_ofNat_of_toNat s 81 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_81] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 83 length 4
+    rw [pc_eq_ofNat_of_toNat s 83 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_83] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 83 length 2
+    rw [pc_eq_ofNat_of_toNat s 83 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_83] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 85 length 5
+    rw [pc_eq_ofNat_of_toNat s 85 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_85] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+  case _ => -- PC 85 length 3
+    rw [pc_eq_ofNat_of_toNat s 85 (by decide) hpc] at hFetch
+    rw [decode_bytecode_at_85] at hFetch
+    simp only [Option.option] at hFetch
+    injection hFetch with h1
+    injection h1 with h1 _
+    cases h1
+
+/-- A reachable Weth state with `fetchInstr` returning CALL has
+`s.pc.toNat = 72`. Used by `WethCallSlack` dischargers to fix the
+unique CALL site at PC 72. -/
+private theorem WethReachable_call_pc
+    {C : AccountAddress} {s : EVM.State} {arg : Option (UInt256 × Nat)}
+    (hR : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (.CALL, arg)) :
+    s.pc.toNat = 72 := by
+  obtain ⟨⟨_, hCode, hPC⟩, _⟩ := hR
+  unfold fetchInstr at hFetch
+  rw [hCode] at hFetch
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  -- Every disjunct rewrites the PC and the decoded op. CALL only at
+  -- PC 72. All other disjuncts give a fetch-decoded op inequality.
+  all_goals first
+    | exact hpc
+    | (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch
+       first
+       | rw [decode_bytecode_at_0] at hFetch
+       | rw [decode_bytecode_at_2] at hFetch
+       | rw [decode_bytecode_at_3] at hFetch
+       | rw [decode_bytecode_at_5] at hFetch
+       | rw [decode_bytecode_at_6] at hFetch
+       | rw [decode_bytecode_at_7] at hFetch
+       | rw [decode_bytecode_at_12] at hFetch
+       | rw [decode_bytecode_at_13] at hFetch
+       | rw [decode_bytecode_at_16] at hFetch
+       | rw [decode_bytecode_at_17] at hFetch
+       | rw [decode_bytecode_at_22] at hFetch
+       | rw [decode_bytecode_at_23] at hFetch
+       | rw [decode_bytecode_at_26] at hFetch
+       | rw [decode_bytecode_at_27] at hFetch
+       | rw [decode_bytecode_at_29] at hFetch
+       | rw [decode_bytecode_at_31] at hFetch
+       | rw [decode_bytecode_at_32] at hFetch
+       | rw [decode_bytecode_at_33] at hFetch
+       | rw [decode_bytecode_at_34] at hFetch
+       | rw [decode_bytecode_at_35] at hFetch
+       | rw [decode_bytecode_at_36] at hFetch
+       | rw [decode_bytecode_at_37] at hFetch
+       | rw [decode_bytecode_at_38] at hFetch
+       | rw [decode_bytecode_at_39] at hFetch
+       | rw [decode_bytecode_at_40] at hFetch
+       | rw [decode_bytecode_at_41] at hFetch
+       | rw [decode_bytecode_at_42] at hFetch
+       | rw [decode_bytecode_at_43] at hFetch
+       | rw [decode_bytecode_at_45] at hFetch
+       | rw [decode_bytecode_at_46] at hFetch
+       | rw [decode_bytecode_at_47] at hFetch
+       | rw [decode_bytecode_at_48] at hFetch
+       | rw [decode_bytecode_at_49] at hFetch
+       | rw [decode_bytecode_at_50] at hFetch
+       | rw [decode_bytecode_at_51] at hFetch
+       | rw [decode_bytecode_at_52] at hFetch
+       | rw [decode_bytecode_at_55] at hFetch
+       | rw [decode_bytecode_at_56] at hFetch
+       | rw [decode_bytecode_at_57] at hFetch
+       | rw [decode_bytecode_at_58] at hFetch
+       | rw [decode_bytecode_at_59] at hFetch
+       | rw [decode_bytecode_at_60] at hFetch
+       | rw [decode_bytecode_at_61] at hFetch
+       | rw [decode_bytecode_at_63] at hFetch
+       | rw [decode_bytecode_at_65] at hFetch
+       | rw [decode_bytecode_at_67] at hFetch
+       | rw [decode_bytecode_at_69] at hFetch
+       | rw [decode_bytecode_at_70] at hFetch
+       | rw [decode_bytecode_at_71] at hFetch
+       | rw [decode_bytecode_at_73] at hFetch
+       | rw [decode_bytecode_at_74] at hFetch
+       | rw [decode_bytecode_at_77] at hFetch
+       | rw [decode_bytecode_at_78] at hFetch
+       | rw [decode_bytecode_at_79] at hFetch
+       | rw [decode_bytecode_at_80] at hFetch
+       | rw [decode_bytecode_at_81] at hFetch
+       | rw [decode_bytecode_at_83] at hFetch
+       | rw [decode_bytecode_at_85] at hFetch
+       simp only [Option.option] at hFetch
+       injection hFetch with h1
+       injection h1 with h1 _
+       cases h1)
+
 /-- Per-state SSTORE invariant preservation. At every reachable SSTORE
 state, the post-step `WethInvFr` holds. The two SSTORE PCs in Weth
 are PC 40 (deposit, slot += msg.value) and PC 60 (withdraw, slot −=
