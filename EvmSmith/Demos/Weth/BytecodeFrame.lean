@@ -3161,6 +3161,59 @@ def WethSStorePreserves (C : AccountAddress) : Prop :=
     EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
     WethInvFr s'.accountMap C
 
+/-! ### Conditional discharger for the PC 60 (withdraw decrement) SSTORE case
+
+`WethSStorePreserves_PC60_of_storage_facts` is a closed-form proof of
+the SSTORE invariant-preservation step at PC 60, conditional on the
+storage facts that PC 60's bytecode walk establishes:
+
+* the SSTORE pops `(slot, newVal)` where `slot` is the sender's slot
+  and `newVal = old − x` (the decremented balance);
+* the slot's pre-storage value is `oldVal`;
+* `newVal.toNat ≤ oldVal.toNat` (from PC 51 LT + PC 55 JUMPI not-taken).
+
+The §H.2 walk lands exactly on this shape; the missing piece for
+in-Lean discharge is exposing these per-state facts in `WethReachable`
+at PC 60 (see `SOLVENCY_PLAN.md`'s trace-extension roadmap).
+
+Until trace extension lands, this lemma is the closed-form template
+that the eventual discharger composes; it is ready-to-call once the
+trace exposes the prerequisite facts. -/
+theorem WethSStorePreserves_PC60_decr
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (arg : Option (UInt256 × Nat))
+    (slot newVal oldVal : UInt256) (tl : Stack UInt256)
+    (hCO : C = s.executionEnv.codeOwner)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (h_le : newVal.toNat ≤ oldVal.toNat)
+    (h_newVal_ne_zero : (newVal == default) = false)
+    (hInv : WethInvFr s.accountMap C)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C :=
+  WethInvFr_step_SSTORE_at_C_replace_decr C s s' f' cost arg slot newVal oldVal tl
+    hStk hCO acc h_find h_old h_le h_newVal_ne_zero hInv hStep
+
+/-- Variant for the SSTORE-erase case (`newVal = 0`): closed-form
+preservation at any reachable SSTORE step where the new value is
+zero. Used by Weth (and any contract) for slot-clearing patterns. -/
+theorem WethSStorePreserves_erase
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (arg : Option (UInt256 × Nat))
+    (slot oldVal : UInt256) (tl : Stack UInt256)
+    (hCO : C = s.executionEnv.codeOwner)
+    (hStk : s.stack = slot :: ⟨0⟩ :: tl)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (hInv : WethInvFr s.accountMap C)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C :=
+  WethInvFr_step_SSTORE_at_C_erase C s s' f' cost arg slot oldVal tl
+    hStk hCO acc h_find h_old hInv hStep
+
 /-- Per-state CALL slack precondition at PC 72. Slack-callback form:
 given the seven popped CALL parameters and the residual stack tail,
 supply the three preconditions of `call_invariant_preserved`:
