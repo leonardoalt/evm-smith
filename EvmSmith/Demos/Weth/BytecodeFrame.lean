@@ -990,4 +990,177 @@ private theorem WethTrace_step_at_31
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 31 1
     · rw [hStk']; exact hLenTl
 
+/-! ### PC 32 — `JUMPDEST` (deposit JUMPDEST entry, length=1)
+
+Note: only the length=1 case is walked. The length=0 disjunct is the
+post-PC-31-REVERT halt sink — X has already exited so this state is
+never re-stepped. The aggregate `WethTrace_step_preserves` would also
+need a length=0 case; left as a known gap. -/
+
+private theorem WethTrace_step_at_32
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 32) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 32 := pc_eq_ofNat_of_toNat s 32 (by decide) hpc
+  obtain ⟨hPC', hStk', hEE'⟩ :=
+    step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_32 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 18 right
+  left
+  refine ⟨?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 32 1
+  · rw [hStk']; exact hLen
+
+/-! ### PC 33 — `POP` (deposit: pop selector) -/
+
+private theorem WethTrace_step_at_33
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 33) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 33 := pc_eq_ofNat_of_toNat s 33 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd :: tl, hLen2 =>
+    have hLenTl : tl.length = 0 := by
+      have h1 : (hd :: tl).length = 1 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_POP_at_pc s s' f' cost op arg _ hd tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_33 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 19 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 33 1
+    · rw [hStk']; exact hLenTl
+
+/-! ### PC 34 — `CALLER` (deposit: push sender) -/
+
+private theorem WethTrace_step_at_34
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 34) (hLen : s.stack.length = 0)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 34 := pc_eq_ofNat_of_toNat s 34 (by decide) hpc
+  obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+    step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_34 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 20 right
+  left
+  refine ⟨?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 34 1
+  · rw [hStk']; show (v :: s.stack).length = 1; simp [hLen]
+
+/-! ### PC 35 — `DUP1` (deposit: duplicate sender) -/
+
+private theorem WethTrace_step_at_35
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 35) (hLen : s.stack.length = 1)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 35 := pc_eq_ofNat_of_toNat s 35 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd :: tl, hLen2 =>
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_DUP1_at_pc s s' f' cost op arg _ hd tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_35 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 21 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 35 1
+    · rw [hStk']; show (hd :: s.stack).length = 2; simp [hLen]
+
+/-! ### PC 36 — `SLOAD` (deposit: load balance) -/
+
+private theorem WethTrace_step_at_36
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 36) (hLen : s.stack.length = 2)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 36 := pc_eq_ofNat_of_toNat s 36 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd :: tl, hLen2 =>
+    have hLenTl : tl.length = 1 := by
+      have h1 : (hd :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+      step_SLOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_36 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 22 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 36 1
+    · rw [hStk']; show (v :: tl).length = 2; simp [hLenTl]
+
+/-! ### PC 37 — `CALLVALUE` (deposit: push msg.value) -/
+
+private theorem WethTrace_step_at_37
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 37) (hLen : s.stack.length = 2)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 37 := pc_eq_ofNat_of_toNat s 37 (by decide) hpc
+  obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+    step_CALLVALUE_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_37 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 23 right
+  left
+  refine ⟨?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 37 1
+  · rw [hStk']; show (v :: s.stack).length = 3; simp [hLen]
+
+/-! ### PC 38 — `ADD` (deposit: balance + msg.value) -/
+
+private theorem WethTrace_step_at_38
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 38) (hLen : s.stack.length = 3)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 38 := pc_eq_ofNat_of_toNat s 38 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd1 :: hd2 :: tl, hLen2 =>
+    have hLenTl : tl.length = 1 := by
+      have h1 : (hd1 :: hd2 :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
+      step_ADD_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_38 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    iterate 24 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 38 1
+    · rw [hStk']; show (v :: tl).length = 2; simp [hLenTl]
+
 end EvmSmith.Weth
