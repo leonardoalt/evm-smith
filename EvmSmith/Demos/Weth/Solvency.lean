@@ -44,19 +44,23 @@ in `WethAssumptions`:
    `lambda_derived_address_ne_C` rules out CREATE-derivation of `C`.
    Same shape as `RegDeadAtσP`.
 
-4. **Bytecode-level closure hypotheses** (`sstore_preserves`,
-   `call_slack`) — the `ΞPreservesInvariantAtC C` witness is now
-   derived inline by `bytecodePreservesInvariant` (in
-   `BytecodeFrame.lean`) from these structural facts. The non-halt
-   step closure (formerly the `step_closure` field) is now derived
-   in-Lean by `weth_step_closure` (aggregating the 61 per-PC walks);
-   the op-classification (formerly `op_reach`) is also in-Lean
-   (`WethReachable_op_in_allowed`). The discharger routes through the
-   framework's `ΞPreservesInvariantAtC_of_Reachable_general_call_dispatch`
-   (the new dispatch entry that allows non-zero CALL via a per-state
-   slack disjunction at PC 72). This replaces the previous opaque
-   `xi_inv : ΞPreservesInvariantAtC C` field with finer per-state
-   bytecode hypotheses.
+4. **Bytecode-level cascade-fact hypotheses** (`pc40_cascade`,
+   `pc60_cascade`, `pc72_cascade`) — the `ΞPreservesInvariantAtC C`
+   witness is derived inline by `bytecodePreservesInvariant` (in
+   `BytecodeFrame.lean`) from these structural facts via the
+   `weth_sstore_preserves_from_cascades` and
+   `weth_call_slack_from_cascade` glue lemmas. The non-halt step
+   closure (formerly the `step_closure` field) is derived in-Lean by
+   `weth_step_closure` (aggregating the 61 per-PC walks); the
+   op-classification (formerly `op_reach`) is also in-Lean
+   (`WethReachable_op_in_allowed`). The cascade-fact predicates
+   `WethPC{40,60,72}CascadeFacts` capture exactly the per-PC
+   trace-cascade data needed for the SSTORE / CALL discharge — this
+   refines the previous opaque `WethSStorePreserves` / `WethCallSlack`
+   fields to the precise narrower predicates the trace cascade
+   extension would establish (PC 48 SLOAD → PC 60 SSTORE → PC 72 CALL
+   propagation; see `BytecodeFrame.lean`'s `WethPC60CascadeFacts`
+   docstring for the cascade roadmap).
 
 5. **`WethInvAtσP`** — σ_P (Υ's post-Θ/Λ-dispatch state) preserves
    the relational solvency invariant `storageSum σ_P C ≤ balanceOf
@@ -141,11 +145,17 @@ Mirror of Register's `(hDeployed, hSDExcl, hDeadAtσP)` triple, with
 Weth-specific additions:
 
 * `inv_at_σP` — σ_P preserves the invariant.
-* `sstore_preserves`, `call_slack` — the structural bytecode-level
-  hypotheses that derive the framework `ΞPreservesInvariantAtC C`
-  witness via `bytecodePreservesInvariant` (replaces the previous
-  opaque `xi_inv` field). The non-halt step closure and the
-  op-classification are now discharged in-Lean (`weth_step_closure`,
+* `pc40_cascade`, `pc60_cascade`, `pc72_cascade` — the per-PC
+  cascade-fact predicates (in `BytecodeFrame.lean`) capturing the
+  precise trace-cascade data the SSTORE / CALL dischargers need.
+  These derive `WethSStorePreserves` and `WethCallSlack` via the
+  closed-form glue (`weth_sstore_preserves_from_cascades`,
+  `weth_call_slack_from_cascade`), which then derive
+  `ΞPreservesInvariantAtC C` via `bytecodePreservesInvariant`. This
+  replaces the previous opaque `WethSStorePreserves` / `WethCallSlack`
+  fields with narrower per-PC predicates that match the shape of the
+  pending trace cascade extension. The non-halt step closure and the
+  op-classification are discharged in-Lean (`weth_step_closure`,
   `WethReachable_op_in_allowed`).
 
 The decomposition existence (`σ' = Υ_tail_state σ_P g' …`) is
@@ -164,13 +174,30 @@ structure WethAssumptions
   dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- Per-state SSTORE invariant preservation (PCs 40, 60). -/
-  sstore_preserves : WethSStorePreserves C
-  /-- Per-state CALL slack precondition at PC 72 (slack-callback form:
-  no-wrap + sender funds + slack disjunction; routed through the
-  framework's `_call_slack_dispatch` entry, with IHs threaded
-  internally). -/
-  call_slack       : WethCallSlack C
+  /-- PC 40 deposit-SSTORE cascade-fact predicate: at every Weth-reachable
+  state at PC 40, the trace cascade exposes the slot/value/old-value/
+  Θ-pre-credit slack data needed to discharge the SSTORE invariant
+  preservation step. (Refines the previous `sstore_preserves` field
+  to the precise per-PC cascade-trace data, in the shape the trace
+  cascade extension would establish.) -/
+  pc40_cascade     : WethPC40CascadeFacts C
+  /-- PC 60 withdraw-SSTORE cascade-fact predicate: at every Weth-reachable
+  state at PC 60, the trace cascade exposes the slot/newVal/old-value/
+  ≤-bound data needed to discharge the SSTORE invariant preservation
+  step. (Refines the previous `sstore_preserves` field to the precise
+  per-PC cascade-trace data, in the shape the trace cascade extension
+  would establish from PC 48's SLOAD + PC 51's LT + PC 55's JUMPI
+  not-taken.) -/
+  pc60_cascade     : WethPC60CascadeFacts C
+  /-- PC 72 CALL cascade-fact predicate: at every Weth-reachable state at
+  PC 72 (the unique CALL site), the trace cascade exposes the seven
+  popped CALL parameters plus the no-wrap, funds, and slack disjunctions
+  in a narrower form (without the vacuous recipient-≠-codeOwner clause).
+  (Refines the previous `call_slack` field to the precise per-state
+  cascade-trace data, in the shape the trace cascade extension would
+  establish from PC 60's SSTORE-decrement + PCs 61–71 propagation +
+  PC 70's CALLER push + `weth_caller_ne_C`.) -/
+  pc72_cascade     : WethPC72CascadeFacts C
 
 /-! ## Conversion to framework predicates
 
@@ -272,8 +299,8 @@ Given:
                     cover gasLimit·p + value).
 * `hAssumptions`  — the `WethAssumptions` bundle (deployed code,
                     SD-exclusion, dead-at-σP, σ_P-invariant, plus
-                    bytecode-level closure hypotheses for
-                    step / op-classification / SSTORE / CALL).
+                    per-PC cascade-fact predicates for the PC 40 /
+                    60 SSTORE and PC 72 CALL discharges).
 
 Conclusion: Υ's post-state σ' satisfies `WethInv σ' C` (or Υ
 returned `.error`, in which case the conclusion is vacuous).
@@ -307,13 +334,21 @@ theorem weth_solvency_invariant
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
+  -- Derive the larger SSTORE / CALL closure predicates from the
+  -- narrower per-PC cascade-fact predicates via the closed-form
+  -- glue lemmas (`weth_sstore_preserves_from_cascades`,
+  -- `weth_call_slack_from_cascade`).
+  have hSStore : WethSStorePreserves C :=
+    weth_sstore_preserves_from_cascades C
+      hAssumptions.pc40_cascade hAssumptions.pc60_cascade
+  have hCall : WethCallSlack C :=
+    weth_call_slack_from_cascade C hAssumptions.pc72_cascade
   -- Derive ΞPreservesInvariantAtC C from the bytecode-level structural
   -- hypotheses via `bytecodePreservesInvariant`. The non-halt step
   -- closure is derived in-Lean by `weth_step_closure C` inside the
   -- discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant C hAssumptions.deployed
-      hAssumptions.sstore_preserves hAssumptions.call_slack
+    bytecodePreservesInvariant C hAssumptions.deployed hSStore hCall
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
