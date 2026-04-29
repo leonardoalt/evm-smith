@@ -2467,7 +2467,7 @@ sink is excluded). Each non-halt PC walks to a destination PC ≠ 32
 PCs (31, 41, 79, 85) are ruled out by the op-inequalities. -/
 
 /-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`. -/
-private theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
+theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
   obtain ⟨hT, _hNot⟩ := hR
   have hT' := hT
@@ -3125,16 +3125,17 @@ private theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
 /-- **`bytecodePreservesInvariant` — Weth's bytecode-level §H.2 entry.**
 
 Discharges `ΞPreservesInvariantAtC C` from the deployment witness
-(`hDeployed`) and three structural bytecode hypotheses (step closure,
-SSTORE preservation, CALL dispatch). Used by `weth_solvency_invariant`
-in `Solvency.lean` in place of the opaque `WethAssumptions.xi_inv`
-hypothesis. -/
+(`hDeployed`) and two structural bytecode hypotheses (SSTORE
+preservation and CALL dispatch). The non-halt step closure is derived
+in-Lean by `weth_step_closure C` (aggregating the 61 per-PC walks).
+Used by `weth_solvency_invariant` in `Solvency.lean` in place of the
+opaque `WethAssumptions.xi_inv` hypothesis. -/
 theorem bytecodePreservesInvariant
     (C : AccountAddress) (hDeployed : DeployedAtC C)
-    (hStepClosure : WethStepClosure C)
     (hSStore : WethSStorePreserves C)
     (hCall : WethCallSlack C) :
     ΞPreservesInvariantAtC C := by
+  have hStepClosure : WethStepClosure C := weth_step_closure C
   apply ΞPreservesInvariantAtC_of_Reachable_general_call_dispatch
     WethOpAllowed C (WethReachable C)
   · -- hReach_Z

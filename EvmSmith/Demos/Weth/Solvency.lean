@@ -44,11 +44,14 @@ in `WethAssumptions`:
    `lambda_derived_address_ne_C` rules out CREATE-derivation of `C`.
    Same shape as `RegDeadAtσP`.
 
-4. **Bytecode-level closure hypotheses** (`step_closure`,
-   `op_reach`, `sstore_preserves`, `call_slack`) — the
-   `ΞPreservesInvariantAtC C` witness is now derived inline by
-   `bytecodePreservesInvariant` (in `BytecodeFrame.lean`) from these
-   four structural facts. The discharger routes through the
+4. **Bytecode-level closure hypotheses** (`sstore_preserves`,
+   `call_slack`) — the `ΞPreservesInvariantAtC C` witness is now
+   derived inline by `bytecodePreservesInvariant` (in
+   `BytecodeFrame.lean`) from these structural facts. The non-halt
+   step closure (formerly the `step_closure` field) is now derived
+   in-Lean by `weth_step_closure` (aggregating the 61 per-PC walks);
+   the op-classification (formerly `op_reach`) is also in-Lean
+   (`WethReachable_op_in_allowed`). The discharger routes through the
    framework's `ΞPreservesInvariantAtC_of_Reachable_general_call_dispatch`
    (the new dispatch entry that allows non-zero CALL via a per-state
    slack disjunction at PC 72). This replaces the previous opaque
@@ -138,10 +141,12 @@ Mirror of Register's `(hDeployed, hSDExcl, hDeadAtσP)` triple, with
 Weth-specific additions:
 
 * `inv_at_σP` — σ_P preserves the invariant.
-* `step_closure`, `op_reach`, `sstore_preserves`, `call_slack` —
-  the structural bytecode-level hypotheses that derive the framework
-  `ΞPreservesInvariantAtC C` witness via `bytecodePreservesInvariant`
-  (replaces the previous opaque `xi_inv` field).
+* `sstore_preserves`, `call_slack` — the structural bytecode-level
+  hypotheses that derive the framework `ΞPreservesInvariantAtC C`
+  witness via `bytecodePreservesInvariant` (replaces the previous
+  opaque `xi_inv` field). The non-halt step closure and the
+  op-classification are now discharged in-Lean (`weth_step_closure`,
+  `WethReachable_op_in_allowed`).
 
 The decomposition existence (`σ' = Υ_tail_state σ_P g' …`) is
 mechanical and is derived inline by `weth_Υ_body_factors`; combined
@@ -159,9 +164,6 @@ structure WethAssumptions
   dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- Non-halt-op trace closure of `WethReachable`. Aggregates the
-  per-PC walks (`WethTrace_step_at_*`). -/
-  step_closure     : WethStepClosure C
   /-- Per-state SSTORE invariant preservation (PCs 40, 60). -/
   sstore_preserves : WethSStorePreserves C
   /-- Per-state CALL dispatch at PC 72 (v=0 or recipient ≠ C / slack). -/
@@ -303,10 +305,11 @@ theorem weth_solvency_invariant
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
   -- Derive ΞPreservesInvariantAtC C from the bytecode-level structural
-  -- hypotheses via `bytecodePreservesInvariant`.
+  -- hypotheses via `bytecodePreservesInvariant`. The non-halt step
+  -- closure is derived in-Lean by `weth_step_closure C` inside the
+  -- discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant C hAssumptions.deployed
-      hAssumptions.step_closure
       hAssumptions.sstore_preserves hAssumptions.call_slack
   -- Apply Υ_invariant_preserved.
   have h :=
