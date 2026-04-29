@@ -2371,6 +2371,48 @@ theorem WethInvFr_step_SSTORE_at_C_replace_decr
   exact WethInvFr_of_sstore_replace_decr s.accountMap C slot newVal oldVal
     h_newVal_ne_zero acc h_find h_old h_le hInv
 
+/-- **Closed-form replace bridge with explicit slack.** Given an EVM
+SSTORE step at the codeOwner with stack `(slot :: newVal :: tl)`,
+slot pre-value `oldVal`, and the slack hypothesis
+`storageSum σ C - oldVal.toNat + newVal.toNat ≤ balanceOf σ C`, the
+post-state preserves `WethInvFr`.
+
+Used for the PC 40 (deposit) increment case: `newVal > oldVal` is
+allowed, but the at-`C` Θ-pre-credit slack covers the increment.
+The slack hypothesis is the cascade-fact the deposit-side trace
+extension would establish (Θ pre-credits the at-`C` balance by
+`msg.value`, which exactly equals the SSTORE delta `newVal − oldVal`). -/
+theorem WethInvFr_of_sstore_replace_with_slack
+    (σ : AccountMap .EVM) (C : AccountAddress)
+    (slot newVal oldVal : UInt256)
+    (h_newVal : (newVal == default) = false)
+    (acc : Account .EVM)
+    (h_find : σ.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (h_slack : storageSum σ C - oldVal.toNat + newVal.toNat ≤ balanceOf σ C) :
+    WethInvFr (σ.insert C (acc.updateStorage slot newVal)) C := by
+  unfold WethInvFr
+  -- balanceOf preserved.
+  have h_bal_eq :
+      balanceOf (σ.insert C (acc.updateStorage slot newVal)) C
+        = balanceOf σ C := by
+    apply balanceOf_insert_preserve_of_eq σ C acc _ h_find
+    exact Account_updateStorage_balance _ _ _
+  rw [h_bal_eq]
+  -- storageSum delta: new + oldVal = old + newVal ⇒ new = old + newVal − oldVal.
+  have h_delta := storageSum_sstore_replace_eq σ C slot newVal oldVal
+                    h_newVal acc h_find h_old
+  -- h_old_ge: oldVal.toNat ≤ storageSum σ C (slot is in the sum)
+  have h_old_ge : oldVal.toNat ≤ storageSum σ C := by
+    apply storageSum_old_le σ C slot oldVal
+    rw [h_find]; simp [h_old]
+  -- new = storageSum + newVal − oldVal (∈ ℕ since oldVal ≤ storageSum guarantees no truncation)
+  have h_eq : storageSum (σ.insert C (acc.updateStorage slot newVal)) C
+                = storageSum σ C - oldVal.toNat + newVal.toNat := by
+    omega
+  rw [h_eq]
+  exact h_slack
+
 /-- **Closed-form erase bridge.** Given an EVM SSTORE step at the
 codeOwner with stack `(slot :: ⟨0⟩ :: tl)` where the slot's
 pre-storage value is `oldVal`, the post-state preserves `WethInvFr`. -/
@@ -2390,6 +2432,30 @@ theorem WethInvFr_step_SSTORE_at_C_erase
   have h_am := step_SSTORE_accountMap s s' f' cost arg slot ⟨0⟩ tl hStk acc h_find_CO hStep
   rw [h_am, ← hCO]
   exact WethInvFr_of_sstore_erase s.accountMap C slot oldVal acc h_find h_old hInv
+
+/-- **Closed-form replace-with-slack bridge.** EVM-step version of
+`WethInvFr_of_sstore_replace_with_slack`. -/
+theorem WethInvFr_step_SSTORE_at_C_replace_with_slack
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (arg : Option (UInt256 × Nat))
+    (slot newVal oldVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (hCO : C = s.executionEnv.codeOwner)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (h_slack : storageSum s.accountMap C - oldVal.toNat + newVal.toNat
+                 ≤ balanceOf s.accountMap C)
+    (h_newVal_ne_zero : (newVal == default) = false)
+    (_hInv : WethInvFr s.accountMap C)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C := by
+  have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+    rw [← hCO]; exact h_find
+  have h_am := step_SSTORE_accountMap s s' f' cost arg slot newVal tl hStk acc h_find_CO hStep
+  rw [h_am, ← hCO]
+  exact WethInvFr_of_sstore_replace_with_slack s.accountMap C slot newVal oldVal
+    h_newVal_ne_zero acc h_find h_old h_slack
 
 /-! ## §H.2 wiring — `bytecodePreservesInvariant`
 
@@ -3234,6 +3300,199 @@ theorem WethSStorePreserves_erase
     WethInvFr s'.accountMap C :=
   WethInvFr_step_SSTORE_at_C_erase C s s' f' cost arg slot oldVal tl
     hStk hCO acc h_find h_old hInv hStep
+
+/-! ### Narrower cascade-fact predicates for SSTORE / CALL discharge
+
+The full `WethSStorePreserves` / `WethCallSlack` predicates ask the
+caller to discharge the entire post-step invariant or full slack
+disjunction at every reachable SSTORE/CALL state. With the closed-form
+bridges (`WethSStorePreserves_PC60_decr`, `WethSStorePreserves_erase`,
+the slack-callback's three preconditions), the discharge depends only
+on a small set of **cascade-trace facts** at the trace level:
+
+* **PC 60 (withdraw SSTORE)**: stack shape `[sender_uint, balance−x, x]`,
+  storage[sender_uint] = some `balance`, and `(balance−x).toNat ≤ balance.toNat`.
+* **PC 40 (deposit SSTORE)**: stack shape, storage value, plus the
+  Θ-prefix slack `(balance + x).toNat ≤ acc.balance.toNat`.
+* **PC 72 (CALL)**: stack shape `[gas, to, x, ao, as, ro, rs, x']` with
+  `to = AccountAddress.ofUInt256 sender`, plus the post-PC-60 slack
+  invariant `x.toNat + storageSum σ C ≤ balanceOf σ C`.
+
+The lemmas below define the **narrower per-PC cascade-fact predicates**
+and the **closed-form glue** showing they imply the larger
+`WethSStorePreserves` / `WethCallSlack` shapes. With these in place,
+dropping the bigger structural hypotheses reduces to discharging the
+narrower cascade-fact predicates, which is exactly what trace
+extension (PCs 48→60→72) would establish.
+
+This is the **interface** the trace cascade lands against: the trace
+cascade extension makes these narrower predicates true, and these
+glue lemmas pipe that into the framework's `bytecodePreservesInvariant`. -/
+
+/-- **PC 60 cascade fact predicate.** At every Weth-reachable state at
+PC 60 (the withdraw SSTORE), the trace cascade exposes one of two
+disjuncts:
+
+* **decrement** — non-zero new value: stack `[slot, newVal, …]`,
+  `s.accountMap.find? C = some acc`,
+  `acc.storage.find? slot = some oldVal`,
+  `newVal.toNat ≤ oldVal.toNat`, `(newVal == default) = false`.
+* **erase** — zero new value: stack `[slot, ⟨0⟩, …]`,
+  `s.accountMap.find? C = some acc`,
+  `acc.storage.find? slot = some oldVal`.
+
+Discharged by extending the trace at PCs 48→60: PC 48's SLOAD
+establishes the storage fact; PC 51's LT + PC 55's JUMPI not-taken
+establishes the bound. -/
+def WethPC60CascadeFacts (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 60 →
+    fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) →
+    ∃ (slot : UInt256) (tl : Stack UInt256),
+      ∃ (acc : Account .EVM) (oldVal : UInt256),
+        s.accountMap.find? C = some acc ∧
+        acc.storage.find? slot = some oldVal ∧
+        ((∃ newVal,
+            s.stack = slot :: newVal :: tl ∧
+            newVal.toNat ≤ oldVal.toNat ∧
+            (newVal == default) = false) ∨
+         s.stack = slot :: ⟨0⟩ :: tl)
+
+/-- **PC 40 cascade fact predicate.** At every Weth-reachable state at
+PC 40 (the deposit SSTORE), the trace cascade exposes:
+
+* stack shape `[slot, newVal, …]`,
+* `s.accountMap.find? C = some acc`,
+* `acc.storage.find? slot = some oldVal`,
+* the at-`C` Ξ-pre-state β-credit slack:
+  `storageSum σ C - oldVal.toNat + newVal.toNat ≤ balanceOf σ C`,
+  which combined with the SSTORE-replace law yields the post-step
+  invariant.
+
+Discharged by extending the trace at PCs 32→40 with the Θ-pre-credit
+slack tracked at the Ξ entry point. (This is the "PC 40 deposit" case
+the prior plan flagged as deferable; it requires Θ-side reasoning that
+threads through to `WethReachable`.) -/
+def WethPC40CascadeFacts (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 40 →
+    fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) →
+    ∃ (slot : UInt256) (tl : Stack UInt256),
+      ∃ (acc : Account .EVM) (oldVal : UInt256),
+        s.accountMap.find? C = some acc ∧
+        acc.storage.find? slot = some oldVal ∧
+        ((∃ newVal,
+            s.stack = slot :: newVal :: tl ∧
+            storageSum s.accountMap C - oldVal.toNat + newVal.toNat
+              ≤ balanceOf s.accountMap C ∧
+            (newVal == default) = false) ∨
+         s.stack = slot :: ⟨0⟩ :: tl)
+
+/-- **PC 60 SSTORE preservation from cascade facts.** Closed-form glue:
+given the cascade facts at PC 60, every reachable SSTORE step at PC 60
+preserves the invariant. Composes `WethReachable_sstore_pc` to fix the
+PC, then dispatches between `_replace_decr` and `_erase` based on the
+zero-check on `newVal`. -/
+private theorem weth_sstore_preserves_pc60_from_cascade
+    (C : AccountAddress) (hCascade : WethPC60CascadeFacts C) :
+    ∀ (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat)),
+      WethReachable C s →
+      StateWF s.accountMap →
+      C = s.executionEnv.codeOwner →
+      WethInvFr s.accountMap C →
+      s.pc.toNat = 60 →
+      fetchInstr s.executionEnv s.pc = .ok (.StackMemFlow .SSTORE, arg) →
+      EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
+      WethInvFr s'.accountMap C := by
+  intro s s' f' cost arg hR _hWF hCO hInv hPC60 hFetch hStep
+  -- The decode at PC 60 is SSTORE with arg = none.
+  have hFetchNone : fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) := by
+    obtain ⟨⟨_, hCode, _⟩, _⟩ := hR
+    have hpcEq : s.pc = UInt256.ofNat 60 :=
+      pc_eq_ofNat_of_toNat s 60 (by decide) hPC60
+    unfold fetchInstr
+    rw [hCode, hpcEq, decode_bytecode_at_60]
+    rfl
+  -- The fetched arg matches the decode's none.
+  have hArgNone : arg = none := by
+    rw [hFetchNone] at hFetch
+    injection hFetch with h1
+    injection h1 with _ h2
+    exact h2.symm
+  subst hArgNone
+  -- Pull the cascade facts.
+  obtain ⟨slot, tl, acc, oldVal, h_find, h_old, hCase⟩ :=
+    hCascade s hR hPC60 hFetchNone
+  cases hCase with
+  | inl h =>
+    obtain ⟨newVal, hStk, h_le, hNonZero⟩ := h
+    exact WethSStorePreserves_PC60_decr C s s' f' cost none slot newVal oldVal tl
+      hCO hStk acc h_find h_old h_le hNonZero hInv hStep
+  | inr hStk =>
+    exact WethSStorePreserves_erase C s s' f' cost none slot oldVal tl
+      hCO hStk acc h_find h_old hInv hStep
+
+/-- **PC 40 SSTORE preservation from cascade facts.** Closed-form glue
+for the deposit case. Uses the at-`C` Θ-pre-credit slack to bound the
+post-SSTORE storageSum by the (preserved) balanceOf. -/
+private theorem weth_sstore_preserves_pc40_from_cascade
+    (C : AccountAddress) (hCascade : WethPC40CascadeFacts C) :
+    ∀ (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat)),
+      WethReachable C s →
+      StateWF s.accountMap →
+      C = s.executionEnv.codeOwner →
+      WethInvFr s.accountMap C →
+      s.pc.toNat = 40 →
+      fetchInstr s.executionEnv s.pc = .ok (.StackMemFlow .SSTORE, arg) →
+      EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
+      WethInvFr s'.accountMap C := by
+  intro s s' f' cost arg hR hWF hCO hInv hPC40 hFetch hStep
+  have hFetchNone : fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) := by
+    obtain ⟨⟨_, hCode, _⟩, _⟩ := hR
+    have hpcEq : s.pc = UInt256.ofNat 40 :=
+      pc_eq_ofNat_of_toNat s 40 (by decide) hPC40
+    unfold fetchInstr
+    rw [hCode, hpcEq, decode_bytecode_at_40]
+    rfl
+  have hArgNone : arg = none := by
+    rw [hFetchNone] at hFetch
+    injection hFetch with h1
+    injection h1 with _ h2
+    exact h2.symm
+  subst hArgNone
+  obtain ⟨slot, tl, acc, oldVal, h_find, h_old, hCase⟩ :=
+    hCascade s hR hPC40 hFetchNone
+  cases hCase with
+  | inl h =>
+    obtain ⟨newVal, hStk, h_slack, hNonZero⟩ := h
+    exact WethInvFr_step_SSTORE_at_C_replace_with_slack C s s' f' cost none
+      slot newVal oldVal tl hStk hCO acc h_find h_old h_slack hNonZero hInv hStep
+  | inr hStk =>
+    exact WethSStorePreserves_erase C s s' f' cost none slot oldVal tl
+      hCO hStk acc h_find h_old hInv hStep
+
+/-- **Compose PC 40 + PC 60 cascade-fact predicates into the full
+`WethSStorePreserves`.** Reduces the structural assumption to the
+per-PC cascade predicates `WethPC40CascadeFacts` and
+`WethPC60CascadeFacts`, plus the framework's narrowing
+`WethReachable_sstore_pc`. -/
+theorem weth_sstore_preserves_from_cascades
+    (C : AccountAddress)
+    (h40 : WethPC40CascadeFacts C)
+    (h60 : WethPC60CascadeFacts C) :
+    WethSStorePreserves C := by
+  intro s s' f' cost arg hR hWF hCO hInv hFetch hStep
+  rcases WethReachable_sstore_pc hR hFetch with hPC40 | hPC60
+  · exact weth_sstore_preserves_pc40_from_cascade C h40 s s' f' cost arg
+      hR hWF hCO hInv hPC40 hFetch hStep
+  · exact weth_sstore_preserves_pc60_from_cascade C h60 s s' f' cost arg
+      hR hWF hCO hInv hPC60 hFetch hStep
 
 /-- Per-state CALL slack precondition at PC 72. Slack-callback form:
 given the seven popped CALL parameters and the residual stack tail,
