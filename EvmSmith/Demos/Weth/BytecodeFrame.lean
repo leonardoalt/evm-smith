@@ -2172,4 +2172,58 @@ private theorem WethTrace_step_at_83_len2
   · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 83 2
   · rw [hStk']; show List.length (UInt256.ofNat 0 :: s.stack) = 3; simp [hLen]
 
+/-! ## Closure obligation: initial state
+
+Mirrors Register's `RegisterTrace_initial`: the initial Weth-execution
+state (pc = 0, empty stack) lies in `WethTrace`, given the
+deployment-pinned code-identity witness `DeployedAtC`. -/
+
+/-- **Weth-context code-identity hypothesis.**
+
+`DeployedAtC C` asserts that any `ExecutionEnv` with `codeOwner = C`
+runs Weth's bytecode. Real-world tx contexts satisfy this when:
+
+  * Weth's genesis deployment installed this exact 86-byte code at `C`.
+  * Weth's own bytecode contains no `CREATE`/`CREATE2` opcode, so no
+    nested frame can overwrite code at `C`.
+  * The boundary hypothesis enforced by the consumer (`weth_solvency_invariant`)
+    excludes nested `CREATE`/`CREATE2` from any other contract producing
+    address `C`.
+  * Weth's bytecode contains no `SELFDESTRUCT`, so `C`'s account is
+    never erased (which would otherwise reset its code to empty).
+
+Mirror of Register's `DeployedAtC` predicate. -/
+def DeployedAtC (C : AccountAddress) : Prop :=
+  ∀ I : ExecutionEnv .EVM, I.codeOwner = C → I.code = bytecode
+
+/-- An initial Weth-execution state is `WethTrace`, given the
+deployment-pinned code-identity witness. -/
+private theorem WethTrace_initial
+    (C : AccountAddress)
+    (hDeployed : DeployedAtC C)
+    (cA : Batteries.RBSet AccountAddress compare)
+    (gbh : BlockHeader) (bs : ProcessedBlocks)
+    (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM)
+    (hCO : I.codeOwner = C) :
+    WethTrace C
+      { (default : EVM.State) with
+          accountMap := σ
+          σ₀ := σ₀
+          executionEnv := I
+          substate := A
+          createdAccounts := cA
+          gasAvailable := g
+          blocks := bs
+          genesisBlockHeader := gbh } := by
+  have hCode : I.code = bytecode := hDeployed I hCO
+  refine ⟨hCO.symm, hCode, ?_⟩
+  -- Initial state has pc = 0 and empty stack.
+  left
+  refine ⟨?_, ?_⟩
+  · show (⟨0⟩ : UInt256).toNat = 0
+    decide
+  · show ([] : Stack UInt256).length = 0
+    rfl
+
 end EvmSmith.Weth
