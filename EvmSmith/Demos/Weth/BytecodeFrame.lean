@@ -741,4 +741,58 @@ private theorem WethTrace_step_at_13
     show (depositLbl :: s.stack)[0]? = some depositLbl
     rfl
 
+/-! ### PC 16 — `JUMPI` (deposit dispatch)
+
+Both branches fire: fall-through to PC 17 if EQ flag = 0, taken-branch
+to PC 32 (deposit JUMPDEST) if EQ flag ≠ 0. The taken-branch's
+destination is `depositLbl = 32`, which the trace pins via
+`stack[0]? = some depositLbl` at PC 16. -/
+
+private theorem WethTrace_step_at_16
+    (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (h : WethTrace C s)
+    (hpc : s.pc.toNat = 16) (hLen : s.stack.length = 3)
+    (hStk0 : s.stack[0]? = some depositLbl)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
+    WethTrace C s' := by
+  obtain ⟨hCO, hCode, _⟩ := h
+  have hpcEq : s.pc = UInt256.ofNat 16 := pc_eq_ofNat_of_toNat s 16 (by decide) hpc
+  match hStk_eq : s.stack, hLen with
+  | hd1 :: hd2 :: tl, hLen2 =>
+    have hLenTl : tl.length = 1 := by
+      have h1 : (hd1 :: hd2 :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
+      simpa using h1
+    have hd1_eq : hd1 = depositLbl := by
+      have : (hd1 :: hd2 :: tl)[0]? = some depositLbl := by rw [← hStk_eq]; exact hStk0
+      simpa using this
+    obtain ⟨hPC', hStk', hEE'⟩ :=
+      step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_16 hStep
+    refine mk_wethTrace_aux hCO hCode hEE' ?_
+    -- Bool case-analysis on `hd2 != ⟨0⟩`. UInt256's BEq is derived from
+    -- Fin so it's lawful, but rather than invoke that we just split on
+    -- the Bool.
+    cases hb : (hd2 != ⟨0⟩) with
+    | true =>
+      -- Taken-branch: post-pc = hd1 = depositLbl = 32.
+      iterate 17 right
+      left
+      refine ⟨?_, ?_⟩
+      · rw [hPC']
+        simp only [hb, ↓reduceIte]
+        rw [hd1_eq]; show depositLbl.toNat = 32; rfl
+      · rw [hStk']; exact hLenTl
+    | false =>
+      -- Fall-through: post-pc = s.pc + 1 = 17.
+      iterate 9 right
+      left
+      refine ⟨?_, ?_⟩
+      · rw [hPC']
+        simp only [hb, Bool.false_eq_true, if_false]
+        rw [hpcEq]
+        exact ofNat_add_ofNat_toNat_lt256 16 1
+      · rw [hStk']; exact hLenTl
+
 end EvmSmith.Weth
