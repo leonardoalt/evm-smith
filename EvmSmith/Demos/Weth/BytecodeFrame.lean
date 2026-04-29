@@ -2227,6 +2227,78 @@ private theorem WethTrace_initial
   · show ([] : Stack UInt256).length = 0
     rfl
 
+/-! ## SSTORE-step `WethInvFr` preservation helpers
+
+These lift the `Frame.storageSum_sstore_*_eq` delta laws into clean
+`WethInvFr` preservation lemmas under the SSTORE post-state shape.
+
+The "monotone-decrement" form (PC 60) is fully closed-form: when
+`newVal.toNat ≤ oldVal.toNat`, the post-storageSum at `C` does not
+exceed the pre-storageSum (by `storageSum_sstore_replace_eq` /
+`_erase_eq`), and `sstore` preserves `balanceOf`, so `WethInvFr` is
+preserved verbatim.
+
+The "increment" form (PC 40) needs additional slack from the trace
+shape (the at-`C` Ξ pre-credit of `msg.value`). It's omitted here;
+the `WethSStorePreserves` consumer handles it via per-state
+hypotheses. -/
+
+/-- `WethInvFr` is preserved by an SSTORE-replace at `C` whose new
+value is bounded above by the old value at the slot. The pre-state
+balance is unchanged (sstore doesn't touch balance), so the
+storageSum decrease translates verbatim to invariant preservation. -/
+theorem WethInvFr_of_sstore_replace_decr
+    (σ : AccountMap .EVM) (C : AccountAddress)
+    (slot newVal oldVal : UInt256)
+    (h_newVal : (newVal == default) = false)
+    (acc : Account .EVM)
+    (h_find : σ.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (h_le  : newVal.toNat ≤ oldVal.toNat)
+    (hInv : WethInvFr σ C) :
+    WethInvFr (σ.insert C (acc.updateStorage slot newVal)) C := by
+  unfold WethInvFr at *
+  -- balanceOf is preserved by storage-only updates at `C`.
+  have h_bal_eq :
+      balanceOf (σ.insert C (acc.updateStorage slot newVal)) C
+        = balanceOf σ C := by
+    apply balanceOf_insert_preserve_of_eq σ C acc _ h_find
+    exact Account_updateStorage_balance _ _ _
+  rw [h_bal_eq]
+  -- storageSum delta: new + oldVal = old + newVal ⇒ new = old + newVal − oldVal
+  -- Since newVal ≤ oldVal, the RHS (in ℕ-truncated subtraction) is ≤ old.
+  have h_delta := storageSum_sstore_replace_eq σ C slot newVal oldVal h_newVal
+                    acc h_find h_old
+  -- h_delta : new + oldVal.toNat = old + newVal.toNat.
+  have hnew_le_old : storageSum (σ.insert C (acc.updateStorage slot newVal)) C
+                       ≤ storageSum σ C := by
+    omega
+  exact Nat.le_trans hnew_le_old hInv
+
+/-- `WethInvFr` is preserved by an SSTORE-erase at `C` (equivalently,
+SSTORE with `newVal = 0`). The post-storageSum drops by exactly the
+slot's old value, so it does not exceed the pre-storageSum. -/
+theorem WethInvFr_of_sstore_erase
+    (σ : AccountMap .EVM) (C : AccountAddress) (slot oldVal : UInt256)
+    (acc : Account .EVM)
+    (h_find : σ.find? C = some acc)
+    (h_old : acc.storage.find? slot = some oldVal)
+    (hInv : WethInvFr σ C) :
+    WethInvFr (σ.insert C (acc.updateStorage slot ⟨0⟩)) C := by
+  unfold WethInvFr at *
+  have h_bal_eq :
+      balanceOf (σ.insert C (acc.updateStorage slot ⟨0⟩)) C
+        = balanceOf σ C := by
+    apply balanceOf_insert_preserve_of_eq σ C acc _ h_find
+    exact Account_updateStorage_balance _ _ _
+  rw [h_bal_eq]
+  have h_delta := storageSum_sstore_erase_eq σ C slot oldVal acc h_find h_old
+  -- h_delta : new + oldVal.toNat = old.
+  have hnew_le_old : storageSum (σ.insert C (acc.updateStorage slot ⟨0⟩)) C
+                       ≤ storageSum σ C := by
+    omega
+  exact Nat.le_trans hnew_le_old hInv
+
 /-! ## §H.2 wiring — `bytecodePreservesInvariant`
 
 Combines the per-PC walks and `WethTrace` predicate with three
