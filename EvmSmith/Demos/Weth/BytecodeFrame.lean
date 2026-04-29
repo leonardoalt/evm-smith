@@ -3535,6 +3535,85 @@ def WethCallSlack (C : AccountAddress) : Prop :=
        μ₂.toNat + storageSum s.accountMap C
          ≤ balanceOf s.accountMap C)
 
+/-! ### Narrower PC 72 cascade-fact predicate for CALL slack
+
+Like `WethPC60CascadeFacts` for SSTORE, `WethPC72CascadeFacts` captures
+exactly the per-state data the CALL slack discharger needs at PC 72.
+Once the trace cascade extension lands at PCs 61→72, this predicate
+is the precise discharge target. -/
+
+/-- **PC 72 cascade fact predicate.** At every Weth-reachable state at
+PC 72 (the unique CALL site, per `WethReachable_call_pc`), the trace
+cascade exposes:
+
+* the seven popped CALL parameters: `[gas, to, val, ao, as, ro, rs, x']`
+  (the eighth element is the residual `x'` left over by the SSTORE
+  prefix's stack discipline);
+* `to = AccountAddress.ofUInt256 sender`, with `sender ≠ C` (from
+  `weth_caller_ne_C` + the boundary `C ≠ S_T`);
+* the post-PC-60 SSTORE-decrement slack: `val.toNat + storageSum σ C
+  ≤ balanceOf σ C`;
+* the no-wrap fact: for any recipient account, `balance + val.toNat
+  < UInt256.size` (Weth withdraw caps val at the SLOAD'd balance, so
+  this is bounded by the existing balance + balance ≤ totalETH);
+* the funds fact: the codeOwner-as-AccountAddress account has balance
+  ≥ val.toNat (this comes from the at-`C` invariant `S(σ) ≤ β(σ)`
+  combined with the slack disjunction).
+
+Discharged by extending the trace at PCs 61→72: PC 60's SSTORE
+establishes the slack; PCs 61–71 propagate it; PC 70's CALLER push
+establishes `to = sender`; the no-wrap and funds derive from the
+slack via `WethInvFr` and `StateWF`. -/
+def WethPC72CascadeFacts (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 72 →
+    fetchInstr s.executionEnv s.pc = .ok (.CALL, none) →
+    StateWF s.accountMap →
+    WethInvFr s.accountMap C →
+    ∀ (μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ : UInt256) (tl : Stack UInt256),
+      s.stack = μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: tl →
+      (∀ acc,
+          s.accountMap.find? (AccountAddress.ofUInt256 μ₁) = some acc →
+          acc.balance.toNat + μ₂.toNat < UInt256.size) ∧
+      (μ₂ = ⟨0⟩ ∨ ∃ acc,
+          s.accountMap.find?
+              (AccountAddress.ofUInt256
+                (.ofNat s.executionEnv.codeOwner)) = some acc ∧
+          μ₂.toNat ≤ acc.balance.toNat) ∧
+      (μ₂ = ⟨0⟩ ∨
+       μ₂.toNat + storageSum s.accountMap C
+         ≤ balanceOf s.accountMap C)
+
+/-- **Compose `WethPC72CascadeFacts` into the full `WethCallSlack`.**
+Closed-form glue: at every reachable CALL state, the unique CALL PC is
+72 (per `WethReachable_call_pc`), so the per-PC cascade-fact predicate
+suffices. The third clause of the slack disjunction (`C ≠ ofUInt256
+(ofNat codeOwner) ∨ μ₂=0 ∨ slack`) is discharged from the cascade's
+narrower form by simply weakening to add the recipient-≠-C disjunct. -/
+theorem weth_call_slack_from_cascade
+    (C : AccountAddress) (hCascade : WethPC72CascadeFacts C) :
+    WethCallSlack C := by
+  intro s arg hR hWF hCO _hNC hInv hFetch μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  -- Narrow the PC to 72 via WethReachable_call_pc.
+  have hPC72 : s.pc.toNat = 72 := WethReachable_call_pc hR hFetch
+  -- The decode at PC 72 is CALL with arg = none.
+  have hFetchNone : fetchInstr s.executionEnv s.pc = .ok (.CALL, none) := by
+    obtain ⟨⟨_, hCode, _⟩, _⟩ := hR
+    have hpcEq : s.pc = UInt256.ofNat 72 :=
+      pc_eq_ofNat_of_toNat s 72 (by decide) hPC72
+    unfold fetchInstr
+    rw [hCode, hpcEq, decode_bytecode_at_72]
+    rfl
+  -- Pull the cascade facts.
+  obtain ⟨hNoWrap, hFunds, hSlack⟩ :=
+    hCascade s hR hPC72 hFetchNone hWF hInv μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  refine ⟨hNoWrap, hFunds, ?_⟩
+  -- Convert (μ₂=0 ∨ slack) to (C ≠ … ∨ μ₂=0 ∨ slack) by weakening.
+  cases hSlack with
+  | inl h0 => exact Or.inr (Or.inl h0)
+  | inr hSl => exact Or.inr (Or.inr hSl)
+
 /-- Initial Weth-execution state (pc = 0, empty stack) inhabits
 `WethReachable`, given the deployment-pinned code-identity. -/
 private theorem WethReachable_initial
