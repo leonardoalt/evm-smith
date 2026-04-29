@@ -1,5 +1,6 @@
 import EvmYul.Frame
 import EvmSmith.Demos.Weth.Invariant
+import EvmSmith.Lemmas.RBMapSum
 
 /-!
 # Weth — bytecode-specific Ξ preservation (B2 / §2.x)
