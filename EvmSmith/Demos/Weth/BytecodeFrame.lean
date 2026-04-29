@@ -2297,6 +2297,67 @@ private theorem WethOpAllowed_discharge :
         op' = .StackMemFlow .SSTORE :=
   fun _ h => h
 
+/-- Helper: every op decoded at any Weth PC falls in `WethOpAllowed`.
+This is the closed-form proof of the `WethOpReach` structural
+hypothesis — given any reachable Weth state and the decoded op, the
+op is in the allowed-set. Discharged by case-split on the
+`WethTrace` disjunct + the per-PC decode lemmas + decidability of
+`strictlyPreservesAccountMap` on concrete ops. -/
+private theorem WethReachable_op_in_allowed
+    (C : AccountAddress) (s : EVM.State) (op : Operation .EVM)
+    (arg : Option (UInt256 × Nat))
+    (h : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg)) :
+    WethOpAllowed op := by
+  obtain ⟨⟨_, hCode, hPC⟩, _hNot⟩ := h
+  unfold fetchInstr at hFetch
+  rw [hCode] at hFetch
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch)
+  all_goals
+    simp only [decode_bytecode_at_0, decode_bytecode_at_2,
+      decode_bytecode_at_3, decode_bytecode_at_5, decode_bytecode_at_6,
+      decode_bytecode_at_7, decode_bytecode_at_12, decode_bytecode_at_13,
+      decode_bytecode_at_16, decode_bytecode_at_17, decode_bytecode_at_22,
+      decode_bytecode_at_23, decode_bytecode_at_26, decode_bytecode_at_27,
+      decode_bytecode_at_29, decode_bytecode_at_31, decode_bytecode_at_32,
+      decode_bytecode_at_33, decode_bytecode_at_34, decode_bytecode_at_35,
+      decode_bytecode_at_36, decode_bytecode_at_37, decode_bytecode_at_38,
+      decode_bytecode_at_39, decode_bytecode_at_40, decode_bytecode_at_41,
+      decode_bytecode_at_42, decode_bytecode_at_43, decode_bytecode_at_45,
+      decode_bytecode_at_46, decode_bytecode_at_47, decode_bytecode_at_48,
+      decode_bytecode_at_49, decode_bytecode_at_50, decode_bytecode_at_51,
+      decode_bytecode_at_52, decode_bytecode_at_55, decode_bytecode_at_56,
+      decode_bytecode_at_57, decode_bytecode_at_58, decode_bytecode_at_59,
+      decode_bytecode_at_60, decode_bytecode_at_61, decode_bytecode_at_63,
+      decode_bytecode_at_65, decode_bytecode_at_67, decode_bytecode_at_69,
+      decode_bytecode_at_70, decode_bytecode_at_71, decode_bytecode_at_72,
+      decode_bytecode_at_73, decode_bytecode_at_74, decode_bytecode_at_77,
+      decode_bytecode_at_78, decode_bytecode_at_79, decode_bytecode_at_80,
+      decode_bytecode_at_81, decode_bytecode_at_83, decode_bytecode_at_85] at hFetch
+  all_goals (simp only [Option.option] at hFetch)
+  all_goals (
+    injection hFetch with h1
+    injection h1 with h1 _
+    subst h1)
+  -- 64 goals. Each goal is `WethOpAllowed (specific op)`. Three of the
+  -- ops are CALL (PC 72) and SSTORE (PCs 40, 60); the rest are
+  -- strictlyPreservesAccountMap. We can dispatch via tauto + decide.
+  all_goals first
+    | (right; right; rfl)         -- SSTORE
+    | (right; left; rfl)           -- CALL
+    | (left
+       refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩ <;> intro hh <;>
+         exact absurd hh (by decide))  -- strict (handled ∧ ¬SD ∧ ¬SSTORE ∧ ¬TSTORE)
+
 /-! ## Structural hypotheses (§H.2 closure for Weth's bytecode)
 
 These three predicates capture the load-bearing per-state facts that
@@ -2314,14 +2375,8 @@ def WethStepClosure (C : AccountAddress) : Prop :=
     op ≠ .RETURN → op ≠ .REVERT → op ≠ .STOP → op ≠ .SELFDESTRUCT →
     WethReachable C s'
 
-/-- The bytecode op classification: every reachable Weth-op decodes
-into the `WethOpAllowed` set. Discharged by case-splitting on the
-`WethTrace` disjunct + the per-PC decode lemmas. -/
-def WethOpReach (C : AccountAddress) : Prop :=
-  ∀ s : EVM.State, ∀ op : Operation .EVM, ∀ arg,
-    WethReachable C s →
-    fetchInstr s.executionEnv s.pc = .ok (op, arg) →
-    WethOpAllowed op
+-- (`WethOpReach` removed: discharged in-Lean by
+-- `WethReachable_op_in_allowed` above.)
 
 /-- Per-state SSTORE invariant preservation. At every reachable SSTORE
 state, the post-step `WethInvFr` holds. The two SSTORE PCs in Weth
@@ -2392,7 +2447,6 @@ hypothesis. -/
 theorem bytecodePreservesInvariant
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hStepClosure : WethStepClosure C)
-    (hOpReach : WethOpReach C)
     (hSStore : WethSStorePreserves C)
     (hCall : WethCallSlack C) :
     ΞPreservesInvariantAtC C := by
@@ -2407,9 +2461,9 @@ theorem bytecodePreservesInvariant
   · -- hReach_decodeSome
     intro s h
     exact WethReachable_decodeSome C s h
-  · -- hReach_op
+  · -- hReach_op (discharged in-Lean by WethReachable_op_in_allowed)
     intro s op arg hR hFetch
-    exact hOpReach s op arg hR hFetch
+    exact WethReachable_op_in_allowed C s op arg hR hFetch
   · -- hDischarge
     exact WethOpAllowed_discharge
   · -- hReach_call

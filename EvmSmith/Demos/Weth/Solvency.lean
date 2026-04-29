@@ -162,8 +162,6 @@ structure WethAssumptions
   /-- Non-halt-op trace closure of `WethReachable`. Aggregates the
   per-PC walks (`WethTrace_step_at_*`). -/
   step_closure     : WethStepClosure C
-  /-- Reachable Weth ops fall in `WethOpAllowed`. -/
-  op_reach         : WethOpReach C
   /-- Per-state SSTORE invariant preservation (PCs 40, 60). -/
   sstore_preserves : WethSStorePreserves C
   /-- Per-state CALL dispatch at PC 72 (v=0 or recipient ≠ C / slack). -/
@@ -308,7 +306,7 @@ theorem weth_solvency_invariant
   -- hypotheses via `bytecodePreservesInvariant`.
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant C hAssumptions.deployed
-      hAssumptions.step_closure hAssumptions.op_reach
+      hAssumptions.step_closure
       hAssumptions.sstore_preserves hAssumptions.call_slack
   -- Apply Υ_invariant_preserved.
   have h :=
