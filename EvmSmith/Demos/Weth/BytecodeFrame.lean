@@ -2257,6 +2257,22 @@ The three structural hypotheses are the **load-bearing pieces**:
   recipient ≠ C disjunct discharges via `weth_caller_ne_C`. The IHs
   are threaded internally — the consumer never sees them.
 
+The narrowing lemmas `WethReachable_sstore_pc` (PCs 40, 60) and
+`WethReachable_call_pc` (PC 72) reduce per-state case analysis to
+the single-PC discharge form. The remaining work to drop these two
+hypotheses from `WethAssumptions` is:
+
+  1. Extend `EVMYulLean/.../StorageSum.lean` with the SSTORE delta
+     bounds (`storageSum_sstore_decrement` / `_increment`). These
+     require multiset-level reasoning over the RBMap toList, lifting
+     the membership-level `mem_toList_insert` characterisation.
+  2. Thread the trace at PCs 40 / 60 / 72 to expose the load-bearing
+     stack-shape facts (sender uint at stack[0]?/stack[1]?, slot's
+     old value, x ≤ balance from the PC 51 LT + PC 55 JUMPI not-taken
+     branch). These feed the slack-disjunction's third clause.
+  3. Compose 1 + 2 to discharge `WethSStorePreserves` and
+     `WethCallSlack` via case-split on the narrowing lemmas.
+
 Together with the deployment witness (`hDeployed`), these reduce
 `ΞPreservesInvariantAtC C` to a closed-form Lean proof, eliminating
 the need for the opaque `WethAssumptions.xi_inv` hypothesis. -/
