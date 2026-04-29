@@ -118,4 +118,41 @@ theorem WethInv_balance_increase_at_C
   rw [h_bal_old] at hInv
   exact Nat.le_trans hInv hBal
 
+/-! ## §2.2 — Storage layout: `addressSlot`
+
+A user `a`'s token-balance slot in Weth's storage is the 20-byte
+address zero-extended to 32 bytes — i.e. Solidity's
+`mapping(address => uint256)` layout for a single mapping at slot 0.
+
+`addressSlot_injective` is what powers the storage-sum reasoning:
+two distinct user addresses occupy two distinct storage slots, so
+the per-user contribution to `storageSum σ C` is unambiguous. -/
+
+/-- A user `a`'s token-balance slot. -/
+def addressSlot (a : AccountAddress) : UInt256 := UInt256.ofNat a.val
+
+/-- `addressSlot` is injective. Proof: for `a, b : AccountAddress` we
+have `a.val, b.val < AccountAddress.size = 2^160 < UInt256.size = 2^256`,
+so `UInt256.ofNat a.val = UInt256.ofNat b.val` implies `a.val = b.val`
+by `Nat.mod_eq_of_lt`, hence `a = b` by `Fin.ext`. -/
+theorem addressSlot_injective : Function.Injective addressSlot := by
+  intro a b h
+  -- Unfold addressSlot.
+  unfold addressSlot at h
+  -- Project both sides through .val.val to get a.val = b.val (mod UInt256.size).
+  have hUnf : (UInt256.ofNat a.val).val.val = (UInt256.ofNat b.val).val.val := by
+    rw [h]
+  -- The .ofNat reduction.
+  have hA : (UInt256.ofNat a.val).val.val = a.val % UInt256.size := rfl
+  have hB : (UInt256.ofNat b.val).val.val = b.val % UInt256.size := rfl
+  rw [hA, hB] at hUnf
+  -- a.val < 2^160 < 2^256.
+  have hAddrLtUSize : AccountAddress.size ≤ UInt256.size := by
+    unfold AccountAddress.size UInt256.size; decide
+  have hAlt : a.val < UInt256.size := Nat.lt_of_lt_of_le a.isLt hAddrLtUSize
+  have hBlt : b.val < UInt256.size := Nat.lt_of_lt_of_le b.isLt hAddrLtUSize
+  rw [Nat.mod_eq_of_lt hAlt, Nat.mod_eq_of_lt hBlt] at hUnf
+  -- Now hUnf : a.val = b.val. Lift to Fin equality.
+  exact Fin.ext hUnf
+
 end EvmSmith.Weth
