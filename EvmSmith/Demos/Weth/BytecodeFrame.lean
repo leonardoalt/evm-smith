@@ -2492,38 +2492,41 @@ The narrowing lemmas `WethReachable_sstore_pc` (PCs 40, 60) and
 `WethReachable_call_pc` (PC 72) reduce per-state case analysis to
 the single-PC discharge form. **The framework SSTORE-delta laws
 (`storageSum_sstore_replace_eq`, `storageSum_sstore_erase_eq`) are
-already closed-form**, and the **EVM-step bridges**
-(`WethInvFr_step_SSTORE_at_C_replace_decr`, `_erase`) compose them
-with the SSTORE step shape. The remaining work to drop these two
-hypotheses from `WethAssumptions` is:
+closed-form**, the **EVM-step bridges**
+(`WethInvFr_step_SSTORE_at_C_replace_decr`, `_erase`,
+`_replace_with_slack`) compose them with the SSTORE step shape, and
+the **per-PC cascade-fact predicates**
+(`WethPC{40,60,72}CascadeFacts`) capture the precise per-state
+trace-cascade data the dischargers need. The closed-form glue lemmas
+(`weth_sstore_preserves_pc60_from_cascade`,
+`weth_sstore_preserves_pc40_from_cascade`,
+`weth_sstore_preserves_from_cascades`,
+`weth_call_slack_from_cascade`) compose these into the larger
+`WethSStorePreserves` / `WethCallSlack` shapes.
 
-  1. **Trace cascade for SSTORE storage facts**: PC 60's discharge
-     requires knowing `acc.storage.find? slot = some old` and
-     `newVal.toNat ≤ old.toNat`. The SLOAD at PC 48 establishes the
-     storage fact; carrying it forward through the 12 intermediate
-     steps (PCs 49–59) requires extending each disjunct with a
-     `(σ.find? C).bind (·.storage.find? slot) = some oldVal` clause
-     (preserved by all non-SSTORE steps). The walks landing on these
-     PCs (~12 of them) must establish the new clause; downstream
-     consumers (aggregate `weth_step_closure`, narrowing lemmas) must
-     handle it.
-  2. **Trace cascade for SSTORE arithmetic facts**: at PC 60 we need
-     `x ≤ balance` (UInt256). The PC 51 LT + PC 55 JUMPI not-taken
-     fall-through establishes this; carrying it forward is similar to
-     (1).
-  3. **PC 40 (deposit) increment slack**: at PC 40 we need
-     `S(C) + msg.value ≤ β(C)`. This isn't local to the trace — it
-     comes from Θ's pre-credit at the Ξ entry point. Threading
-     requires lifting the at-`C` Ξ pre-state's β-credit through to
-     the `WethReachable` predicate.
-  4. **PC 72 (CALL) slack**: requires the SSTORE-decrement fact at
-     PC 60 propagated through the 12 intermediate steps (PCs 61–71).
-     Same cascade pattern as (1).
+The convenience entry `bytecodePreservesInvariant_from_cascades`
+discharges `ΞPreservesInvariantAtC C` directly from the deployment
+witness + the three per-PC cascade-fact predicates — this is what
+`WethAssumptions` consumes via `pc40_cascade`, `pc60_cascade`,
+`pc72_cascade`.
 
-The closed-form templates `WethSStorePreserves_PC60_decr`,
-`WethSStorePreserves_erase` are ready-to-call once (1)+(2) land.
-The PC 40 case (3) requires additional Θ-side reasoning. The PC 72
-case (4) reuses (1) and is straightforward once that's in place.
+The **remaining work** to fully discharge `WethAssumptions`'s
+cascade-fact predicates inside Lean is the **trace extension**:
+
+  1. **PC 60 storage cascade**: the trace at PCs 48→60 needs to
+     carry `(σ.find? C).bind (·.storage.find? slot) = some oldVal`
+     through the 12 intermediate steps (PCs 49–59). PC 48's SLOAD
+     establishes it; non-SSTORE steps preserve it.
+  2. **PC 60 arithmetic cascade**: the trace at PCs 51→60 needs to
+     carry `newVal.toNat ≤ oldVal.toNat`. PC 51's LT + PC 55's JUMPI
+     not-taken establishes it; non-arithmetic steps preserve it.
+  3. **PC 72 slack cascade**: the trace at PCs 60→72 needs to carry
+     the post-SSTORE slack `μ₂.toNat + storageSum ≤ balanceOf` plus
+     the recipient-as-sender witness from PC 70's CALLER. Both
+     propagate through PCs 61–71.
+  4. **PC 40 deposit cascade** (deferable): needs Θ-pre-credit slack
+     `storageSum - oldVal + newVal ≤ balanceOf`. Threading requires
+     lifting the at-`C` Ξ pre-state's β-credit through the trace.
 
 Together with the deployment witness (`hDeployed`), these reduce
 `ΞPreservesInvariantAtC C` to a closed-form Lean proof, eliminating
