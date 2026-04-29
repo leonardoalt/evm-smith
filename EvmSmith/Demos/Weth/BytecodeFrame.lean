@@ -2412,23 +2412,46 @@ def WethSStorePreserves (C : AccountAddress) : Prop :=
     EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
     WethInvFr s'.accountMap C
 
-/-- Per-state CALL slack/dispatch at PC 72. Either the call is at
-`v=0` (route through the existing v=0 helper), or the recipient
-≠ C / slack from PC 60's SSTORE-decrement holds, in which case the
-post-CALL bundle is derivable via `call_invariant_preserved`. -/
+/-- Per-state CALL slack precondition at PC 72. Slack-callback form:
+given the seven popped CALL parameters and the residual stack tail,
+supply the three preconditions of `call_invariant_preserved`:
+* `no-wrap`: recipient balance + value < UInt256.size,
+* `funds`: sender funds cover value (or value = 0),
+* `slack`: at-`C` debit safety (recipient ≠ C ∨ value = 0 ∨
+  value + storageSum σ C ≤ balanceOf σ C).
+
+The slack inequality at PC 72 follows from PC 60's SSTORE-decrement
+fact (the slot was decremented by `x` which is exactly the CALL value),
+combined with `WethInvFr` (storageSum ≤ balanceOf). The recipient ≠ C
+disjunct is satisfied by `weth_caller_ne_C` (the recipient is the
+caller, who differs from C by the boundary hypothesis `C ≠ S_T`).
+
+The IHs `ΞInvariantAtCFrame`/`ΞInvariantFrameAtC` are threaded
+internally by the framework's `step_CALL_arm_at_C_slack_invariant` —
+the consumer never sees them. -/
 def WethCallSlack (C : AccountAddress) : Prop :=
-  ∀ s s' : EVM.State, ∀ f' cost : ℕ, ∀ arg,
+  ∀ s : EVM.State, ∀ arg,
     WethReachable C s →
     StateWF s.accountMap →
     C = s.executionEnv.codeOwner →
     (∀ a ∈ s.createdAccounts, a ≠ C) →
     WethInvFr s.accountMap C →
     fetchInstr s.executionEnv s.pc = .ok (.CALL, arg) →
-    EVM.step (f' + 1) cost (some (.CALL, arg)) s = .ok s' →
-    s.stack[2]? = some ⟨0⟩ ∨
-    (WethInvFr s'.accountMap C ∧ StateWF s'.accountMap ∧
-     C = s'.executionEnv.codeOwner ∧
-     (∀ a ∈ s'.createdAccounts, a ≠ C))
+    ∀ (μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ : UInt256) (tl : Stack UInt256),
+      s.stack = μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: tl →
+      (∀ acc,
+          s.accountMap.find? (AccountAddress.ofUInt256 μ₁) = some acc →
+          acc.balance.toNat + μ₂.toNat < UInt256.size) ∧
+      (μ₂ = ⟨0⟩ ∨ ∃ acc,
+          s.accountMap.find?
+              (AccountAddress.ofUInt256
+                (.ofNat s.executionEnv.codeOwner)) = some acc ∧
+          μ₂.toNat ≤ acc.balance.toNat) ∧
+      (C ≠ AccountAddress.ofUInt256
+              (.ofNat s.executionEnv.codeOwner) ∨
+       μ₂ = ⟨0⟩ ∨
+       μ₂.toNat + storageSum s.accountMap C
+         ≤ balanceOf s.accountMap C)
 
 /-- Initial Weth-execution state (pc = 0, empty stack) inhabits
 `WethReachable`, given the deployment-pinned code-identity. -/
@@ -3136,7 +3159,7 @@ theorem bytecodePreservesInvariant
     (hCall : WethCallSlack C) :
     ΞPreservesInvariantAtC C := by
   have hStepClosure : WethStepClosure C := weth_step_closure C
-  apply ΞPreservesInvariantAtC_of_Reachable_general_call_dispatch
+  apply ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch
     WethOpAllowed C (WethReachable C)
   · -- hReach_Z
     intro s g h
@@ -3152,9 +3175,9 @@ theorem bytecodePreservesInvariant
     exact WethReachable_op_in_allowed C s op arg hR hFetch
   · -- hDischarge
     exact WethOpAllowed_discharge
-  · -- hReach_call
-    intro s s' f' cost arg hR hWF hCO hNC hInv hFetch hStep
-    exact hCall s s' f' cost arg hR hWF hCO hNC hInv hFetch hStep
+  · -- hReach_call_slack (slack-callback form)
+    intro s arg hR hWF hCO hNC hInv hFetch μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+    exact hCall s arg hR hWF hCO hNC hInv hFetch μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
   · -- hReach_sstore
     intro s s' f' cost arg hR hWF hCO hInv hFetch hStep
     exact hSStore s s' f' cost arg hR hWF hCO hInv hFetch hStep
