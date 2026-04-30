@@ -180,19 +180,17 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
                   (Account.lookupStorage (k := slot)) ∧
        x.toNat ≤ oldVal.toNat) ∨
    (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧
-     (∃ slot oldVal newVal x : UInt256,
-        s.stack[0]? = some slot ∧
-        s.stack[1]? = some newVal ∧
-        s.stack[2]? = some x ∧
-        newVal.toNat ≤ oldVal.toNat)) ∨
-     -- pre-SSTORE [sender; newBal; x]; the existential carries cascade-bound
-     -- witnesses. The stack-position triple (slot, newVal, x) is established
-     -- by PC 59's SWAP1 from the PC 58 SUB output. The `newVal ≤ oldVal`
-     -- bound is currently trivially witnessed (oldVal := newVal); future
-     -- upstream-walk threading from PCs 48 (SLOAD-strong) / 51 (LT-strong) /
-     -- 58 (SUB-strong) replaces this with the real
-     -- (sender_slot, stored_balance, stored_balance − x) trio carrying the
-     -- LT-not-taken bound `x ≤ balance`.
+     ∃ slot oldVal x : UInt256,
+       s.stack = slot :: UInt256.sub oldVal x :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat) ∨
+     -- pre-SSTORE [slot; newVal; x]; the cascade exposes
+     -- (slot, oldVal=SLOAD slot at C, x=withdrawal amount) with the
+     -- bound x ≤ oldVal established by the LT-not-taken at PC 55.
+     -- newVal = UInt256.sub oldVal x is the post-SUB result (balance −
+     -- x). The cascade is threaded forward from PC 49's SLOAD-strong
+     -- result through PCs 49..59 walks.
   -- Withdraw block CALL setup (PCs 61..79).
    (s.pc.toNat = 61 ∧ s.stack.length = 1) ∨   -- post-SSTORE [x]
    (s.pc.toNat = 63 ∧ s.stack.length = 2) ∨
@@ -693,11 +691,11 @@ private theorem mk_wethTrace_aux
                       (Account.lookupStorage (k := slot)) ∧
            x.toNat ≤ oldVal.toNat) ∨
        (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧
-         (∃ slot oldVal newVal x : UInt256,
-            s'.stack[0]? = some slot ∧
-            s'.stack[1]? = some newVal ∧
-            s'.stack[2]? = some x ∧
-            newVal.toNat ≤ oldVal.toNat)) ∨
+         ∃ slot oldVal x : UInt256,
+           s'.stack = slot :: UInt256.sub oldVal x :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot)) ∧
+           x.toNat ≤ oldVal.toNat) ∨
        (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
        (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
@@ -1870,38 +1868,31 @@ private theorem WethTrace_step_at_59
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 59) (hLen : s.stack.length = 3)
+    (hCascade59 : ∃ slot oldVal x : UInt256,
+       s.stack = UInt256.sub oldVal x :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 59 := pc_eq_ofNat_of_toNat s 59 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: tl, hLen2 =>
-    have hLenTl : tl.length = 1 := by
-      have h1 : (hd1 :: hd2 :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
-      simpa using h1
-    obtain ⟨hPC', hStk', hEE'⟩ :=
-      step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_59 hStep
-    -- Extract the unique tail element (length 1) for the stack[2]? witness.
-    match htl : tl, hLenTl with
-    | [x_tail], _ =>
-      refine mk_wethTrace_aux hCO hCode hEE' ?_
-      iterate 42 right
-      left
-      refine ⟨?_, ?_, ?_⟩
-      · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
-      · rw [hStk']; show (hd2 :: hd1 :: [x_tail]).length = 3; simp
-      · -- Stack-position witnesses: slot = hd2 (the SWAP1-promoted second-from-top,
-        -- = the original sender), newVal = hd1 (the SWAP1-demoted top, = balance − x),
-        -- x = the unique tail element. The bound `newVal ≤ oldVal` is currently
-        -- trivially witnessed (oldVal := newVal) — future upstream threading from
-        -- PCs 48 (SLOAD-strong) / 51 (LT-strong) / 58 (SUB-strong) replaces this
-        -- with the real LT-not-taken bound `x ≤ balance` propagated through SUB.
-        refine ⟨hd2, hd1, hd1, x_tail, ?_, ?_, ?_, Nat.le_refl _⟩
-        · rw [hStk']; rfl
-        · rw [hStk']; rfl
-        · rw [hStk']; rfl
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal, hBound⟩ := hCascade59
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_SWAP1_at_pc_strong s s' f' cost op arg _
+      (UInt256.sub oldVal x) slot (x :: []) hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_59 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 42 right
+  left
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
+  · rw [hStk']; rfl
+  · refine ⟨slot, oldVal, x, ?_, ?_, hBound⟩
+    · rw [hStk']
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 60 — `SSTORE` (withdraw: write decremented `storage[sender]`)
 
@@ -4352,7 +4343,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   -- Case PC=59 (SWAP1). Lands at PC=60 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 59 := pc_eq_ofNat_of_toNat s 59 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_59 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_59 C s s' f' cost op arg hT' hpc hLen hCascade59 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
