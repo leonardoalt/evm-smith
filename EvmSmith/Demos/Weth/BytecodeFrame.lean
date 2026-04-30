@@ -117,11 +117,27 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 33 ∧ s.stack.length = 1) ∨
    (s.pc.toNat = 34 ∧ s.stack.length = 0) ∨
    (s.pc.toNat = 35 ∧ s.stack.length = 1) ∨
-   (s.pc.toNat = 36 ∧ s.stack.length = 2) ∨
-   (s.pc.toNat = 37 ∧ s.stack.length = 2) ∨
-   (s.pc.toNat = 38 ∧ s.stack.length = 3) ∨
-   (s.pc.toNat = 39 ∧ s.stack.length = 2) ∨
-   (s.pc.toNat = 40 ∧ s.stack.length = 2) ∨
+   (s.pc.toNat = 36 ∧ s.stack.length = 2 ∧ s.stack[0]? = s.stack[1]?) ∨
+   (s.pc.toNat = 37 ∧ s.stack.length = 2 ∧
+     ∃ slot oldVal : UInt256,
+       s.stack = oldVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
+   (s.pc.toNat = 38 ∧ s.stack.length = 3 ∧
+     ∃ slot oldVal v : UInt256,
+       s.stack = v :: oldVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
+   (s.pc.toNat = 39 ∧ s.stack.length = 2 ∧
+     ∃ slot oldVal newVal : UInt256,
+       s.stack = newVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
+   (s.pc.toNat = 40 ∧ s.stack.length = 2 ∧
+     ∃ slot oldVal newVal : UInt256,
+       s.stack = slot :: newVal :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
    (s.pc.toNat = 41 ∧ s.stack.length = 0) ∨   -- post-SSTORE; STOP next
   -- Withdraw block prefix (PCs 42..60), entered from PC 26 JUMPI taken.
    (s.pc.toNat = 42 ∧ s.stack.length = 0) ∨   -- JUMPDEST
@@ -544,8 +560,8 @@ private theorem WethTrace_decodeSome
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
@@ -629,11 +645,27 @@ private theorem mk_wethTrace_aux
        (s'.pc.toNat = 33 ∧ s'.stack.length = 1) ∨
        (s'.pc.toNat = 34 ∧ s'.stack.length = 0) ∨
        (s'.pc.toNat = 35 ∧ s'.stack.length = 1) ∨
-       (s'.pc.toNat = 36 ∧ s'.stack.length = 2) ∨
-       (s'.pc.toNat = 37 ∧ s'.stack.length = 2) ∨
-       (s'.pc.toNat = 38 ∧ s'.stack.length = 3) ∨
-       (s'.pc.toNat = 39 ∧ s'.stack.length = 2) ∨
-       (s'.pc.toNat = 40 ∧ s'.stack.length = 2) ∨
+       (s'.pc.toNat = 36 ∧ s'.stack.length = 2 ∧ s'.stack[0]? = s'.stack[1]?) ∨
+       (s'.pc.toNat = 37 ∧ s'.stack.length = 2 ∧
+         ∃ slot oldVal : UInt256,
+           s'.stack = oldVal :: slot :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
+       (s'.pc.toNat = 38 ∧ s'.stack.length = 3 ∧
+         ∃ slot oldVal v : UInt256,
+           s'.stack = v :: oldVal :: slot :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
+       (s'.pc.toNat = 39 ∧ s'.stack.length = 2 ∧
+         ∃ slot oldVal newVal : UInt256,
+           s'.stack = newVal :: slot :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
+       (s'.pc.toNat = 40 ∧ s'.stack.length = 2 ∧
+         ∃ slot oldVal newVal : UInt256,
+           s'.stack = slot :: newVal :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
        (s'.pc.toNat = 41 ∧ s'.stack.length = 0) ∨
        (s'.pc.toNat = 42 ∧ s'.stack.length = 0) ∨
        (s'.pc.toNat = 43 ∧ s'.stack.length = 0) ∨
@@ -1262,9 +1294,11 @@ private theorem WethTrace_step_at_35
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 21 right
     left
-    refine ⟨?_, ?_⟩
+    refine ⟨?_, ?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 35 1
     · rw [hStk']; show (hd :: s.stack).length = 2; simp [hLen]
+    · -- DUP1 invariant: post-state's top two stack elements are equal.
+      rw [hStk', hStk_eq]; rfl
 
 /-! ### PC 36 — `SLOAD` (deposit: load balance) -/
 
@@ -1273,25 +1307,41 @@ private theorem WethTrace_step_at_36
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 36) (hLen : s.stack.length = 2)
+    (hStk01 : s.stack[0]? = s.stack[1]?)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 36 := pc_eq_ofNat_of_toNat s 36 (by decide) hpc
   match hStk_eq : s.stack, hLen with
-  | hd :: tl, hLen2 =>
-    have hLenTl : tl.length = 1 := by
-      have h1 : (hd :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
-      simpa using h1
-    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-      step_SLOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+  | hd :: t1 :: [], _ =>
+    -- DUP1 invariant: stack[0] = stack[1] pre-SLOAD, so the slot
+    -- popped by SLOAD also lives at the new top's tail head.
+    have hHd_eq_t1 : hd = t1 := by
+      have h0 : s.stack[0]? = some hd := by rw [hStk_eq]; rfl
+      have h1 : s.stack[1]? = some t1 := by rw [hStk_eq]; rfl
+      rw [h0] at hStk01
+      rw [h1] at hStk01
+      exact Option.some.inj hStk01
+    -- Use the strong wrapper: exposes the pushed value as the
+    -- storage lookup at the contract's own address.
+    obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+      step_SLOAD_at_pc_strong s s' f' cost op arg _ hd (t1 :: []) hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_36 hStep
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 22 right
     left
-    refine ⟨?_, ?_⟩
+    refine ⟨?_, ?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 36 1
-    · rw [hStk']; show (v :: tl).length = 2; simp [hLenTl]
+    · rw [hStk']; rfl
+    · refine ⟨t1,
+              (s.lookupAccount s.executionEnv.codeOwner).option ⟨0⟩
+                (Account.lookupStorage (k := hd)), ?_, ?_⟩
+      · -- Goal: s'.stack = oldVal :: slot :: [].
+        rw [hStk']
+      · -- Goal: oldVal = (s'.accountMap.find? C).option ⟨0⟩ (lookupStorage slot).
+        rw [hHd_eq_t1, show s'.accountMap = s.accountMap from hAcc', hCO]
+        rfl
 
 /-! ### PC 37 — `CALLVALUE` (deposit: push msg.value) -/
 
@@ -1300,19 +1350,29 @@ private theorem WethTrace_step_at_37
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 37) (hLen : s.stack.length = 2)
+    (hCascade37 : ∃ slot oldVal : UInt256,
+       s.stack = oldVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 37 := pc_eq_ofNat_of_toNat s 37 (by decide) hpc
-  obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-    step_CALLVALUE_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_37 hStep
+  obtain ⟨slot, oldVal, hStk_eq, hOldVal⟩ := hCascade37
+  obtain ⟨hPC', ⟨v, hStk'⟩, hEE', hAcc'⟩ :=
+    step_CALLVALUE_at_pc_strong s s' f' cost op arg _
+      hFetch hCode hpcEq decode_bytecode_at_37 hStep
   refine mk_wethTrace_aux hCO hCode hEE' ?_
   iterate 23 right
   left
-  refine ⟨?_, ?_⟩
+  refine ⟨?_, ?_, ?_⟩
   · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 37 1
   · rw [hStk']; show (v :: s.stack).length = 3; simp [hLen]
+  · refine ⟨slot, oldVal, v, ?_, ?_⟩
+    · rw [hStk', hStk_eq]
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 38 — `ADD` (deposit: balance + msg.value) -/
 
@@ -1321,25 +1381,29 @@ private theorem WethTrace_step_at_38
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 38) (hLen : s.stack.length = 3)
+    (hCascade38 : ∃ slot oldVal v : UInt256,
+       s.stack = v :: oldVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 38 := pc_eq_ofNat_of_toNat s 38 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: tl, hLen2 =>
-    have hLenTl : tl.length = 1 := by
-      have h1 : (hd1 :: hd2 :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
-      simpa using h1
-    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-      step_ADD_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_38 hStep
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    iterate 24 right
-    left
-    refine ⟨?_, ?_⟩
-    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 38 1
-    · rw [hStk']; show (v :: tl).length = 2; simp [hLenTl]
+  obtain ⟨slot, oldVal, v, hStk_eq, hOldVal⟩ := hCascade38
+  obtain ⟨hPC', ⟨w, hStk'⟩, hEE', hAcc'⟩ :=
+    step_ADD_at_pc_strong s s' f' cost op arg _ v oldVal (slot :: []) hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_38 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 24 right
+  left
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 38 1
+  · rw [hStk']; rfl
+  · refine ⟨slot, oldVal, w, ?_, ?_⟩
+    · rw [hStk']
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 39 — `SWAP1` (deposit: swap newBalance and sender) -/
 
@@ -1348,25 +1412,29 @@ private theorem WethTrace_step_at_39
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 39) (hLen : s.stack.length = 2)
+    (hCascade39 : ∃ slot oldVal newVal : UInt256,
+       s.stack = newVal :: slot :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 39 := pc_eq_ofNat_of_toNat s 39 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: tl, hLen2 =>
-    have hLenTl : tl.length = 0 := by
-      have h1 : (hd1 :: hd2 :: tl).length = 2 := by rw [← hStk_eq]; exact hLen
-      simpa using h1
-    obtain ⟨hPC', hStk', hEE'⟩ :=
-      step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_39 hStep
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    iterate 25 right
-    left
-    refine ⟨?_, ?_⟩
-    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 39 1
-    · rw [hStk']; show (hd2 :: hd1 :: tl).length = 2; simp [hLenTl]
+  obtain ⟨slot, oldVal, newVal, hStk_eq, hOldVal⟩ := hCascade39
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_SWAP1_at_pc_strong s s' f' cost op arg _ newVal slot [] hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_39 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 25 right
+  left
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 39 1
+  · rw [hStk']; rfl
+  · refine ⟨slot, oldVal, newVal, ?_, ?_⟩
+    · rw [hStk']
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 40 — `SSTORE` (deposit: write storage[sender]) -/
 
@@ -1375,6 +1443,10 @@ private theorem WethTrace_step_at_40
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 40) (hLen : s.stack.length = 2)
+    (_hCascade40 : ∃ slot oldVal newVal : UInt256,
+       s.stack = slot :: newVal :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
@@ -2809,8 +2881,8 @@ private theorem WethReachable_op_in_allowed
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
@@ -2952,8 +3024,8 @@ private theorem WethReachable_sstore_pc
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
@@ -3414,8 +3486,8 @@ private theorem WethReachable_call_pc
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
@@ -3639,8 +3711,8 @@ private theorem WethReachable_pc60_cascade
   rcases hPC with
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
@@ -4200,8 +4272,8 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   rcases hPC with
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
-    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
-    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hCascade36⟩|⟨hpc, hLen, hCascade37⟩|⟨hpc, hLen, hCascade38⟩|
+    ⟨hpc, hLen, hCascade39⟩|⟨hpc, hLen, hCascade40⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen, hStk01⟩|⟨hpc, hLen, hCascade49⟩|⟨hpc, hLen, hCascade50⟩|⟨hpc, hLen, hCascade51⟩|⟨hpc, hLen, hCascade52⟩|⟨hpc, hLen, hCascade55⟩|⟨hpc, hLen, hCascade56⟩|⟨hpc, hLen, hCascade57⟩|
     ⟨hpc, hLen, hCascade58⟩|⟨hpc, hLen, hCascade59⟩|⟨hpc, hLen, _⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
@@ -4421,7 +4493,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   -- Case PC=36 (SLOAD). Lands at PC=37 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 36 := pc_eq_ofNat_of_toNat s 36 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_36 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_36 C s s' f' cost op arg hT' hpc hLen hCascade36 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
@@ -4434,13 +4506,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
     obtain ⟨hPC', _, _⟩ :=
       step_CALLVALUE_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_37 hStep
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_37 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_37 C s s' f' cost op arg hT' hpc hLen hCascade37 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 37 1]; decide
   -- Case PC=38 (ADD). Lands at PC=39 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 38 := pc_eq_ofNat_of_toNat s 38 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_38 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_38 C s s' f' cost op arg hT' hpc hLen hCascade38 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
@@ -4451,7 +4523,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   -- Case PC=39 (SWAP1). Lands at PC=40 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 39 := pc_eq_ofNat_of_toNat s 39 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_39 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_39 C s s' f' cost op arg hT' hpc hLen hCascade39 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
@@ -4462,7 +4534,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   -- Case PC=40 (SSTORE). Lands at PC=41 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 40 := pc_eq_ofNat_of_toNat s 40 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_40 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_40 C s s' f' cost op arg hT' hpc hLen hCascade40 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
