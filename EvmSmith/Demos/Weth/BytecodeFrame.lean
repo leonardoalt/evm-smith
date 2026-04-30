@@ -3586,6 +3586,95 @@ def WethPC60CascadeFacts (C : AccountAddress) : Prop :=
             (newVal == default) = false) ∨
          s.stack = slot :: ⟨0⟩ :: tl)
 
+/-- Extract the PC 60 cascade witnesses from a Weth-reachable state at
+PC 60. Discharged from the threaded WethTrace cascade (PCs 47..60). -/
+private theorem WethReachable_pc60_cascade
+    (C : AccountAddress) (s : EVM.State)
+    (hR : WethReachable C s) (hPC60 : s.pc.toNat = 60) :
+    ∃ slot oldVal x : UInt256,
+      s.stack = slot :: UInt256.sub oldVal x :: x :: [] ∧
+      oldVal = (s.accountMap.find? C).option ⟨0⟩
+                 (Account.lookupStorage (k := slot)) ∧
+      x.toNat ≤ oldVal.toNat := by
+  obtain ⟨⟨_, _, hPC⟩, _⟩ := hR
+  -- All 64 disjuncts named uniformly except PC 60's cascade.
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  -- PC 60's case has hCascade in scope; all others derive False from hpc + hPC60.
+  all_goals first
+    | exact hCascade
+    | (exfalso; omega)
+
+/-- σ-has-C invariant: every Weth-reachable state has σ.find? C = some _.
+
+This is the **structural fact** that replaces the opaque
+`WethPC60CascadeFacts` assumption. It is much narrower (only asserts
+account presence, not full cascade-trace data) and is true because:
+
+1. Λ enters Weth at C with σ[C] = some acc (framework guarantee).
+2. Weth's bytecode has no SELFDESTRUCT.
+3. SSTORE preserves account presence (it inserts/updates).
+4. CALL preserves σ at the executing-frame address (Θ-preservation).
+
+Bundled as a structural assumption to avoid threading σ-has-C through
+all 61 walks of `weth_step_closure`. The eventual framework-level
+discharger would expose a "Reachable preserves σ-at-codeOwner" helper. -/
+def WethAccountAtC (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State, WethReachable C s →
+    ∃ acc : Account .EVM, s.accountMap.find? C = some acc
+
+/-- **`WethPC60CascadeFacts` is a theorem given σ-has-C.** Discharges
+the cascade fact predicate from the threaded WethTrace cascade plus a
+narrow structural fact: every Weth-reachable state has σ.find? C =
+some acc. The σ-has-C fact is true (Weth has no SELFDESTRUCT and Ξ
+enters at C) but proving it uniformly across the trace requires
+extending WethReachable's preservation; here we expose it as a hook. -/
+theorem weth_pc60_cascade
+    (C : AccountAddress)
+    (hAccC : WethAccountAtC C) :
+    WethPC60CascadeFacts C := by
+  intro s hR hPC60 _hFetch
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal, hBound⟩ :=
+    WethReachable_pc60_cascade C s hR hPC60
+  obtain ⟨acc, h_find⟩ := hAccC s hR
+  -- Convert oldVal to acc.storage.findD slot ⟨0⟩ via h_find.
+  have h_findD : acc.storage.findD slot ⟨0⟩ = oldVal := by
+    rw [h_find] at hOldVal
+    -- hOldVal : oldVal = (some acc).option ⟨0⟩ (lookupStorage slot)
+    --        = acc.storage.findD slot ⟨0⟩
+    show acc.storage.findD slot ⟨0⟩ = oldVal
+    rw [hOldVal]
+    rfl
+  -- newVal = sub oldVal x. Bound: x ≤ oldVal ⇒ (sub oldVal x).toNat ≤ oldVal.toNat.
+  have h_subVal : (UInt256.sub oldVal x).toNat ≤ oldVal.toNat := by
+    have hSub_eq : UInt256.sub oldVal x = oldVal - x := rfl
+    rw [hSub_eq, UInt256_sub_toNat_of_le _ _ hBound]
+    exact Nat.sub_le _ _
+  refine ⟨slot, [x], acc, oldVal, h_find, h_findD, ?_⟩
+  -- Case-split on newVal = 0 (erase) vs ≠ 0 (decrement).
+  by_cases h_eq : UInt256.sub oldVal x = default
+  · -- Erase arm: newVal = 0.
+    right
+    rw [h_eq] at hStk_eq
+    exact hStk_eq
+  · -- Decrement arm.
+    left
+    refine ⟨UInt256.sub oldVal x, hStk_eq, h_subVal, ?_⟩
+    -- (UInt256.sub oldVal x == default) = false from h_eq.
+    -- For UInt256 (deriving BEq from Fin), `(a == b) = false` ↔ a ≠ b.
+    have hd : (UInt256.sub oldVal x).val ≠ (default : UInt256).val := fun h_val_eq =>
+      h_eq (UInt256.mk.injEq _ _ |>.mpr h_val_eq)
+    show ((UInt256.sub oldVal x).val == (default : UInt256).val) = false
+    show (decide ((UInt256.sub oldVal x).val = (default : UInt256).val) : Bool) = false
+    exact decide_eq_false hd
+
 /-- **PC 40 cascade fact predicate.** At every Weth-reachable state at
 PC 40 (the deposit SSTORE), the trace cascade exposes:
 
@@ -4613,5 +4702,24 @@ theorem bytecodePreservesInvariant_from_cascades
   bytecodePreservesInvariant C hDeployed
     (weth_sstore_preserves_from_cascades C h40 h60)
     (weth_call_slack_from_cascade C h72)
+
+/-- **Convenience entry that derives `pc60_cascade` from σ-has-C.**
+
+This replaces the `h60` field with the narrower σ-has-C structural
+fact, leveraging `weth_pc60_cascade` to discharge the cascade fact
+predicate from the threaded `WethTrace` cascade.
+
+Consumers prefer this entry: σ-has-C is a small, framework-derivable
+fact (Weth's bytecode has no SELFDESTRUCT and Ξ enters at C with
+σ[C] = some _; the framework's `Λ_invariant_preserved` chain
+preserves it). -/
+theorem bytecodePreservesInvariant_from_account_and_cascades
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hAccC : WethAccountAtC C)
+    (h40 : WethPC40CascadeFacts C)
+    (h72 : WethPC72CascadeFacts C) :
+    ΞPreservesInvariantAtC C :=
+  bytecodePreservesInvariant_from_cascades C hDeployed
+    h40 (weth_pc60_cascade C hAccC) h72
 
 end EvmSmith.Weth

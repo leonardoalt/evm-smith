@@ -181,14 +181,28 @@ structure WethAssumptions
   to the precise per-PC cascade-trace data, in the shape the trace
   cascade extension would establish.) -/
   pc40_cascade     : WethPC40CascadeFacts C
-  /-- PC 60 withdraw-SSTORE cascade-fact predicate: at every Weth-reachable
-  state at PC 60, the trace cascade exposes the slot/newVal/old-value/
-  ≤-bound data needed to discharge the SSTORE invariant preservation
-  step. (Refines the previous `sstore_preserves` field to the precise
-  per-PC cascade-trace data, in the shape the trace cascade extension
-  would establish from PC 48's SLOAD + PC 51's LT + PC 55's JUMPI
-  not-taken.) -/
-  pc60_cascade     : WethPC60CascadeFacts C
+  /-- σ-has-C invariant: every Weth-reachable state has σ.find? C = some _.
+
+  This **replaces** the previous opaque `pc60_cascade : WethPC60CascadeFacts C`
+  field. The PC 60 cascade-fact predicate is now a **theorem**
+  (`weth_pc60_cascade`), discharged from the threaded `WethTrace`
+  cascade (PCs 47..60) plus this narrower σ-has-C fact.
+
+  Why σ-has-C is true: Weth's bytecode has no SELFDESTRUCT, and Ξ
+  enters at C with σ[C] = some _ (framework guarantee from Λ's
+  account-at-codeOwner setup). Across the X loop, only SSTORE
+  (modifies storage but preserves account presence) and CALL (Θ
+  preserves σ at the source address) touch σ at C, neither removes
+  it.
+
+  Discharging this from Lean requires extending `WethReachable`'s
+  preservation across `weth_step_closure` cases (or exposing a
+  framework-level "Reachable preserves σ-at-codeOwner" helper). For
+  now it remains a structural fact bundled with the assumption set;
+  it is **strictly narrower** than the prior opaque cascade-fact
+  field, since it asserts only account presence (one bit), not the
+  full per-PC cascade data. -/
+  account_at_C     : WethAccountAtC C
   /-- PC 72 CALL cascade-fact predicate: at every Weth-reachable state at
   PC 72 (the unique CALL site), the trace cascade exposes the seven
   popped CALL parameters plus the no-wrap, funds, and slack disjunctions
@@ -342,9 +356,9 @@ theorem weth_solvency_invariant
   -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
   -- inside the discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant_from_cascades C hAssumptions.deployed
-      hAssumptions.pc40_cascade hAssumptions.pc60_cascade
-      hAssumptions.pc72_cascade
+    bytecodePreservesInvariant_from_account_and_cascades C
+      hAssumptions.deployed hAssumptions.account_at_C
+      hAssumptions.pc40_cascade hAssumptions.pc72_cascade
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
