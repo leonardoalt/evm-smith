@@ -3795,16 +3795,16 @@ PC 40 (the deposit SSTORE), the trace cascade exposes:
 
 * stack shape `[slot, newVal, …]`,
 * `s.accountMap.find? C = some acc`,
-* `acc.storage.find? slot = some oldVal`,
+* `acc.storage.findD slot ⟨0⟩ = oldVal` (the `findD`-flavored shape
+  matching SLOAD-strong; reduces to `find? slot = some oldVal` when
+  the slot exists, and to `oldVal = ⟨0⟩` when it does not),
 * the at-`C` Ξ-pre-state β-credit slack:
   `storageSum σ C - oldVal.toNat + newVal.toNat ≤ balanceOf σ C`,
   which combined with the SSTORE-replace law yields the post-step
   invariant.
 
-Discharged by extending the trace at PCs 32→40 with the Θ-pre-credit
-slack tracked at the Ξ entry point. (This is the "PC 40 deposit" case
-the prior plan flagged as deferable; it requires Θ-side reasoning that
-threads through to `WethReachable`.) -/
+Discharged by extending the trace at PCs 32→40 plus the Θ-pre-credit
+slack tracked at the Ξ entry point. -/
 def WethPC40CascadeFacts (C : AccountAddress) : Prop :=
   ∀ s : EVM.State,
     WethReachable C s →
@@ -3814,7 +3814,7 @@ def WethPC40CascadeFacts (C : AccountAddress) : Prop :=
     ∃ (slot : UInt256) (tl : Stack UInt256),
       ∃ (acc : Account .EVM) (oldVal : UInt256),
         s.accountMap.find? C = some acc ∧
-        acc.storage.find? slot = some oldVal ∧
+        acc.storage.findD slot ⟨0⟩ = oldVal ∧
         ((∃ newVal,
             s.stack = slot :: newVal :: tl ∧
             storageSum s.accountMap C - oldVal.toNat + newVal.toNat
@@ -3829,16 +3829,14 @@ form expected by the deposit flow: stack = [sender, newBal, …] where
 `sender = CALLER` (pushed at PC 34) and `newBal = SLOAD(sender) +
 msg.value` (computed at PC 38 ADD).
 
-Discharging in full requires cascade threading through PCs 32..40 —
-same pattern as the PCs 47..60 threading already done for pc60. The
-threading would establish:
+The storage equation uses the **`findD slot ⟨0⟩`** shape (matching
+SLOAD-strong's pushed-value semantics: SLOAD-of-missing returns `⟨0⟩`)
+rather than a strict `find? slot = some oldVal` form. This matches
+the cascade actually exposable from the WethTrace cascade threading at
+PCs 36→40 (commit 14dd324) — the strict `find?` form would not be
+derivable from bytecode walks for first-time depositors.
 
-* stack[0] = sender, stack[1] = newBal,
-* slot lookup for sender's balance, with old value `oldBal`,
-* `newBal = oldBal + msg.value`.
-
-Pending that threading, this is bundled as a structural assumption.
-**Bytecode-derivable in principle**, just not yet threaded. -/
+Discharged as `weth_deposit_cascade` theorem from the cascade thread.  -/
 def WethDepositCascadeStruct (C : AccountAddress) : Prop :=
   ∀ s : EVM.State,
     WethReachable C s →
@@ -3848,7 +3846,7 @@ def WethDepositCascadeStruct (C : AccountAddress) : Prop :=
     ∃ (slot : UInt256) (tl : Stack UInt256),
       ∃ (acc : Account .EVM) (oldVal : UInt256),
         s.accountMap.find? C = some acc ∧
-        acc.storage.find? slot = some oldVal ∧
+        acc.storage.findD slot ⟨0⟩ = oldVal ∧
         (∃ newVal, s.stack = slot :: newVal :: tl)
 
 /-- **Θ-pre-credit slack at PC 40 (deposit SSTORE).**
@@ -3875,13 +3873,63 @@ def WethDepositPreCredit (C : AccountAddress) : Prop :=
     ∀ (slot : UInt256) (tl : Stack UInt256) (acc : Account .EVM)
       (oldVal : UInt256),
       s.accountMap.find? C = some acc →
-      acc.storage.find? slot = some oldVal →
+      acc.storage.findD slot ⟨0⟩ = oldVal →
       ((∃ newVal,
           s.stack = slot :: newVal :: tl ∧
           storageSum s.accountMap C - oldVal.toNat + newVal.toNat
             ≤ balanceOf s.accountMap C ∧
           (newVal == default) = false) ∨
        s.stack = slot :: ⟨0⟩ :: tl)
+
+/-- Extract the PC 40 cascade witnesses from a Weth-reachable state at
+PC 40. Discharged from the threaded WethTrace cascade (PCs 36..40). -/
+private theorem WethReachable_pc40_cascade
+    (C : AccountAddress) (s : EVM.State)
+    (hR : WethReachable C s) (hPC40 : s.pc.toNat = 40) :
+    ∃ slot oldVal newVal : UInt256,
+      s.stack = slot :: newVal :: [] ∧
+      oldVal = (s.accountMap.find? C).option ⟨0⟩
+                 (Account.lookupStorage (k := slot)) := by
+  obtain ⟨⟨_, _, hPC⟩, _⟩ := hR
+  -- PC 40 is the 26th disjunct (0-indexed 25). All other disjuncts derive
+  -- False from hpc + hPC40.
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  all_goals first
+    | exact hCascade
+    | (exfalso; omega)
+
+/-- **`WethDepositCascadeStruct` is a theorem.** Discharged from the
+σ-has-C fact (`WethAccountAtC` — itself a theorem now) plus the
+threaded WethTrace cascade at PCs 36..40. The cascade exposes the
+storage equation in `findD`-flavored form (matching SLOAD-strong's
+pushed-value semantics: `findD slot ⟨0⟩ = oldVal`); first-time
+depositors carry `oldVal = ⟨0⟩` via this shape. -/
+theorem weth_deposit_cascade
+    (C : AccountAddress)
+    (hAccC : WethAccountAtC C) :
+    WethDepositCascadeStruct C := by
+  intro s hR hPC40 _hFetch
+  obtain ⟨slot, oldVal, newVal, hStk_eq, hOldVal⟩ :=
+    WethReachable_pc40_cascade C s hR hPC40
+  obtain ⟨acc, h_find⟩ := hAccC s hR
+  -- Convert oldVal to acc.storage.findD slot ⟨0⟩ via h_find.
+  have h_findD : acc.storage.findD slot ⟨0⟩ = oldVal := by
+    rw [h_find] at hOldVal
+    -- hOldVal : oldVal = (some acc).option ⟨0⟩ (lookupStorage slot)
+    --        = acc.storage.findD slot ⟨0⟩
+    show acc.storage.findD slot ⟨0⟩ = oldVal
+    rw [hOldVal]
+    rfl
+  refine ⟨slot, [], acc, oldVal, h_find, h_findD, newVal, ?_⟩
+  exact hStk_eq
 
 /-- **`WethPC40CascadeFacts` is a theorem given the two narrower
 structural facts.** -/
@@ -3969,7 +4017,12 @@ private theorem weth_sstore_preserves_pc60_from_cascade
 
 /-- **PC 40 SSTORE preservation from cascade facts.** Closed-form glue
 for the deposit case. Uses the at-`C` Θ-pre-credit slack to bound the
-post-SSTORE storageSum by the (preserved) balanceOf. -/
+post-SSTORE storageSum by the (preserved) balanceOf.
+
+Handles the `findD`-flavored cascade fact: case-splits on
+`find? slot` to recover the strict `find?`-form bridges in the
+existing-slot case, and uses direct `storageSum`-delta reasoning in the
+absent-slot case (first-time depositor). -/
 private theorem weth_sstore_preserves_pc40_from_cascade
     (C : AccountAddress) (hCascade : WethPC40CascadeFacts C) :
     ∀ (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat)),
@@ -3996,16 +4049,100 @@ private theorem weth_sstore_preserves_pc40_from_cascade
     injection h1 with _ h2
     exact h2.symm
   subst hArgNone
-  obtain ⟨slot, tl, acc, oldVal, h_find, h_old, hCase⟩ :=
+  obtain ⟨slot, tl, acc, oldVal, h_find, h_findD, hCase⟩ :=
     hCascade s hR hPC40 hFetchNone
-  cases hCase with
-  | inl h =>
-    obtain ⟨newVal, hStk, h_slack, hNonZero⟩ := h
-    exact WethInvFr_step_SSTORE_at_C_replace_with_slack C s s' f' cost none
-      slot newVal oldVal tl hStk hCO acc h_find h_old h_slack hNonZero hInv hStep
-  | inr hStk =>
-    exact WethSStorePreserves_erase C s s' f' cost none slot oldVal tl
-      hCO hStk acc h_find h_old hInv hStep
+  -- Case-split on `find? slot` to recover the strict `find?` form.
+  unfold Batteries.RBMap.findD at h_findD
+  cases h_find_slot : acc.storage.find? slot with
+  | some oldVal' =>
+    -- Existing slot: use the strict-form bridges.
+    rw [h_find_slot, Option.getD] at h_findD
+    subst h_findD
+    cases hCase with
+    | inl h =>
+      obtain ⟨newVal, hStk, h_slack, hNonZero⟩ := h
+      exact WethInvFr_step_SSTORE_at_C_replace_with_slack C s s' f' cost none
+        slot newVal oldVal' tl hStk hCO acc h_find h_find_slot h_slack hNonZero
+        hInv hStep
+    | inr hStk =>
+      exact WethSStorePreserves_erase C s s' f' cost none slot oldVal' tl
+        hCO hStk acc h_find h_find_slot hInv hStep
+  | none =>
+    -- Absent slot (first-time depositor): oldVal = ⟨0⟩, slot is being inserted.
+    rw [h_find_slot, Option.getD] at h_findD
+    subst h_findD
+    have h_oldVal_toNat : (⟨0⟩ : UInt256).toNat = 0 := rfl
+    cases hCase with
+    | inl h =>
+      -- Decrement arm: slack = storageSum - 0 + newVal ≤ balanceOf, so
+      -- storageSum + newVal ≤ balanceOf. Post-state inserts (slot, newVal),
+      -- so storageSum_post = storageSum_pre + newVal.toNat.
+      obtain ⟨newVal, hStk, h_slack, hNonZero⟩ := h
+      have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+        rw [← hCO]; exact h_find
+      have h_am := step_SSTORE_accountMap s s' f' cost none slot newVal tl hStk acc
+        h_find_CO hStep
+      rw [h_am, ← hCO]
+      unfold WethInvFr at *
+      -- balanceOf preserved.
+      have h_bal_eq :
+          balanceOf (s.accountMap.insert C (acc.updateStorage slot newVal)) C
+            = balanceOf s.accountMap C := by
+        apply balanceOf_insert_preserve_of_eq s.accountMap C acc _ h_find
+        exact Account_updateStorage_balance _ _ _
+      rw [h_bal_eq]
+      -- storageSum_post: insert at C with updated storage where slot was absent.
+      have h_post_storage :
+          (acc.updateStorage slot newVal).storage = acc.storage.insert slot newVal := by
+        unfold Account.updateStorage; simp [hNonZero]
+      -- Need: storageSum (insert C ...) ≤ balanceOf σ C.
+      -- Slack: storageSum σ C - 0 + newVal ≤ balanceOf σ C.
+      rw [h_oldVal_toNat] at h_slack
+      -- Show: storageSum (insert ...) ≤ storageSum σ C + newVal.toNat,
+      -- which combined with h_slack gives the result.
+      -- Use storageSum_sstore_replace_eq_findD with newVal ≤ ⟨0⟩? No, that
+      -- requires the bound. Use the equation form via the existence-bridge.
+      -- Strategy: prove storageSum_post = storageSum_pre + newVal.toNat directly.
+      have h_post_eq :
+          storageSum (s.accountMap.insert C (acc.updateStorage slot newVal)) C
+            = storageSum s.accountMap C + newVal.toNat := by
+        rw [storageSum_insert_at_C,
+            storageSum_of_find?_some s.accountMap C acc h_find,
+            h_post_storage]
+        exact storageSum_storage_insert_absent_eq acc.storage slot newVal h_find_slot
+      rw [h_post_eq]
+      exact h_slack
+    | inr hStk =>
+      -- Erase arm: stack[1] = ⟨0⟩, but slot is absent. SSTORE-erase of absent
+      -- slot is a no-op (storage unchanged). Invariant preserved.
+      have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+        rw [← hCO]; exact h_find
+      have h_am := step_SSTORE_accountMap s s' f' cost none slot ⟨0⟩ tl hStk acc
+        h_find_CO hStep
+      rw [h_am, ← hCO]
+      unfold WethInvFr at *
+      -- balanceOf preserved.
+      have h_bal_eq :
+          balanceOf (s.accountMap.insert C (acc.updateStorage slot ⟨0⟩)) C
+            = balanceOf s.accountMap C := by
+        apply balanceOf_insert_preserve_of_eq s.accountMap C acc _ h_find
+        exact Account_updateStorage_balance _ _ _
+      rw [h_bal_eq]
+      -- Post-storage: erase of absent slot ⇒ storage preserved.
+      have h_post_storage :
+          (acc.updateStorage slot ⟨0⟩).storage = acc.storage.erase slot := by
+        unfold Account.updateStorage
+        have h0 : ((⟨0⟩ : UInt256) == default) = true := by decide
+        simp [h0]
+      have h_storage_preserved :
+          storageSum (s.accountMap.insert C (acc.updateStorage slot ⟨0⟩)) C
+            = storageSum s.accountMap C := by
+        rw [storageSum_insert_at_C,
+            storageSum_of_find?_some s.accountMap C acc h_find,
+            h_post_storage]
+        exact storageSum_storage_erase_eq_of_find?_none acc.storage slot h_find_slot
+      rw [h_storage_preserved]
+      exact hInv
 
 /-- **Compose PC 40 + PC 60 cascade-fact predicates into the full
 `WethSStorePreserves`.** Reduces the structural assumption to the
