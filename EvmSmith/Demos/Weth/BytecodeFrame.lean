@@ -1425,15 +1425,18 @@ private theorem WethTrace_step_at_48
     have hLenTl : tl.length = 2 := by
       have h1 : (hd :: tl).length = 3 := by rw [← hStk_eq]; exact hLen
       simpa using h1
-    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-      step_SLOAD_at_pc s s' f' cost op arg _ hd tl hStk_eq
+    -- Use the strong wrapper: exposes the pushed value as the
+    -- storage lookup at the contract's address (cascade-ready for
+    -- future PC-60 disjunct strengthening).
+    obtain ⟨hPC', hStk', hEE', _hAcc'⟩ :=
+      step_SLOAD_at_pc_strong s s' f' cost op arg _ hd tl hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_48 hStep
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 33 right
     left
     refine ⟨?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 48 1
-    · rw [hStk']; show (v :: tl).length = 3; simp [hLenTl]
+    · rw [hStk']; show (_ :: tl).length = 3; simp [hLenTl]
 
 /-! ### PC 49 — `DUP3` (withdraw: duplicate `x` to top) -/
 
@@ -1500,15 +1503,18 @@ private theorem WethTrace_step_at_51
     have hLenTl : tl.length = 3 := by
       have h1 : (hd1 :: hd2 :: tl).length = 5 := by rw [← hStk_eq]; exact hLen
       simpa using h1
-    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-      step_LT_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+    -- Use the strong wrapper: exposes the pushed value as
+    -- `UInt256.lt hd1 hd2` (cascade-ready for future PC-60 disjunct
+    -- strengthening).
+    obtain ⟨hPC', hStk', hEE', _hAcc'⟩ :=
+      step_LT_at_pc_strong s s' f' cost op arg _ hd1 hd2 tl hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_51 hStep
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 36 right
     left
     refine ⟨?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 51 1
-    · rw [hStk']; show (v :: tl).length = 4; simp [hLenTl]
+    · rw [hStk']; show (_ :: tl).length = 4; simp [hLenTl]
 
 /-! ### PC 52 — `PUSH2 revertLbl` (withdraw: revert dest setup) -/
 
@@ -1651,15 +1657,18 @@ private theorem WethTrace_step_at_58
     have hLenTl : tl.length = 2 := by
       have h1 : (hd1 :: hd2 :: tl).length = 4 := by rw [← hStk_eq]; exact hLen
       simpa using h1
-    obtain ⟨hPC', ⟨v, hStk'⟩, hEE'⟩ :=
-      step_SUB_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
+    -- Use the strong wrapper: exposes the pushed value as
+    -- `UInt256.sub hd1 hd2` (cascade-ready for future PC-60 disjunct
+    -- strengthening; this is `balance - x` at PC 58).
+    obtain ⟨hPC', hStk', hEE', _hAcc'⟩ :=
+      step_SUB_at_pc_strong s s' f' cost op arg _ hd1 hd2 tl hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_58 hStep
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 41 right
     left
     refine ⟨?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 58 1
-    · rw [hStk']; show (v :: tl).length = 3; simp [hLenTl]
+    · rw [hStk']; show (_ :: tl).length = 3; simp [hLenTl]
 
 /-! ### PC 59 — `SWAP1` (withdraw: align newBalance and sender for SSTORE) -/
 
