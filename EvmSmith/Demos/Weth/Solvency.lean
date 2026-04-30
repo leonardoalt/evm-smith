@@ -231,10 +231,33 @@ structure WethAssumptions
   The framework now ships an op-conditional variant
   (`Ξ_preserves_account_at_a_of_Reachable_op_conditional`) that solves
   the post-halt-state issue (e.g. Weth's PC 86 sink past the bytecode
-  end). The remaining blocker is the universal-`I` closure shape, not
-  the PC-86 closure.
+  end), plus a C-restricted variant
+  (`Ξ_preserves_account_at_a_of_Reachable_for_C`) whose `hReachInit`
+  slot only fires for `I.codeOwner = C` executions; the non-C arm is
+  delegated to an external `hΞ_other` witness.
 
-  Bundled as a structural assumption pending framework extension. -/
+  Wiring `Ξ_preserves_account_at_a_of_Reachable_for_C` to discharge
+  `xi_preserves_C` as a Lean theorem requires:
+
+  1. A `WethReachable`-derivative without the `accountPresentAt
+     s.accountMap C` third conjunct, so the step closure does not
+     need an external `ΞPreservesAccountAt C` witness (currently
+     `weth_step_closure C` consumes one to thread `accountPresentAt`
+     across CALL ops).
+  2. A non-C-arm witness `hΞ_other`, capturing "Ξ on contracts other
+     than C preserves σ's `find? C`". Real-world: SELFDESTRUCT only
+     removes Iₐ = I.codeOwner ≠ C; CREATE/CREATE2 only insert. A
+     framework-level discharge requires `EVM_step_preserves_codeOwner`
+     and "non-Iₐ accounts are preserved by SELFDESTRUCT", neither
+     currently in `MutualFrame.lean`.
+
+  Pending those framework additions, kept as a structural assumption.
+  When wired up, this field will be replaced by:
+
+      xi_preserves_C_other : ∀ ..., I.codeOwner ≠ C → ...
+
+  with `xi_preserves_C` derived in BytecodeFrame via the new framework
+  variant. -/
   xi_preserves_C   : ΞPreservesAccountAt C
   /-- Recipient-balance no-wrap at PC 72's CALL: chain-bound real-world
   fact. **Replaces** the no-wrap part of the previous opaque
