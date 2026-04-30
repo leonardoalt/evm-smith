@@ -150,9 +150,23 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
        s.stack = UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
                   (Account.lookupStorage (k := slot))) ∨
-   (s.pc.toNat = 55 ∧ s.stack.length = 5 ∧ s.stack[0]? = some revertLbl) ∨
-   (s.pc.toNat = 56 ∧ s.stack.length = 3) ∨   -- JUMPI not-taken
-   (s.pc.toNat = 57 ∧ s.stack.length = 4) ∨
+   (s.pc.toNat = 55 ∧ s.stack.length = 5 ∧
+     ∃ slot oldVal x : UInt256,
+       s.stack = revertLbl :: UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
+   (s.pc.toNat = 56 ∧ s.stack.length = 3 ∧
+     ∃ slot oldVal x : UInt256,
+       s.stack = oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat) ∨   -- JUMPI not-taken; LT result was 0 ⇒ x ≤ oldVal
+   (s.pc.toNat = 57 ∧ s.stack.length = 4 ∧
+     ∃ slot oldVal x : UInt256,
+       s.stack = x :: oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat) ∨
    (s.pc.toNat = 58 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 59 ∧ s.stack.length = 3) ∨
    (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧
@@ -524,7 +538,7 @@ private theorem WethTrace_decodeSome
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
@@ -639,9 +653,23 @@ private theorem mk_wethTrace_aux
            s'.stack = UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
            oldVal = (s'.accountMap.find? C).option ⟨0⟩
                       (Account.lookupStorage (k := slot))) ∨
-       (s'.pc.toNat = 55 ∧ s'.stack.length = 5 ∧ s'.stack[0]? = some revertLbl) ∨
-       (s'.pc.toNat = 56 ∧ s'.stack.length = 3) ∨
-       (s'.pc.toNat = 57 ∧ s'.stack.length = 4) ∨
+       (s'.pc.toNat = 55 ∧ s'.stack.length = 5 ∧
+         ∃ slot oldVal x : UInt256,
+           s'.stack = revertLbl :: UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
+       (s'.pc.toNat = 56 ∧ s'.stack.length = 3 ∧
+         ∃ slot oldVal x : UInt256,
+           s'.stack = oldVal :: slot :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot)) ∧
+           x.toNat ≤ oldVal.toNat) ∨
+       (s'.pc.toNat = 57 ∧ s'.stack.length = 4 ∧
+         ∃ slot oldVal x : UInt256,
+           s'.stack = x :: oldVal :: slot :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot)) ∧
+           x.toNat ≤ oldVal.toNat) ∨
        (s'.pc.toNat = 58 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 59 ∧ s'.stack.length = 3) ∨
        (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧
@@ -1636,13 +1664,18 @@ private theorem WethTrace_step_at_52
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 52) (hLen : s.stack.length = 4)
+    (hCascade52 : ∃ slot oldVal x : UInt256,
+       s.stack = UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 52 := pc_eq_ofNat_of_toNat s 52 (by decide) hpc
-  obtain ⟨hPC', hStk', hEE'⟩ :=
-    step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) revertLbl 2
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal⟩ := hCascade52
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_PUSH_at_pc_strong s s' f' cost op arg .PUSH2 (by decide) revertLbl 2
       hFetch hCode hpcEq decode_bytecode_at_52 hStep
   refine mk_wethTrace_aux hCO hCode hEE' ?_
   iterate 37 right
@@ -1650,9 +1683,10 @@ private theorem WethTrace_step_at_52
   refine ⟨?_, ?_, ?_⟩
   · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 52 3
   · rw [hStk']; show List.length (revertLbl :: s.stack) = 5; simp [hLen]
-  · rw [hStk']
-    show (revertLbl :: s.stack)[0]? = some revertLbl
-    rfl
+  · refine ⟨slot, oldVal, x, ?_, ?_⟩
+    · rw [hStk', hStk_eq]
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 55 — `JUMPI` (withdraw: revert if balance < x) -/
 
@@ -1661,46 +1695,57 @@ private theorem WethTrace_step_at_55
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 55) (hLen : s.stack.length = 5)
-    (hStk0 : s.stack[0]? = some revertLbl)
+    (hCascade55 : ∃ slot oldVal x : UInt256,
+       s.stack = revertLbl :: UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 55 := pc_eq_ofNat_of_toNat s 55 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: tl, hLen2 =>
-    have hLenTl : tl.length = 3 := by
-      have h1 : (hd1 :: hd2 :: tl).length = 5 := by rw [← hStk_eq]; exact hLen
-      simpa using h1
-    have hd1_eq : hd1 = revertLbl := by
-      have : (hd1 :: hd2 :: tl)[0]? = some revertLbl := by
-        rw [← hStk_eq]; exact hStk0
-      simpa using this
-    obtain ⟨hPC', hStk', hEE'⟩ :=
-      step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_55 hStep
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    cases hb : (hd2 != ⟨0⟩) with
-    | true =>
-      -- Taken-branch: post-pc = revertLbl = 80, post-stack length 3.
-      -- PC=80 is the 57th disjunct (index 56) → 56 `right`s.
-      iterate 56 right
-      left
-      refine ⟨?_, ?_⟩
-      · rw [hPC']
-        simp only [hb, if_true]
-        rw [hd1_eq]; show revertLbl.toNat = 80; rfl
-      · rw [hStk']; exact hLenTl
-    | false =>
-      -- Fall-through: post-pc = 56, post-stack length 3.
-      iterate 38 right
-      left
-      refine ⟨?_, ?_⟩
-      · rw [hPC']
-        simp only [hb, Bool.false_eq_true, if_false]
-        rw [hpcEq]
-        exact ofNat_add_ofNat_toNat_lt256 55 1
-      · rw [hStk']; exact hLenTl
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal⟩ := hCascade55
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_JUMPI_at_pc_strong s s' f' cost op arg _ revertLbl (UInt256.lt oldVal x)
+      (oldVal :: slot :: x :: []) hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_55 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  cases hb : (UInt256.lt oldVal x != ⟨0⟩) with
+  | true =>
+    -- Taken-branch: post-pc = revertLbl = 80, post-stack length 3.
+    iterate 56 right
+    left
+    refine ⟨?_, ?_⟩
+    · rw [hPC']
+      simp only [hb, if_true]
+      show revertLbl.toNat = 80; rfl
+    · rw [hStk']; rfl
+  | false =>
+    -- Fall-through: post-pc = 56, post-stack length 3, with bound x ≤ oldVal.
+    iterate 38 right
+    left
+    refine ⟨?_, ?_, ?_⟩
+    · rw [hPC']
+      simp only [hb, Bool.false_eq_true, if_false]
+      rw [hpcEq]
+      exact ofNat_add_ofNat_toNat_lt256 55 1
+    · rw [hStk']; rfl
+    · refine ⟨slot, oldVal, x, ?_, ?_, ?_⟩
+      · rw [hStk']
+      · rw [show s'.accountMap = s.accountMap from hAcc']
+        exact hOldVal
+      · -- Goal: x.toNat ≤ oldVal.toNat. From `LT oldVal x = 0` (JUMPI not-taken).
+        -- The cases on `lt`: either `oldVal < x` (then lt = ⟨1⟩, JUMPI takes the branch ≠ this case),
+        -- or `¬ (oldVal < x)` (then lt = ⟨0⟩, JUMPI not-taken — our case — gives the bound).
+        unfold UInt256.lt UInt256.fromBool at hb
+        by_cases h_lt : oldVal < x
+        · -- Case oldVal < x: fromBool true = ⟨1⟩ ≠ ⟨0⟩ ⇒ != = true, contradicts hb=false.
+          exfalso
+          simp only [h_lt, decide_true, Bool.toUInt256] at hb
+          exact Bool.noConfusion hb
+        · -- Case ¬(oldVal < x): hence x.val ≤ oldVal.val.
+          show x.val ≤ oldVal.val
+          exact Nat.le_of_not_lt h_lt
 
 /-! ### PC 56 — `DUP3` (withdraw: duplicate `x` for SUB) -/
 
@@ -1709,22 +1754,30 @@ private theorem WethTrace_step_at_56
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 56) (hLen : s.stack.length = 3)
+    (hCascade56 : ∃ slot oldVal x : UInt256,
+       s.stack = oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 56 := pc_eq_ofNat_of_toNat s 56 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: hd3 :: tl, hLen2 =>
-    obtain ⟨hPC', hStk', hEE'⟩ :=
-      step_DUP3_at_pc s s' f' cost op arg _ hd1 hd2 hd3 tl hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_56 hStep
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    iterate 39 right
-    left
-    refine ⟨?_, ?_⟩
-    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 56 1
-    · rw [hStk']; show (hd3 :: s.stack).length = 4; simp [hLen]
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal, hBound⟩ := hCascade56
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_DUP3_at_pc_strong s s' f' cost op arg _ oldVal slot x [] hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_56 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 39 right
+  left
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 56 1
+  · rw [hStk']; show (x :: s.stack).length = 4; simp [hLen]
+  · refine ⟨slot, oldVal, x, ?_, ?_, hBound⟩
+    · rw [hStk', hStk_eq]
+    · rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 57 — `SWAP1` (withdraw: align balance and x for SUB) -/
 
@@ -2735,7 +2788,7 @@ private theorem WethReachable_op_in_allowed
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
@@ -2845,7 +2898,7 @@ private theorem WethReachable_sstore_pc
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
@@ -3307,7 +3360,7 @@ private theorem WethReachable_call_pc
     ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
@@ -3843,7 +3896,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
     ⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
-    ⟨hpc, hLen, hStk01⟩|⟨hpc, hLen, hCascade49⟩|⟨hpc, hLen, hCascade50⟩|⟨hpc, hLen, hCascade51⟩|⟨hpc, hLen, hCascade52⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen, hStk01⟩|⟨hpc, hLen, hCascade49⟩|⟨hpc, hLen, hCascade50⟩|⟨hpc, hLen, hCascade51⟩|⟨hpc, hLen, hCascade52⟩|⟨hpc, hLen, hCascade55⟩|⟨hpc, hLen, hCascade56⟩|⟨hpc, hLen, hCascade57⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, _⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩
@@ -4213,37 +4266,33 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH_at_pc s s' f' cost op arg .PUSH2 (by decide) revertLbl 2
         hFetch hCode hpcEq decode_bytecode_at_52 hStep
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_52 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_52 C s s' f' cost op arg hT' hpc hLen hCascade52 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 52 3]; decide
   -- Case PC=55 (JUMPI). Branches: taken→PC=80, not-taken→PC=56. Both ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 55 := pc_eq_ofNat_of_toNat s 55 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_55 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
+      WethTrace_step_at_55 C s s' f' cost op arg hT' hpc hLen hCascade55 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
-    match hStk_eq : s.stack, hLen with
-    | hd1 :: hd2 :: tl, _hLen2 =>
-      have hd1_eq : hd1 = revertLbl := by
-        have : (hd1 :: hd2 :: tl)[0]? = some revertLbl := by
-          rw [← hStk_eq]; exact hStk0
-        simpa using this
-      obtain ⟨hPC', _, _⟩ :=
-        step_JUMPI_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
-          hFetch hCode hpcEq decode_bytecode_at_55 hStep
-      cases hb : (hd2 != ⟨0⟩) with
-      | true =>
-        rw [hPC']
-        simp only [hb, ↓reduceIte]
-        rw [hd1_eq]; show revertLbl.toNat ≠ 32; decide
-      | false =>
-        rw [hPC']
-        simp only [hb, Bool.false_eq_true, if_false]
-        rw [hpcEq]
-        native_decide
+    obtain ⟨slot, oldVal, x, hStk_eq, _⟩ := hCascade55
+    obtain ⟨hPC', _, _⟩ :=
+      step_JUMPI_at_pc s s' f' cost op arg _ revertLbl (UInt256.lt oldVal x)
+        (oldVal :: slot :: x :: []) hStk_eq
+        hFetch hCode hpcEq decode_bytecode_at_55 hStep
+    cases hb : (UInt256.lt oldVal x != ⟨0⟩) with
+    | true =>
+      rw [hPC']
+      simp only [hb, ↓reduceIte]
+      show revertLbl.toNat ≠ 32; decide
+    | false =>
+      rw [hPC']
+      simp only [hb, Bool.false_eq_true, if_false]
+      rw [hpcEq]
+      native_decide
   -- Case PC=56 (DUP3). Lands at PC=57 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 56 := pc_eq_ofNat_of_toNat s 56 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_56 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_56 C s s' f' cost op arg hT' hpc hLen hCascade56 hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: tl, _hLen2 =>
