@@ -131,17 +131,15 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 47 ∧ s.stack.length = 2) ∨
    (s.pc.toNat = 48 ∧ s.stack.length = 3 ∧ s.stack[0]? = s.stack[1]?) ∨
    (s.pc.toNat = 49 ∧ s.stack.length = 3 ∧
-     ∃ slot : UInt256,
-       s.stack[1]? = some slot ∧
-       s.stack[0]? = some
-         ((s.accountMap.find? C).option ⟨0⟩
-           (Account.lookupStorage (k := slot)))) ∨
+     ∃ slot oldVal x : UInt256,
+       s.stack = oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
    (s.pc.toNat = 50 ∧ s.stack.length = 4 ∧
-     ∃ slot : UInt256,
-       s.stack[2]? = some slot ∧
-       s.stack[1]? = some
-         ((s.accountMap.find? C).option ⟨0⟩
-           (Account.lookupStorage (k := slot)))) ∨
+     ∃ slot oldVal x : UInt256,
+       s.stack = x :: oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot))) ∨
    (s.pc.toNat = 51 ∧ s.stack.length = 5) ∨
    (s.pc.toNat = 52 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 55 ∧ s.stack.length = 5 ∧ s.stack[0]? = some revertLbl) ∨
@@ -614,17 +612,15 @@ private theorem mk_wethTrace_aux
        (s'.pc.toNat = 47 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 48 ∧ s'.stack.length = 3 ∧ s'.stack[0]? = s'.stack[1]?) ∨
        (s'.pc.toNat = 49 ∧ s'.stack.length = 3 ∧
-         ∃ slot : UInt256,
-           s'.stack[1]? = some slot ∧
-           s'.stack[0]? = some
-             ((s'.accountMap.find? C).option ⟨0⟩
-               (Account.lookupStorage (k := slot)))) ∨
+         ∃ slot oldVal x : UInt256,
+           s'.stack = oldVal :: slot :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
        (s'.pc.toNat = 50 ∧ s'.stack.length = 4 ∧
-         ∃ slot : UInt256,
-           s'.stack[2]? = some slot ∧
-           s'.stack[1]? = some
-             ((s'.accountMap.find? C).option ⟨0⟩
-               (Account.lookupStorage (k := slot)))) ∨
+         ∃ slot oldVal x : UInt256,
+           s'.stack = x :: oldVal :: slot :: x :: [] ∧
+           oldVal = (s'.accountMap.find? C).option ⟨0⟩
+                      (Account.lookupStorage (k := slot))) ∨
        (s'.pc.toNat = 51 ∧ s'.stack.length = 5) ∨
        (s'.pc.toNat = 52 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 55 ∧ s'.stack.length = 5 ∧ s'.stack[0]? = some revertLbl) ∨
@@ -1511,17 +1507,14 @@ private theorem WethTrace_step_at_48
     refine ⟨?_, ?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 48 1
     · rw [hStk']; rfl
-    · refine ⟨t1, ?_, ?_⟩
-      · rw [hStk']; rfl
-      · rw [hStk']
-        show some _ = some _
-        congr 1
-        rw [hHd_eq_t1]
-        show (s.lookupAccount s.executionEnv.codeOwner).option ⟨0⟩
-                (Account.lookupStorage (k := t1)) =
-              (s'.accountMap.find? C).option ⟨0⟩
-                (Account.lookupStorage (k := t1))
-        rw [show s'.accountMap = s.accountMap from hAcc', hCO]
+    · refine ⟨t1,
+              (s.lookupAccount s.executionEnv.codeOwner).option ⟨0⟩
+                (Account.lookupStorage (k := hd)),
+              t2, ?_, ?_⟩
+      · -- Goal: s'.stack = oldVal :: slot :: x :: [].
+        rw [hStk']
+      · -- Goal: oldVal = (s'.accountMap.find? C).option ⟨0⟩ (lookupStorage slot).
+        rw [hHd_eq_t1, show s'.accountMap = s.accountMap from hAcc', hCO]
         rfl
 
 /-! ### PC 49 — `DUP3` (withdraw: duplicate `x` to top) -/
@@ -1531,52 +1524,31 @@ private theorem WethTrace_step_at_49
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 49) (hLen : s.stack.length = 3)
-    (hCascade49 : ∃ slot : UInt256,
-       s.stack[1]? = some slot ∧
-       s.stack[0]? = some
-         ((s.accountMap.find? C).option ⟨0⟩
-           (Account.lookupStorage (k := slot))))
+    (hCascade49 : ∃ slot oldVal x : UInt256,
+       s.stack = oldVal :: slot :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)))
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
   obtain ⟨hCO, hCode, _⟩ := h
   have hpcEq : s.pc = UInt256.ofNat 49 := pc_eq_ofNat_of_toNat s 49 (by decide) hpc
-  match hStk_eq : s.stack, hLen with
-  | hd1 :: hd2 :: hd3 :: [], _ =>
-    obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
-      step_DUP3_at_pc_strong s s' f' cost op arg _ hd1 hd2 hd3 [] hStk_eq
-        hFetch hCode hpcEq decode_bytecode_at_49 hStep
-    -- Extract slot from PC 49's cascade. The cascade gives:
-    --   stack[1]? = some slot ∧ stack[0]? = some lookup(slot).
-    -- Pre-DUP3 stack [hd1; hd2; hd3] gives stack[1]? = some hd2, stack[0]? = some hd1.
-    -- So slot = hd2, and hd1 = lookup(hd2) at C's accountMap.
-    obtain ⟨slot, hSlot, hOldVal⟩ := hCascade49
-    have hSlot_eq : slot = hd2 := by
-      have h1 : s.stack[1]? = some hd2 := by rw [hStk_eq]; rfl
-      rw [h1] at hSlot
-      exact (Option.some.inj hSlot).symm
-    have hHd1_eq : hd1 =
-        (s.accountMap.find? C).option ⟨0⟩
-          (Account.lookupStorage (k := hd2)) := by
-      have h0 : s.stack[0]? = some hd1 := by rw [hStk_eq]; rfl
-      rw [h0] at hOldVal
-      rw [← hSlot_eq]
-      exact Option.some.inj hOldVal
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    iterate 34 right
-    left
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 49 1
-    · rw [hStk']; show (hd3 :: s.stack).length = 4; simp [hLen]
-    · refine ⟨hd2, ?_, ?_⟩
-      · -- Goal: s'.stack[2]? = some hd2.
-        rw [hStk', hStk_eq]; rfl
-      · -- Goal: s'.stack[1]? = some ((s'.accountMap.find? C).option ⟨0⟩ (lookupStorage hd2)).
-        rw [hStk', hStk_eq]
-        show some hd1 = some _
-        congr 1
-        rw [show s'.accountMap = s.accountMap from hAcc']
-        exact hHd1_eq
+  obtain ⟨slot, oldVal, x, hStk_eq, hOldVal⟩ := hCascade49
+  obtain ⟨hPC', hStk', hEE', hAcc'⟩ :=
+    step_DUP3_at_pc_strong s s' f' cost op arg _ oldVal slot x [] hStk_eq
+      hFetch hCode hpcEq decode_bytecode_at_49 hStep
+  refine mk_wethTrace_aux hCO hCode hEE' ?_
+  iterate 34 right
+  left
+  refine ⟨?_, ?_, ?_⟩
+  · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 49 1
+  · rw [hStk']; show (x :: s.stack).length = 4; simp [hLen]
+  · refine ⟨slot, oldVal, x, ?_, ?_⟩
+    · -- Goal: s'.stack = x :: oldVal :: slot :: x :: [].
+      rw [hStk', hStk_eq]
+    · -- Goal: oldVal = (s'.accountMap.find? C).option ⟨0⟩ (lookupStorage slot).
+      rw [show s'.accountMap = s.accountMap from hAcc']
+      exact hOldVal
 
 /-! ### PC 50 — `DUP2` (withdraw: duplicate balance) -/
 
