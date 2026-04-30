@@ -206,11 +206,35 @@ structure WethAssumptions
   /-- Ξ preserves account presence at C.
 
   Real-world justification: Weth's bytecode has no SELFDESTRUCT and no
-  CREATE/CREATE2 — neither can erase C's account. Discharging from Lean
-  requires the framework's `Ξ_preserves_account_at_a_of_Reachable` over
-  a Reachable predicate that handles all halt cases (PCs 31, 41, 79, 85),
-  including the post-PC-85-REVERT pc=86 sink. Currently bundled as a
-  structural assumption pending that extended Reachable predicate. -/
+  CREATE/CREATE2; SELFDESTRUCT in any other contract removes only the
+  running address `Iₐ ≠ C`; CREATE/CREATE2 only insert. So C's account
+  is never removed.
+
+  Discharging from Lean via `Ξ_preserves_account_at_a_of_Reachable`
+  (universal-`I` form) requires a `Reachable` predicate that satisfies
+  the framework's closures **for all `I.codeOwner`**, including
+  contracts whose bytecode we don't know. Specifically:
+
+  * `hReach_decodeSome` must hold at every Reachable state, but for
+    arbitrary code (when `I.codeOwner ≠ C`) decode may be `none`.
+  * `hReach_no_create` similarly requires bytecode knowledge.
+  * `hReach_step` (op-conditional or universal) at `I.codeOwner ≠ C`
+    needs a closure over arbitrary bytecode.
+
+  A genuine discharge requires a bytecode-deployment-closure
+  hypothesis, e.g. "no contract reachable from C's call graph has
+  SELFDESTRUCT at `Iₐ = C` or CREATE2 with a salt hitting C." The
+  framework's Reachable interface does not currently provide a clean
+  way to encode such a global hypothesis without bundling a
+  ΞPreservesAccountAt-style witness.
+
+  The framework now ships an op-conditional variant
+  (`Ξ_preserves_account_at_a_of_Reachable_op_conditional`) that solves
+  the post-halt-state issue (e.g. Weth's PC 86 sink past the bytecode
+  end). The remaining blocker is the universal-`I` closure shape, not
+  the PC-86 closure.
+
+  Bundled as a structural assumption pending framework extension. -/
   xi_preserves_C   : ΞPreservesAccountAt C
   /-- Recipient-balance no-wrap at PC 72's CALL: chain-bound real-world
   fact. **Replaces** the no-wrap part of the previous opaque
