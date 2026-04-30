@@ -5161,9 +5161,10 @@ theorem bytecodePreservesInvariant_from_narrowed
 
 /-- **Final convenience entry: all three opaque cascade-fact assumptions
 discharged as theorems.** Takes only the narrower structural facts
-(`WethAccountAtC`, `WethCallNoWrapAt72`, `WethCallSlackAt72`,
-`WethDepositCascadeStruct`, `WethDepositPreCredit`) and produces
-`ΞPreservesInvariantAtC C`. -/
+(`WethCallNoWrapAt72`, `WethCallSlackAt72`, `WethDepositPreCredit`) and
+produces `ΞPreservesInvariantAtC C`. The `WethDepositCascadeStruct C`
+fact is now discharged as `weth_deposit_cascade` (using
+`WethAccountAtC`, itself a theorem). -/
 theorem bytecodePreservesInvariant_fully_narrowed
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
@@ -5171,10 +5172,11 @@ theorem bytecodePreservesInvariant_fully_narrowed
         I.codeOwner = C → accountPresentAt σ C)
     (hNoWrap : WethCallNoWrapAt72 C)
     (hSlack : WethCallSlackAt72 C)
-    (hDepositCascade : WethDepositCascadeStruct C)
     (hPreCredit : WethDepositPreCredit C) :
     ΞPreservesInvariantAtC C :=
   bytecodePreservesInvariant_from_narrowed C hDeployed hΞ hAccInit hNoWrap hSlack
-    (weth_pc40_cascade C hDepositCascade hPreCredit)
+    (weth_pc40_cascade C
+      (weth_deposit_cascade C (weth_account_at_C C))
+      hPreCredit)
 
 end EvmSmith.Weth

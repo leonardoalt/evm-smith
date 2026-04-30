@@ -174,19 +174,16 @@ structure WethAssumptions
   dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- Bytecode-derivable cascade structure at PC 40 (deposit SSTORE):
-  stack[0] = sender, stack[1] = newBal, σ has C with the sender's
-  storage slot present. **Bytecode-derivable in principle** via
-  cascade threading PCs 32..40 (same pattern as PCs 47..60 already
-  done for pc60). Pending that threading, kept as a structural
-  assumption. -/
-  deposit_cascade  : WethDepositCascadeStruct C
   /-- Θ-pre-credit slack at PC 40: `storageSum - oldVal + newVal ≤
   balanceOf` at PC 40. This is the **Υ-side** fact: `msg.value` was
   added to C's balance by Θ before Ξ entered, so the post-SSTORE
   storageSum (= storageSum + msg.value) is bounded by the post-Θ
   balance. **Cannot be derived from bytecode walks alone** — it
-  lives in the framework's outer Θ/Λ layer. -/
+  lives in the framework's outer Θ/Λ layer.
+
+  Note: the previous `deposit_cascade : WethDepositCascadeStruct C`
+  field has been replaced by an in-Lean theorem `weth_deposit_cascade`
+  (commit 083ea45), so consumers no longer need to supply it. -/
   deposit_slack    : WethDepositPreCredit C
   /-- σ-has-C at Ξ entry: every state at which Ξ is invoked at C with
   `I.codeOwner = C` has `σ.find? C = some _`.
@@ -418,7 +415,7 @@ theorem weth_solvency_invariant
       hAssumptions.deployed hAssumptions.xi_preserves_C
       hAssumptions.account_at_initial
       hAssumptions.call_no_wrap hAssumptions.call_slack
-      hAssumptions.deposit_cascade hAssumptions.deposit_slack
+      hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
