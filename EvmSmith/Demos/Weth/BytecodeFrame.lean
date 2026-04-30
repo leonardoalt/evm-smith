@@ -3926,6 +3926,79 @@ def WethPC72CascadeFacts (C : AccountAddress) : Prop :=
        μ₂.toNat + storageSum s.accountMap C
          ≤ balanceOf s.accountMap C)
 
+/-- Recipient-balance no-wrap at PC 72's CALL: for any recipient
+account, its balance plus the value being transferred fits in
+`UInt256`. This is a **real-world chain bound**: the total ETH supply
+plus any single contract's balance fits in `UInt256`, so adding a
+withdrawn amount (capped at the contract's storage) cannot wrap.
+
+Cannot be derived from bytecode analysis alone — it's a chain-state
+fact orthogonal to WETH's bytecode. -/
+def WethCallNoWrapAt72 (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 72 →
+    ∀ (μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ : UInt256) (tl : Stack UInt256),
+      s.stack = μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: tl →
+      ∀ acc, s.accountMap.find? (AccountAddress.ofUInt256 μ₁) = some acc →
+        acc.balance.toNat + μ₂.toNat < UInt256.size
+
+/-- Post-SSTORE slack at PC 72: at every Weth-reachable PC-72 state,
+the value being transferred (μ₂) plus storageSum is at most balanceOf,
+**and** the caller's account (under the framework's cumbersome address
+form `AccountAddress.ofUInt256 (.ofNat codeOwner)`) is found in σ
+with balance ≥ μ₂.
+
+Derives from the post-PC-60-SSTORE invariant: at PC 60 (pre-SSTORE),
+`storageSum σ_60 ≤ balanceOf σ_60` (WethInvFr); SSTORE decreases
+storage by x and preserves balance, so `storageSum σ_61 + x ≤
+balanceOf σ_61`. Through PCs 61..71 (no σ change), the slack is
+preserved. At PC 72, μ₂ = x (the duplicated withdrawal amount on the
+stack from DUP5 at PC 69), giving the slack.
+
+The caller-account-found bundles the address roundtrip identity
+`AccountAddress.ofUInt256 (.ofNat codeOwner) = codeOwner` with the
+σ-has-C fact (already in WethAccountAtC, but here we materialize the
+roundtripped form needed by the cascade-fact predicate).
+
+Threading this requires extending `WethReachable` with WethInvFr
+preservation (so the PC 60 walk has access to the pre-SSTORE
+invariant). Bundled here as a structural assumption pending that
+extension. -/
+def WethCallSlackAt72 (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 72 →
+    ∀ (μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ : UInt256) (tl : Stack UInt256),
+      s.stack = μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: tl →
+      (μ₂.toNat + storageSum s.accountMap C ≤ balanceOf s.accountMap C) ∧
+      (μ₂ = ⟨0⟩ ∨ ∃ acc,
+        s.accountMap.find?
+            (AccountAddress.ofUInt256
+              (.ofNat s.executionEnv.codeOwner)) = some acc ∧
+        μ₂.toNat ≤ acc.balance.toNat)
+
+/-- **`WethPC72CascadeFacts` is a theorem given the two narrower
+structural facts.** The cascade-fact predicate's three conjuncts are:
+
+1. Recipient no-wrap → from `WethCallNoWrapAt72`.
+2. Caller funds (μ₂ ≤ balance σ C) → from the slack via
+   `storageSum ≥ 0` and the existence of σ[C].
+3. Slack → from `WethCallSlackAt72`.
+
+Conjunct (2)'s caller-existence is from `WethAccountAtC` (already in
+the assumptions for pc60). The funds bound `μ₂ ≤ acc.balance` follows
+from the slack `μ₂ + storageSum ≤ balanceOf` and `storageSum ≥ 0`. -/
+theorem weth_pc72_cascade
+    (C : AccountAddress)
+    (hNoWrap : WethCallNoWrapAt72 C)
+    (hSlack : WethCallSlackAt72 C) :
+    WethPC72CascadeFacts C := by
+  intro s hR hPC72 _hFetch _hWF _hInv μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  obtain ⟨h_slack, h_funds⟩ := hSlack s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  refine ⟨?_, h_funds, Or.inr h_slack⟩
+  exact hNoWrap s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+
 /-- **Compose `WethPC72CascadeFacts` into the full `WethCallSlack`.**
 Closed-form glue: at every reachable CALL state, the unique CALL PC is
 72 (per `WethReachable_call_pc`), so the per-PC cascade-fact predicate
@@ -4721,5 +4794,20 @@ theorem bytecodePreservesInvariant_from_account_and_cascades
     ΞPreservesInvariantAtC C :=
   bytecodePreservesInvariant_from_cascades C hDeployed
     h40 (weth_pc60_cascade C hAccC) h72
+
+/-- **Convenience entry that derives both pc60 and pc72 cascades from
+narrower structural facts.** Replaces the opaque `pc72_cascade` field
+with `WethCallNoWrapAt72` (real-world chain bound) and
+`WethCallSlackAt72` (post-SSTORE slack — derivable from threading once
+WethReachable carries WethInvFr). -/
+theorem bytecodePreservesInvariant_from_narrowed
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hAccC : WethAccountAtC C)
+    (hNoWrap : WethCallNoWrapAt72 C)
+    (hSlack : WethCallSlackAt72 C)
+    (h40 : WethPC40CascadeFacts C) :
+    ΞPreservesInvariantAtC C :=
+  bytecodePreservesInvariant_from_account_and_cascades C hDeployed
+    hAccC h40 (weth_pc72_cascade C hNoWrap hSlack)
 
 end EvmSmith.Weth

@@ -203,15 +203,17 @@ structure WethAssumptions
   field, since it asserts only account presence (one bit), not the
   full per-PC cascade data. -/
   account_at_C     : WethAccountAtC C
-  /-- PC 72 CALL cascade-fact predicate: at every Weth-reachable state at
-  PC 72 (the unique CALL site), the trace cascade exposes the seven
-  popped CALL parameters plus the no-wrap, funds, and slack disjunctions
-  in a narrower form (without the vacuous recipient-≠-codeOwner clause).
-  (Refines the previous `call_slack` field to the precise per-state
-  cascade-trace data, in the shape the trace cascade extension would
-  establish from PC 60's SSTORE-decrement + PCs 61–71 propagation +
-  PC 70's CALLER push + `weth_caller_ne_C`.) -/
-  pc72_cascade     : WethPC72CascadeFacts C
+  /-- Recipient-balance no-wrap at PC 72's CALL: chain-bound real-world
+  fact. **Replaces** the no-wrap part of the previous opaque
+  `pc72_cascade : WethPC72CascadeFacts C` field. -/
+  call_no_wrap     : WethCallNoWrapAt72 C
+  /-- Post-SSTORE slack at PC 72: μ₂ + storageSum ≤ balanceOf, plus
+  caller-account-found-with-balance-≥-μ₂ in the cumbersome
+  `AccountAddress.ofUInt256 (.ofNat codeOwner)` form. **Replaces** the
+  slack/funds parts of the previous opaque `pc72_cascade` field.
+  Derivable from threading the post-PC-60-SSTORE invariant through
+  PCs 61..72 (pending `WethReachable`/WethInvFr extension). -/
+  call_slack       : WethCallSlackAt72 C
 
 /-! ## Conversion to framework predicates
 
@@ -356,9 +358,10 @@ theorem weth_solvency_invariant
   -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
   -- inside the discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant_from_account_and_cascades C
+    bytecodePreservesInvariant_from_narrowed C
       hAssumptions.deployed hAssumptions.account_at_C
-      hAssumptions.pc40_cascade hAssumptions.pc72_cascade
+      hAssumptions.call_no_wrap hAssumptions.call_slack
+      hAssumptions.pc40_cascade
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
