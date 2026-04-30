@@ -3707,6 +3707,80 @@ def WethPC40CascadeFacts (C : AccountAddress) : Prop :=
             (newVal == default) = false) ∨
          s.stack = slot :: ⟨0⟩ :: tl)
 
+/-- **Bytecode-derivable cascade at PC 40 (deposit SSTORE).**
+
+At every Weth-reachable PC 40 state, the stack and storage are in the
+form expected by the deposit flow: stack = [sender, newBal, …] where
+`sender = CALLER` (pushed at PC 34) and `newBal = SLOAD(sender) +
+msg.value` (computed at PC 38 ADD).
+
+Discharging in full requires cascade threading through PCs 32..40 —
+same pattern as the PCs 47..60 threading already done for pc60. The
+threading would establish:
+
+* stack[0] = sender, stack[1] = newBal,
+* slot lookup for sender's balance, with old value `oldBal`,
+* `newBal = oldBal + msg.value`.
+
+Pending that threading, this is bundled as a structural assumption.
+**Bytecode-derivable in principle**, just not yet threaded. -/
+def WethDepositCascadeStruct (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 40 →
+    fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) →
+    ∃ (slot : UInt256) (tl : Stack UInt256),
+      ∃ (acc : Account .EVM) (oldVal : UInt256),
+        s.accountMap.find? C = some acc ∧
+        acc.storage.find? slot = some oldVal ∧
+        (∃ newVal, s.stack = slot :: newVal :: tl)
+
+/-- **Θ-pre-credit slack at PC 40 (deposit SSTORE).**
+
+The genuinely-Υ-side fact: at PC 40, `storageSum σ C - oldVal +
+newVal ≤ balanceOf σ C`. This encodes that Θ already credited
+`msg.value` to C's balance before Ξ entered, so the post-SSTORE
+storageSum (= old storageSum + msg.value) is bounded by the post-Θ
+balance (= pre-Θ balance + msg.value).
+
+**Cannot be derived from bytecode walks alone** — it lives in the
+framework's outer Θ/Λ layer. Stays as a structural assumption.
+
+The disjunction (decrement vs. erase) handles both newVal ≠ 0 (normal
+deposit) and newVal = 0 (zero-deposit edge case, where the slack is
+trivially the existing `storageSum - oldVal ≤ balanceOf` from the
+pre-state invariant). -/
+def WethDepositPreCredit (C : AccountAddress) : Prop :=
+  ∀ s : EVM.State,
+    WethReachable C s →
+    s.pc.toNat = 40 →
+    fetchInstr s.executionEnv s.pc =
+      .ok (.StackMemFlow .SSTORE, none) →
+    ∀ (slot : UInt256) (tl : Stack UInt256) (acc : Account .EVM)
+      (oldVal : UInt256),
+      s.accountMap.find? C = some acc →
+      acc.storage.find? slot = some oldVal →
+      ((∃ newVal,
+          s.stack = slot :: newVal :: tl ∧
+          storageSum s.accountMap C - oldVal.toNat + newVal.toNat
+            ≤ balanceOf s.accountMap C ∧
+          (newVal == default) = false) ∨
+       s.stack = slot :: ⟨0⟩ :: tl)
+
+/-- **`WethPC40CascadeFacts` is a theorem given the two narrower
+structural facts.** -/
+theorem weth_pc40_cascade
+    (C : AccountAddress)
+    (hCascade : WethDepositCascadeStruct C)
+    (hPreCredit : WethDepositPreCredit C) :
+    WethPC40CascadeFacts C := by
+  intro s hR hPC40 hFetch
+  obtain ⟨slot, tl, acc, oldVal, h_find, h_findSlot, _hStk⟩ :=
+    hCascade s hR hPC40 hFetch
+  refine ⟨slot, tl, acc, oldVal, h_find, h_findSlot, ?_⟩
+  exact hPreCredit s hR hPC40 hFetch slot tl acc oldVal h_find h_findSlot
+
 /-- **PC 60 SSTORE preservation from cascade facts.** Closed-form glue:
 given the cascade facts at PC 60, every reachable SSTORE step at PC 60
 preserves the invariant. Composes `WethReachable_sstore_pc` to fix the
@@ -4809,5 +4883,21 @@ theorem bytecodePreservesInvariant_from_narrowed
     ΞPreservesInvariantAtC C :=
   bytecodePreservesInvariant_from_account_and_cascades C hDeployed
     hAccC h40 (weth_pc72_cascade C hNoWrap hSlack)
+
+/-- **Final convenience entry: all three opaque cascade-fact assumptions
+discharged as theorems.** Takes only the narrower structural facts
+(`WethAccountAtC`, `WethCallNoWrapAt72`, `WethCallSlackAt72`,
+`WethDepositCascadeStruct`, `WethDepositPreCredit`) and produces
+`ΞPreservesInvariantAtC C`. -/
+theorem bytecodePreservesInvariant_fully_narrowed
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hAccC : WethAccountAtC C)
+    (hNoWrap : WethCallNoWrapAt72 C)
+    (hSlack : WethCallSlackAt72 C)
+    (hDepositCascade : WethDepositCascadeStruct C)
+    (hPreCredit : WethDepositPreCredit C) :
+    ΞPreservesInvariantAtC C :=
+  bytecodePreservesInvariant_from_narrowed C hDeployed hAccC hNoWrap hSlack
+    (weth_pc40_cascade C hDepositCascade hPreCredit)
 
 end EvmSmith.Weth

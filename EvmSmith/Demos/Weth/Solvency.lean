@@ -174,13 +174,20 @@ structure WethAssumptions
   dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- PC 40 deposit-SSTORE cascade-fact predicate: at every Weth-reachable
-  state at PC 40, the trace cascade exposes the slot/value/old-value/
-  Θ-pre-credit slack data needed to discharge the SSTORE invariant
-  preservation step. (Refines the previous `sstore_preserves` field
-  to the precise per-PC cascade-trace data, in the shape the trace
-  cascade extension would establish.) -/
-  pc40_cascade     : WethPC40CascadeFacts C
+  /-- Bytecode-derivable cascade structure at PC 40 (deposit SSTORE):
+  stack[0] = sender, stack[1] = newBal, σ has C with the sender's
+  storage slot present. **Bytecode-derivable in principle** via
+  cascade threading PCs 32..40 (same pattern as PCs 47..60 already
+  done for pc60). Pending that threading, kept as a structural
+  assumption. -/
+  deposit_cascade  : WethDepositCascadeStruct C
+  /-- Θ-pre-credit slack at PC 40: `storageSum - oldVal + newVal ≤
+  balanceOf` at PC 40. This is the **Υ-side** fact: `msg.value` was
+  added to C's balance by Θ before Ξ entered, so the post-SSTORE
+  storageSum (= storageSum + msg.value) is bounded by the post-Θ
+  balance. **Cannot be derived from bytecode walks alone** — it
+  lives in the framework's outer Θ/Λ layer. -/
+  deposit_slack    : WethDepositPreCredit C
   /-- σ-has-C invariant: every Weth-reachable state has σ.find? C = some _.
 
   This **replaces** the previous opaque `pc60_cascade : WethPC60CascadeFacts C`
@@ -358,10 +365,10 @@ theorem weth_solvency_invariant
   -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
   -- inside the discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant_from_narrowed C
+    bytecodePreservesInvariant_fully_narrowed C
       hAssumptions.deployed hAssumptions.account_at_C
       hAssumptions.call_no_wrap hAssumptions.call_slack
-      hAssumptions.pc40_cascade
+      hAssumptions.deposit_cascade hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
