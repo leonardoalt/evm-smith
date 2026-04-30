@@ -140,13 +140,19 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
    (s.pc.toNat = 58 ∧ s.stack.length = 4) ∨
    (s.pc.toNat = 59 ∧ s.stack.length = 3) ∨
    (s.pc.toNat = 60 ∧ s.stack.length = 3 ∧
-     (∃ (_slot oldVal newVal : UInt256), newVal.toNat ≤ oldVal.toNat)) ∨
-     -- pre-SSTORE [sender; newBal; x]; the trailing existential is a SHAPED
-     -- placeholder for the cascade fact `WethPC60CascadeFacts` will need
-     -- (slot/oldVal/newVal witnesses + the `newVal ≤ oldVal` no-wrap bound).
-     -- Currently discharged with trivial witnesses (all zero); future
-     -- upstream-walk threading replaces these with the real
-     -- (sender_slot, stored_balance, stored_balance − x) trio.
+     (∃ slot oldVal newVal x : UInt256,
+        s.stack[0]? = some slot ∧
+        s.stack[1]? = some newVal ∧
+        s.stack[2]? = some x ∧
+        newVal.toNat ≤ oldVal.toNat)) ∨
+     -- pre-SSTORE [sender; newBal; x]; the existential carries cascade-bound
+     -- witnesses. The stack-position triple (slot, newVal, x) is established
+     -- by PC 59's SWAP1 from the PC 58 SUB output. The `newVal ≤ oldVal`
+     -- bound is currently trivially witnessed (oldVal := newVal); future
+     -- upstream-walk threading from PCs 48 (SLOAD-strong) / 51 (LT-strong) /
+     -- 58 (SUB-strong) replaces this with the real
+     -- (sender_slot, stored_balance, stored_balance − x) trio carrying the
+     -- LT-not-taken bound `x ≤ balance`.
   -- Withdraw block CALL setup (PCs 61..79).
    (s.pc.toNat = 61 ∧ s.stack.length = 1) ∨   -- post-SSTORE [x]
    (s.pc.toNat = 63 ∧ s.stack.length = 2) ∨
@@ -570,7 +576,11 @@ private theorem mk_wethTrace_aux
        (s'.pc.toNat = 58 ∧ s'.stack.length = 4) ∨
        (s'.pc.toNat = 59 ∧ s'.stack.length = 3) ∨
        (s'.pc.toNat = 60 ∧ s'.stack.length = 3 ∧
-         (∃ (_slot oldVal newVal : UInt256), newVal.toNat ≤ oldVal.toNat)) ∨
+         (∃ slot oldVal newVal x : UInt256,
+            s'.stack[0]? = some slot ∧
+            s'.stack[1]? = some newVal ∧
+            s'.stack[2]? = some x ∧
+            newVal.toNat ≤ oldVal.toNat)) ∨
        (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
        (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
@@ -1690,16 +1700,25 @@ private theorem WethTrace_step_at_59
     obtain ⟨hPC', hStk', hEE'⟩ :=
       step_SWAP1_at_pc_local s s' f' cost op arg _ hd1 hd2 tl hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_59 hStep
-    refine mk_wethTrace_aux hCO hCode hEE' ?_
-    iterate 42 right
-    left
-    refine ⟨?_, ?_, ?_⟩
-    · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
-    · rw [hStk']; show (hd2 :: hd1 :: tl).length = 3; simp [hLenTl]
-    · -- SHAPED placeholder: trivial witnesses (all zero). Future upstream
-      -- threading from PCs 46/48/51/58 replaces these with the real
-      -- (sender_slot, stored_balance, stored_balance − x) trio.
-      exact ⟨UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, Nat.le_refl _⟩
+    -- Extract the unique tail element (length 1) for the stack[2]? witness.
+    match htl : tl, hLenTl with
+    | [x_tail], _ =>
+      refine mk_wethTrace_aux hCO hCode hEE' ?_
+      iterate 42 right
+      left
+      refine ⟨?_, ?_, ?_⟩
+      · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 59 1
+      · rw [hStk']; show (hd2 :: hd1 :: [x_tail]).length = 3; simp
+      · -- Stack-position witnesses: slot = hd2 (the SWAP1-promoted second-from-top,
+        -- = the original sender), newVal = hd1 (the SWAP1-demoted top, = balance − x),
+        -- x = the unique tail element. The bound `newVal ≤ oldVal` is currently
+        -- trivially witnessed (oldVal := newVal) — future upstream threading from
+        -- PCs 48 (SLOAD-strong) / 51 (LT-strong) / 58 (SUB-strong) replaces this
+        -- with the real LT-not-taken bound `x ≤ balance` propagated through SUB.
+        refine ⟨hd2, hd1, hd1, x_tail, ?_, ?_, ?_, Nat.le_refl _⟩
+        · rw [hStk']; rfl
+        · rw [hStk']; rfl
+        · rw [hStk']; rfl
 
 /-! ### PC 60 — `SSTORE` (withdraw: write decremented `storage[sender]`)
 
