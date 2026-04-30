@@ -2847,6 +2847,31 @@ private theorem WethReachable_op_in_allowed
        refine ⟨⟨?_, ?_, ?_, ?_, ?_, ?_⟩, ?_, ?_, ?_⟩ <;> intro hh <;>
          exact absurd hh (by decide))  -- strict (handled ∧ ¬SD ∧ ¬SSTORE ∧ ¬TSTORE)
 
+/-- Every `WethOpAllowed` op is non-CREATE/CREATE2. Direct case-split:
+strictlyPreservesAccountMap excludes CREATE/CREATE2 (`handledByEvmYulStep`'s
+first two conjuncts), CALL ≠ CREATE, SSTORE ≠ CREATE. -/
+private theorem WethOpAllowed_no_create
+    (op : Operation .EVM) (h : WethOpAllowed op) :
+    op ≠ .CREATE ∧ op ≠ .CREATE2 := by
+  rcases h with hStrict | hCall | hSStore
+  · exact ⟨hStrict.1.1, hStrict.1.2.1⟩
+  · subst hCall
+    exact ⟨by decide, by decide⟩
+  · subst hSStore
+    exact ⟨by decide, by decide⟩
+
+/-- Direct discharge of the `hReach_no_create` framework hypothesis for
+`WethReachable`: every Weth-reachable state has a non-CREATE/CREATE2
+decoded op. Composes `WethReachable_op_in_allowed` with
+`WethOpAllowed_no_create`. -/
+theorem weth_no_create
+    (C : AccountAddress) (s : EVM.State) (op : Operation .EVM)
+    (arg : Option (UInt256 × Nat))
+    (h : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg)) :
+    op ≠ .CREATE ∧ op ≠ .CREATE2 :=
+  WethOpAllowed_no_create op (WethReachable_op_in_allowed C s op arg h hFetch)
+
 /-! ## Structural hypotheses (§H.2 closure for Weth's bytecode)
 
 These three predicates capture the load-bearing per-state facts that
