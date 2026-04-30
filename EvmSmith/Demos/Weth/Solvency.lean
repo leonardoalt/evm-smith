@@ -188,28 +188,30 @@ structure WethAssumptions
   balance. **Cannot be derived from bytecode walks alone** — it
   lives in the framework's outer Θ/Λ layer. -/
   deposit_slack    : WethDepositPreCredit C
-  /-- σ-has-C invariant: every Weth-reachable state has σ.find? C = some _.
+  /-- σ-has-C at Ξ entry: every state at which Ξ is invoked at C with
+  `I.codeOwner = C` has `σ.find? C = some _`.
 
-  This **replaces** the previous opaque `pc60_cascade : WethPC60CascadeFacts C`
-  field. The PC 60 cascade-fact predicate is now a **theorem**
-  (`weth_pc60_cascade`), discharged from the threaded `WethTrace`
-  cascade (PCs 47..60) plus this narrower σ-has-C fact.
+  This **replaces** the previous opaque `account_at_C : WethAccountAtC C`
+  field. `WethAccountAtC` is now a **theorem** (`weth_account_at_C`),
+  discharged via the σ-has-C conjunct now embedded in `WethReachable`.
+  The remaining structural fact is just σ-presence at the *initial*
+  state — strictly narrower (one bit at one moment vs. an existential
+  per every reachable state).
 
-  Why σ-has-C is true: Weth's bytecode has no SELFDESTRUCT, and Ξ
-  enters at C with σ[C] = some _ (framework guarantee from Λ's
-  account-at-codeOwner setup). Across the X loop, only SSTORE
-  (modifies storage but preserves account presence) and CALL (Θ
-  preserves σ at the source address) touch σ at C, neither removes
-  it.
+  Real-world justification: Λ enters Weth at C with σ[C] = some acc
+  (framework guarantee). Combined with `xi_preserves_C` below, this
+  feeds the σ-conjunct of `WethReachable` through the entire X loop. -/
+  account_at_initial : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+                          I.codeOwner = C → accountPresentAt σ C
+  /-- Ξ preserves account presence at C.
 
-  Discharging this from Lean requires extending `WethReachable`'s
-  preservation across `weth_step_closure` cases (or exposing a
-  framework-level "Reachable preserves σ-at-codeOwner" helper). For
-  now it remains a structural fact bundled with the assumption set;
-  it is **strictly narrower** than the prior opaque cascade-fact
-  field, since it asserts only account presence (one bit), not the
-  full per-PC cascade data. -/
-  account_at_C     : WethAccountAtC C
+  Real-world justification: Weth's bytecode has no SELFDESTRUCT and no
+  CREATE/CREATE2 — neither can erase C's account. Discharging from Lean
+  requires the framework's `Ξ_preserves_account_at_a_of_Reachable` over
+  a Reachable predicate that handles all halt cases (PCs 31, 41, 79, 85),
+  including the post-PC-85-REVERT pc=86 sink. Currently bundled as a
+  structural assumption pending that extended Reachable predicate. -/
+  xi_preserves_C   : ΞPreservesAccountAt C
   /-- Recipient-balance no-wrap at PC 72's CALL: chain-bound real-world
   fact. **Replaces** the no-wrap part of the previous opaque
   `pc72_cascade : WethPC72CascadeFacts C` field. -/
@@ -366,7 +368,8 @@ theorem weth_solvency_invariant
   -- inside the discharger, so consumers no longer supply it.
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant_fully_narrowed C
-      hAssumptions.deployed hAssumptions.account_at_C
+      hAssumptions.deployed hAssumptions.xi_preserves_C
+      hAssumptions.account_at_initial
       hAssumptions.call_no_wrap hAssumptions.call_slack
       hAssumptions.deposit_cascade hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.
