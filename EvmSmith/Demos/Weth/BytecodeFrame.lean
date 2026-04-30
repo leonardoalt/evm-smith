@@ -383,6 +383,43 @@ private theorem decode_bytecode_at_83 :
 private theorem decode_bytecode_at_85 :
     decode bytecode (UInt256.ofNat 85) = some (.REVERT, none) := by native_decide
 
+/-! ## Withdraw cascade helper predicate
+
+The withdraw block (PCs 42..60) computes `storage[sender] := storage[sender] - x`,
+guarded by an LT-not-taken at PC 55 ensuring `x ≤ storage[sender]`. To
+discharge `WethPC60CascadeFacts`, the trace at PCs 48..60 needs to
+expose:
+
+* the `slot` (sender) on which the SLOAD/SSTORE operates,
+* the `oldVal := lookupAccount.option ⟨0⟩ (lookupStorage k=slot)`
+  that PC 48's SLOAD-strong wrapper pushes (this collapses to
+  `acc.storage.findD slot ⟨0⟩` when `find? C = some acc`),
+* the `x` (the requested withdraw amount, originally on the stack),
+* the bound `x.toNat ≤ oldVal.toNat` (established at PC 55 JUMPI
+  not-taken from PC 51's `LT(oldVal, x) = 0` result),
+* the SUB equation `newVal = oldVal - x` (established at PC 58).
+
+`WithdrawCascadeAt s C slot oldVal x` captures the find?/findD/bound
+invariants common to PCs 48..60 (the SUB equation is added at PC 58
+and threaded through PCs 59, 60 separately). The conjunction of
+`WithdrawCascadeAt` with the SUB equation gives the data needed to
+discharge `WethPC60CascadeFacts` from the trace. -/
+
+/-- The withdraw cascade's per-state invariant at slot `slot`:
+* `s.accountMap.find? C = some acc`, and
+* `acc.storage.findD slot ⟨0⟩ = oldVal`, and
+* `x.toNat ≤ oldVal.toNat`.
+
+This is the data that PC 48's SLOAD-strong (case-split on `find? C`)
++ PC 51's LT-strong + PC 55's JUMPI-not-taken jointly establish, and
+that PCs 56..60 preserve through the non-storage-touching ops. -/
+private def WithdrawCascadeAt (s : EVM.State) (C : AccountAddress)
+    (slot oldVal x : UInt256) : Prop :=
+  ∃ acc : Account .EVM,
+    s.accountMap.find? C = some acc ∧
+    acc.storage.findD slot ⟨0⟩ = oldVal ∧
+    x.toNat ≤ oldVal.toNat
+
 /-! ## Local PC-walk wrapper for SWAP1
 
 `EvmYul.Frame.PcWalk` doesn't expose a `step_SWAP1_at_pc` wrapper, but
