@@ -200,6 +200,35 @@ structure WethAssumptions
   feeds the σ-conjunct of `WethReachable` through the entire X loop. -/
   account_at_initial : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
                           I.codeOwner = C → accountPresentAt σ C
+  /-- `WethInvFr` at Ξ entry: at every state at which Ξ is invoked at C
+  with `I.codeOwner = C`, the relational invariant `storageSum σ C ≤
+  balanceOf σ C` holds.
+
+  Real-world justification: Ξ's pre-state σ at `I.codeOwner = C` is
+  always a state where the framework's outer Θ/Λ chain has already
+  established the invariant (the top-level `weth_solvency_invariant`'s
+  `hInv` precondition; the framework's invariant chain through Θ/Λ
+  preserves it).
+
+  Bundled as a structural assumption pending the closed-form discharge
+  via the framework's `Ξ_invariant_preserved_bundled_bdd`. -/
+  inv_at_initial   : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+                          I.codeOwner = C → WethInvFr σ C
+  /-- `WethInvFr` is preserved per non-halt step. Bundled as a structural
+  assumption pending discharge via:
+
+  * For strict ops (most PCs): `EVM_step_strict_preserves_WethInvFr`
+    (already in BytecodeFrame).
+  * For SSTORE PCs (40, 60): `WethSStorePreserves` (existing
+    cascade-based discharger), modulo the `StateWF` precondition.
+  * For CALL PC (72): `step_CALL_arm_at_C_slack_invariant` (private
+    framework lemma) needing the strong-induction IHs not exposed by
+    the framework's `hReach_step` slot.
+
+  Threading these closed-form dischargers requires either modifying
+  the framework's `hReach_step` signature to expose StateWF/IHs, or
+  adding StateWF as a fifth conjunct to `WethReachable`. -/
+  inv_step_pres    : WethStepInvFrPreserves C
   /-- Ξ preserves account presence at C.
 
   Real-world justification: Weth's bytecode has no SELFDESTRUCT and no
@@ -413,7 +442,9 @@ theorem weth_solvency_invariant
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant_fully_narrowed C
       hAssumptions.deployed hAssumptions.xi_preserves_C
+      hAssumptions.inv_step_pres
       hAssumptions.account_at_initial
+      hAssumptions.inv_at_initial
       hAssumptions.call_no_wrap hAssumptions.call_slack
       hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.

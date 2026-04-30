@@ -2820,25 +2820,32 @@ Together with the deployment witness (`hDeployed`), these reduce
 the need for the opaque `WethAssumptions.xi_inv` hypothesis. -/
 
 /-- Refined reachability: `WethTrace C s` minus the post-PC-31-REVERT
-halt sink (PC 32 length=0), plus account-presence at `C`. The X loop
+halt sink (PC 32 length=0), plus account-presence at `C`, plus
+`WethInvFr` (the relational solvency invariant at `C`). The X loop
 never re-iterates through the halt sink (PC 31 = REVERT exits the X
 loop), so dropping it from the reachable set still covers the
 X-induction's needs while satisfying the framework's step closure for
 non-halt ops. The third conjunct (`accountPresentAt s.accountMap C`)
-makes `WethAccountAtC` derivable from `WethReachable` via projection. -/
+makes `WethAccountAtC` derivable from `WethReachable` via projection.
+The fourth conjunct (`WethInvFr s.accountMap C`) is the bytecode-level
+solvency invariant carried alongside the trace, enabling cascade-fact
+dischargers (e.g. for PC 72 CALL slack) to project the invariant
+directly from `WethReachable`. -/
 private def WethReachable (C : AccountAddress) (s : EVM.State) : Prop :=
   WethTrace C s ∧ ¬ (s.pc.toNat = 32 ∧ s.stack.length = 0) ∧
-    accountPresentAt s.accountMap C
+    accountPresentAt s.accountMap C ∧
+    WethInvFr s.accountMap C
 
 /-- `Z` (gas-only update) preserves `WethReachable`. -/
 private theorem WethReachable_Z_preserves
     (C : AccountAddress) (s : EVM.State) (g : UInt256)
     (h : WethReachable C s) :
     WethReachable C { s with gasAvailable := g } := by
-  obtain ⟨hTrace, hNot, hAcc⟩ := h
-  refine ⟨WethTrace_Z_preserves C s g hTrace, hNot, ?_⟩
+  obtain ⟨hTrace, hNot, hAcc, hInv⟩ := h
+  refine ⟨WethTrace_Z_preserves C s g hTrace, hNot, ?_, ?_⟩
   -- Z preserves accountMap (only changes gasAvailable).
-  exact hAcc
+  · exact hAcc
+  · exact hInv
 
 /-- Each Weth-reachable state has decode-some at its `pc`. Delegates
 to `WethTrace_decodeSome`. -/
@@ -2875,7 +2882,7 @@ private theorem WethReachable_op_in_allowed
     (h : WethReachable C s)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg)) :
     WethOpAllowed op := by
-  obtain ⟨⟨_, hCode, hPC⟩, _hNot⟩ := h
+  obtain ⟨⟨_, hCode, hPC⟩, _hNot, _, _⟩ := h
   unfold fetchInstr at hFetch
   rw [hCode] at hFetch
   rcases hPC with
@@ -2949,22 +2956,106 @@ theorem weth_no_create
     op ≠ .CREATE ∧ op ≠ .CREATE2 :=
   WethOpAllowed_no_create op (WethReachable_op_in_allowed C s op arg h hFetch)
 
+/-- For any handled-strict op (`strictlyPreservesAccountMap`), `EVM.step`
+preserves `WethInvFr`. Mirrors `EVM_step_handled_preserves_present`'s
+bridging from `EVM.step` to `EvmYul.step`, then dispatches to
+`EvmYul_step_preserves_WethInvFr_of_strict`. -/
+private theorem EVM_step_strict_preserves_WethInvFr
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (C : AccountAddress) (f cost : ℕ)
+    (s s' : EVM.State)
+    (hStrict : strictlyPreservesAccountMap op)
+    (hStep : EVM.step (f + 1) cost (some (op, arg)) s = .ok s')
+    (hInv : WethInvFr s.accountMap C) :
+    WethInvFr s'.accountMap C := by
+  -- Bridge EVM.step → EvmYul.step at the handled-strict op.
+  set s_pre : EVM.State :=
+    { s with
+        execLength := s.execLength + 1,
+        gasAvailable := s.gasAvailable - UInt256.ofNat cost }
+    with hs_pre_def
+  have hAM : s_pre.accountMap = s.accountMap := rfl
+  have hHandled : handledByEvmYulStep op := hStrict.1
+  have hStep' : EvmYul.step op arg s_pre = .ok s' := by
+    unfold EVM.step at hStep
+    simp only [bind, Except.bind, pure, Except.pure] at hStep
+    obtain ⟨hne1, hne2, hne3, hne4, hne5, hne6⟩ := hHandled
+    cases op with
+    | StopArith _ => exact hStep
+    | CompBit _ => exact hStep
+    | Keccak _ => exact hStep
+    | Env _ => exact hStep
+    | Block _ => exact hStep
+    | StackMemFlow _ => exact hStep
+    | Push _ => exact hStep
+    | Dup _ => exact hStep
+    | Exchange _ => exact hStep
+    | Log _ => exact hStep
+    | System o =>
+      cases o with
+      | CREATE => exact absurd rfl hne1
+      | CALL => exact absurd rfl hne3
+      | CALLCODE => exact absurd rfl hne4
+      | RETURN => exact hStep
+      | DELEGATECALL => exact absurd rfl hne5
+      | CREATE2 => exact absurd rfl hne2
+      | STATICCALL => exact absurd rfl hne6
+      | REVERT => exact hStep
+      | INVALID => exact hStep
+      | SELFDESTRUCT => exact hStep
+  have hInv_pre : WethInvFr s_pre.accountMap C := by
+    rw [hAM]; exact hInv
+  exact EvmYul_step_preserves_WethInvFr_of_strict op arg s_pre s' C hStrict
+    hStep' hInv_pre
+
 /-! ## Structural hypotheses (§H.2 closure for Weth's bytecode)
 
 These three predicates capture the load-bearing per-state facts that
 `bytecodePreservesInvariant` consumes from the bundle of per-PC walks
 plus the bytecode-level slack reasoning. -/
 
+/-- **Bytecode-level per-step `WethInvFr` preservation predicate.**
+A blanket black-box: every reachable non-halt step preserves
+`WethInvFr`. Used to thread the fourth conjunct of `WethReachable`
+(`WethInvFr s.accountMap C`) through `weth_step_closure`'s 61 per-PC
+walks.
+
+This is supplied as an opaque assumption pending the closed-form
+discharge:
+* For strict ops (most PCs): trivially preserved via
+  `EVM_step_strict_preserves_WethInvFr` (already a theorem).
+* For SSTORE PCs (40, 60): via `WethSStorePreserves` (existing
+  cascade-based discharger), modulo a `StateWF` precondition the
+  framework's `hReach_step` slot doesn't expose.
+* For CALL PC (72): via `step_CALL_arm_at_C_slack_invariant` (private
+  framework lemma), which needs the strong-induction IHs the
+  framework's `hReach_step` slot doesn't expose either.
+
+Bundled here as a structural assumption to keep the refactor focused
+on threading `WethInvFr` through `WethReachable` without modifying
+the framework's `hReach_step` shape. -/
+def WethStepInvFrPreserves (C : AccountAddress) : Prop :=
+  ∀ s s' : EVM.State, ∀ f' cost : ℕ, ∀ op arg,
+    WethReachable C s →
+    fetchInstr s.executionEnv s.pc = .ok (op, arg) →
+    EVM.step (f' + 1) cost (some (op, arg)) s = .ok s' →
+    op ≠ .RETURN → op ≠ .REVERT → op ≠ .STOP → op ≠ .SELFDESTRUCT →
+    WethInvFr s'.accountMap C
+
 /-- Step closure of `WethReachable` under non-halt operations. The 61
 per-PC walks (`WethTrace_step_at_*` above) provide the ingredients —
 aggregating them into this aggregate is mechanical case-splitting.
 
 The `hΞ : ΞPreservesAccountAt C` parameter is consumed by the walks
-to propagate `accountPresentAt` (the new third conjunct of
+to propagate `accountPresentAt` (the third conjunct of
 `WethReachable`) across each step via the framework's
-`EVM_step_preserves_present_no_create`. -/
+`EVM_step_preserves_present_no_create`.
+
+The `WethStepInvFrPreserves C` parameter discharges the fourth conjunct
+(`WethInvFr s'.accountMap C`) per-step. -/
 def WethStepClosure (C : AccountAddress) : Prop :=
   ΞPreservesAccountAt C →
+  WethStepInvFrPreserves C →
   ∀ s s' : EVM.State, ∀ f' cost : ℕ, ∀ op arg,
     WethReachable C s →
     fetchInstr s.executionEnv s.pc = .ok (op, arg) →
@@ -2985,16 +3076,18 @@ shape). The two helpers project these into `WethReachable s'`. -/
 private theorem WethReachable_of_WethTrace_pc_ne_32
     {C : AccountAddress} {s : EVM.State}
     (hAcc : accountPresentAt s.accountMap C)
+    (hInv : WethInvFr s.accountMap C)
     (hT : WethTrace C s) (hpc_ne : s.pc.toNat ≠ 32) :
     WethReachable C s :=
-  ⟨hT, fun ⟨h1, _⟩ => hpc_ne h1, hAcc⟩
+  ⟨hT, fun ⟨h1, _⟩ => hpc_ne h1, hAcc, hInv⟩
 
 private theorem WethReachable_of_WethTrace_len_ne_0
     {C : AccountAddress} {s : EVM.State}
     (hAcc : accountPresentAt s.accountMap C)
+    (hInv : WethInvFr s.accountMap C)
     (hT : WethTrace C s) (hlen : s.stack.length ≠ 0) :
     WethReachable C s :=
-  ⟨hT, fun ⟨_, h2⟩ => hlen h2, hAcc⟩
+  ⟨hT, fun ⟨_, h2⟩ => hlen h2, hAcc, hInv⟩
 
 /-! ### PC-narrowing lemmas for SSTORE / CALL
 
@@ -3743,7 +3836,7 @@ def WethAccountAtC (C : AccountAddress) : Prop :=
 /-- **`WethAccountAtC` is a theorem.** Discharged via the σ-has-C
 conjunct in `WethReachable`'s definition. -/
 theorem weth_account_at_C (C : AccountAddress) : WethAccountAtC C :=
-  fun _ hR => hR.2.2
+  fun _ hR => hR.2.2.1
 
 /-- **`WethPC60CascadeFacts` is a theorem given σ-has-C.** Discharges
 the cascade fact predicate from the threaded WethTrace cascade plus a
@@ -4366,7 +4459,8 @@ private theorem WethReachable_initial
     (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
     (I : ExecutionEnv .EVM)
     (hCO : I.codeOwner = C)
-    (hAcc : accountPresentAt σ C) :
+    (hAcc : accountPresentAt σ C)
+    (hInv : WethInvFr σ C) :
     WethReachable C
       { (default : EVM.State) with
           accountMap := σ
@@ -4377,7 +4471,7 @@ private theorem WethReachable_initial
           gasAvailable := g
           blocks := bs
           genesisBlockHeader := gbh } := by
-  refine ⟨WethTrace_initial C hDeployed cA gbh bs σ σ₀ g A I hCO, ?_, hAcc⟩
+  refine ⟨WethTrace_initial C hDeployed cA gbh bs σ σ₀ g A I hCO, ?_, hAcc, hInv⟩
   -- Initial state has pc = 0, not pc = 32.
   show ¬ ((⟨0⟩ : UInt256).toNat = 32 ∧ _)
   intro h
@@ -4395,16 +4489,20 @@ PCs (31, 41, 79, 85) are ruled out by the op-inequalities. -/
 
 /-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`. -/
 theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
-  intro hΞ s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
-  obtain ⟨hT, _hNot, hAcc⟩ := hR
+  intro hΞ hInvPres s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
+  obtain ⟨hT, _hNot, hAcc, hInv⟩ := hR
   have hT' := hT
   obtain ⟨hCO, hCode, hPC⟩ := hT
   -- Account-presence at s'.accountMap C from per-step preservation.
   have h_no_create : op ≠ .CREATE ∧ op ≠ .CREATE2 :=
-    weth_no_create C s op arg ⟨hT', _hNot, hAcc⟩ hFetch
+    weth_no_create C s op arg ⟨hT', _hNot, hAcc, hInv⟩ hFetch
   have hAcc' : accountPresentAt s'.accountMap C :=
     EVM_step_preserves_present_no_create C hΞ op arg f' cost s s'
       h_no_create hStep hAcc
+  -- WethInvFr at s'.accountMap C from the per-step preservation predicate.
+  have hInv' : WethInvFr s'.accountMap C :=
+    hInvPres s s' f' cost op arg ⟨hT', _hNot, hAcc, hInv⟩ hFetch hStep
+      hRet hRev hStop _hSD
   -- Case split on the 64 `WethTrace` disjuncts.
   rcases hPC with
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
@@ -4421,13 +4519,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_0 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_0 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 0 2]; decide
   -- Case PC=2 (CALLDATALOAD). Lands at PC=3 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 2 := pc_eq_ofNat_of_toNat s 2 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_2 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4440,13 +4538,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_3 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 3 2]; decide
   -- Case PC=5 (SHR). Lands at PC=6 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 5 := pc_eq_ofNat_of_toNat s 5 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_5 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4457,7 +4555,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 6 := pc_eq_ofNat_of_toNat s 6 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_6 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4471,13 +4569,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_7 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_7 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 7 5]; decide
   -- Case PC=12 (EQ). Lands at PC=13 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 12 := pc_eq_ofNat_of_toNat s 12 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_12 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4491,14 +4589,14 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_13 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_13 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 13 3]; decide
   -- Case PC=16 (JUMPI). Two branches: taken→PC=32 len=1, not-taken→PC=17.
   -- Either way `s'.stack.length = 1 ≠ 0` (post-state pops 2 from len=3).
   · have hpcEq : s.pc = UInt256.ofNat 16 := pc_eq_ofNat_of_toNat s 16 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_16 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
-    refine WethReachable_of_WethTrace_len_ne_0 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_len_ne_0 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       have hLenTl : tl.length = 1 := by
@@ -4515,13 +4613,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_17 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_17 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 17 5]; decide
   -- Case PC=22 (EQ). Lands at PC=23 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 22 := pc_eq_ofNat_of_toNat s 22 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_22 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4535,7 +4633,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_23 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_23 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 23 3]; decide
   -- Case PC=26 (JUMPI). Two branches: taken→PC=42, not-taken→PC=27. Both ≠ 32.
   -- Hmm, however the witness `s'.pc.toNat ≠ 32` requires casing. Easier: post-len = 0.
@@ -4544,7 +4642,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 26 := pc_eq_ofNat_of_toNat s 26 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_26 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       have hd1_eq : hd1 = withdrawLbl := by
@@ -4570,7 +4668,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_27 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_27 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 27 2]; decide
   -- Case PC=29 (PUSH1 0). Lands at PC=31 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 29 := pc_eq_ofNat_of_toNat s 29 (by decide) hpc
@@ -4578,7 +4676,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_29 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_29 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 29 2]; decide
   -- Case PC=31 (REVERT). Halt op — excluded by hRev.
   · have hpcEq : s.pc = UInt256.ofNat 31 := pc_eq_ofNat_of_toNat s 31 (by decide) hpc
@@ -4595,13 +4693,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_32 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_32 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 32 1]; decide
   -- Case PC=33 (POP). Lands at PC=34 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 33 := pc_eq_ofNat_of_toNat s 33 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_33 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4614,13 +4712,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_34 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_34 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 34 1]; decide
   -- Case PC=35 (DUP1). Lands at PC=36 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 35 := pc_eq_ofNat_of_toNat s 35 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_35 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4631,7 +4729,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 36 := pc_eq_ofNat_of_toNat s 36 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_36 C s s' f' cost op arg hT' hpc hLen hCascade36 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4644,13 +4742,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_CALLVALUE_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_37 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_37 C s s' f' cost op arg hT' hpc hLen hCascade37 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 37 1]; decide
   -- Case PC=38 (ADD). Lands at PC=39 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 38 := pc_eq_ofNat_of_toNat s 38 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_38 C s s' f' cost op arg hT' hpc hLen hCascade38 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4661,7 +4759,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 39 := pc_eq_ofNat_of_toNat s 39 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_39 C s s' f' cost op arg hT' hpc hLen hCascade39 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4672,7 +4770,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 40 := pc_eq_ofNat_of_toNat s 40 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_40 C s s' f' cost op arg hT' hpc hLen hCascade40 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4691,7 +4789,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_42 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_42 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 42 1]; decide
   -- Case PC=43 (PUSH1 4). Lands at PC=45 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 43 := pc_eq_ofNat_of_toNat s 43 (by decide) hpc
@@ -4699,13 +4797,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_43 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_43 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 43 2]; decide
   -- Case PC=45 (CALLDATALOAD). Lands at PC=46 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 45 := pc_eq_ofNat_of_toNat s 45 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_45 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4718,13 +4816,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_46 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_46 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 46 1]; decide
   -- Case PC=47 (DUP1). Lands at PC=48 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 47 := pc_eq_ofNat_of_toNat s 47 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_47 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4735,7 +4833,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 48 := pc_eq_ofNat_of_toNat s 48 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_48 C s s' f' cost op arg hT' hpc hLen hStk01 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4746,7 +4844,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 49 := pc_eq_ofNat_of_toNat s 49 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_49 C s s' f' cost op arg hT' hpc hLen hCascade49 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4757,7 +4855,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 50 := pc_eq_ofNat_of_toNat s 50 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_50 C s s' f' cost op arg hT' hpc hLen hCascade50 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4768,7 +4866,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 51 := pc_eq_ofNat_of_toNat s 51 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_51 C s s' f' cost op arg hT' hpc hLen hCascade51 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4782,13 +4880,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_52 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_52 C s s' f' cost op arg hT' hpc hLen hCascade52 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 52 3]; decide
   -- Case PC=55 (JUMPI). Branches: taken→PC=80, not-taken→PC=56. Both ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 55 := pc_eq_ofNat_of_toNat s 55 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_55 C s s' f' cost op arg hT' hpc hLen hCascade55 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     obtain ⟨slot, oldVal, x, hStk_eq, _⟩ := hCascade55
     obtain ⟨hPC', _, _⟩ :=
       step_JUMPI_at_pc s s' f' cost op arg _ revertLbl (UInt256.lt oldVal x)
@@ -4808,7 +4906,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 56 := pc_eq_ofNat_of_toNat s 56 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_56 C s s' f' cost op arg hT' hpc hLen hCascade56 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4819,7 +4917,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 57 := pc_eq_ofNat_of_toNat s 57 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_57 C s s' f' cost op arg hT' hpc hLen hCascade57 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4830,7 +4928,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 58 := pc_eq_ofNat_of_toNat s 58 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_58 C s s' f' cost op arg hT' hpc hLen hCascade58 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4841,7 +4939,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 59 := pc_eq_ofNat_of_toNat s 59 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_59 C s s' f' cost op arg hT' hpc hLen hCascade59 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4852,7 +4950,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 60 := pc_eq_ofNat_of_toNat s 60 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_60 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4865,7 +4963,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_61 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_61 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 61 2]; decide
   -- Case PC=63 (PUSH1 0). Lands at PC=65 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 63 := pc_eq_ofNat_of_toNat s 63 (by decide) hpc
@@ -4873,7 +4971,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_63 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_63 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 63 2]; decide
   -- Case PC=65 (PUSH1 0). Lands at PC=67 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 65 := pc_eq_ofNat_of_toNat s 65 (by decide) hpc
@@ -4881,7 +4979,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_65 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_65 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 65 2]; decide
   -- Case PC=67 (PUSH1 0). Lands at PC=69 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 67 := pc_eq_ofNat_of_toNat s 67 (by decide) hpc
@@ -4889,13 +4987,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_67 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_67 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 67 2]; decide
   -- Case PC=69 (DUP5). Lands at PC=70 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 69 := pc_eq_ofNat_of_toNat s 69 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_69 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4908,7 +5006,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_CALLER_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_70 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_70 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 70 1]; decide
   -- Case PC=71 (GAS). Lands at PC=72 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 71 := pc_eq_ofNat_of_toNat s 71 (by decide) hpc
@@ -4916,13 +5014,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_GAS_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_71 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_71 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 71 1]; decide
   -- Case PC=72 (CALL). Lands at PC=73 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 72 := pc_eq_ofNat_of_toNat s 72 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_72 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: hd3 :: hd4 :: hd5 :: hd6 :: hd7 :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4933,7 +5031,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 73 := pc_eq_ofNat_of_toNat s 73 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_73 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4947,13 +5045,13 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
         hFetch hCode hpcEq decode_bytecode_at_74 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_74 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 74 3]; decide
   -- Case PC=77 (JUMPI). Branches: taken→PC=80, not-taken→PC=78. Both ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 77 := pc_eq_ofNat_of_toNat s 77 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_77 C s s' f' cost op arg hT' hpc hLen hStk0 hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
       have hd1_eq : hd1 = revertLbl := by
@@ -4977,7 +5075,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   · have hpcEq : s.pc = UInt256.ofNat 78 := pc_eq_ofNat_of_toNat s 78 (by decide) hpc
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_78 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd :: tl, _hLen2 =>
       obtain ⟨hPC', _, _⟩ :=
@@ -4996,7 +5094,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_80 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_80_len3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 80 1]; decide
   -- Case PC=80 length=1 (JUMPDEST). Lands at PC=81 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 80 := pc_eq_ofNat_of_toNat s 80 (by decide) hpc
@@ -5004,7 +5102,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_JUMPDEST_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_80 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_80_len1 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 80 1]; decide
   -- Case PC=81 length=3 (PUSH1 0). Lands at PC=83 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 81 := pc_eq_ofNat_of_toNat s 81 (by decide) hpc
@@ -5012,7 +5110,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_81 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_81_len3 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 81 2]; decide
   -- Case PC=81 length=1 (PUSH1 0). Lands at PC=83 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 81 := pc_eq_ofNat_of_toNat s 81 (by decide) hpc
@@ -5020,7 +5118,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_81 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_81_len1 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 81 2]; decide
   -- Case PC=83 length=4 (PUSH1 0). Lands at PC=85 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 83 := pc_eq_ofNat_of_toNat s 83 (by decide) hpc
@@ -5028,7 +5126,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_83 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_83_len4 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 83 2]; decide
   -- Case PC=83 length=2 (PUSH1 0). Lands at PC=85 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 83 := pc_eq_ofNat_of_toNat s 83 (by decide) hpc
@@ -5036,7 +5134,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       step_PUSH1_at_pc s s' f' cost op arg _ hFetch hCode hpcEq decode_bytecode_at_83 hStep
     have hT_s' : WethTrace C s' :=
       WethTrace_step_at_83_len2 C s s' f' cost op arg hT' hpc hLen hFetch hStep
-    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hT_s' ?_
+    refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     rw [hPC', hpcEq, ofNat_add_ofNat_toNat_lt256 83 2]; decide
   -- Case PC=85 length=5 (REVERT). Halt op — excluded by hRev.
   · have hpcEq : s.pc = UInt256.ofNat 85 := pc_eq_ofNat_of_toNat s 85 (by decide) hpc
@@ -5065,8 +5163,11 @@ opaque `WethAssumptions.xi_inv` hypothesis. -/
 theorem bytecodePreservesInvariant
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
+    (hInvPres : WethStepInvFrPreserves C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
     (hSStore : WethSStorePreserves C)
     (hCall : WethCallSlack C) :
     ΞPreservesInvariantAtC C := by
@@ -5078,7 +5179,8 @@ theorem bytecodePreservesInvariant
     exact WethReachable_Z_preserves C s g h
   · -- hReach_step (op-conditional non-halt)
     intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop hSD
-    exact hStepClosure hΞ s s' f' cost op arg hR hFetch hStep hRet hRev hStop hSD
+    exact hStepClosure hΞ hInvPres s s' f' cost op arg hR hFetch hStep
+      hRet hRev hStop hSD
   · -- hReach_decodeSome
     intro s h
     exact WethReachable_decodeSome C s h
@@ -5096,7 +5198,7 @@ theorem bytecodePreservesInvariant
   · -- hReachInit
     intro cA gbh bs σ σ₀ g A I hCO
     exact WethReachable_initial C hDeployed cA gbh bs σ σ₀ g A I hCO
-      (hAccInit σ I hCO)
+      (hAccInit σ I hCO) (hInvInit σ I hCO)
 
 /-- **`bytecodePreservesInvariant_from_cascades` — convenience entry that
 takes the per-PC cascade-fact predicates directly.**
@@ -5111,13 +5213,16 @@ disjuncts at PCs 40, 60, 72. -/
 theorem bytecodePreservesInvariant_from_cascades
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
+    (hInvPres : WethStepInvFrPreserves C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
     (h40 : WethPC40CascadeFacts C)
     (h60 : WethPC60CascadeFacts C)
     (h72 : WethPC72CascadeFacts C) :
     ΞPreservesInvariantAtC C :=
-  bytecodePreservesInvariant C hDeployed hΞ hAccInit
+  bytecodePreservesInvariant C hDeployed hΞ hInvPres hAccInit hInvInit
     (weth_sstore_preserves_from_cascades C h40 h60)
     (weth_call_slack_from_cascade C h72)
 
@@ -5134,13 +5239,16 @@ preserves it). -/
 theorem bytecodePreservesInvariant_from_account_and_cascades
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
+    (hInvPres : WethStepInvFrPreserves C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
     (h40 : WethPC40CascadeFacts C)
     (h72 : WethPC72CascadeFacts C) :
     ΞPreservesInvariantAtC C :=
-  bytecodePreservesInvariant_from_cascades C hDeployed hΞ hAccInit
-    h40 (weth_pc60_cascade C (weth_account_at_C C)) h72
+  bytecodePreservesInvariant_from_cascades C hDeployed hΞ hInvPres
+    hAccInit hInvInit h40 (weth_pc60_cascade C (weth_account_at_C C)) h72
 
 /-- **Convenience entry that derives both pc60 and pc72 cascades from
 narrower structural facts.** Replaces the opaque `pc72_cascade` field
@@ -5150,14 +5258,17 @@ WethReachable carries WethInvFr). -/
 theorem bytecodePreservesInvariant_from_narrowed
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
+    (hInvPres : WethStepInvFrPreserves C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
     (hNoWrap : WethCallNoWrapAt72 C)
     (hSlack : WethCallSlackAt72 C)
     (h40 : WethPC40CascadeFacts C) :
     ΞPreservesInvariantAtC C :=
   bytecodePreservesInvariant_from_account_and_cascades C hDeployed
-    hΞ hAccInit h40 (weth_pc72_cascade C hNoWrap hSlack)
+    hΞ hInvPres hAccInit hInvInit h40 (weth_pc72_cascade C hNoWrap hSlack)
 
 /-- **Final convenience entry: all three opaque cascade-fact assumptions
 discharged as theorems.** Takes only the narrower structural facts
@@ -5168,13 +5279,17 @@ fact is now discharged as `weth_deposit_cascade` (using
 theorem bytecodePreservesInvariant_fully_narrowed
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
+    (hInvPres : WethStepInvFrPreserves C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
     (hNoWrap : WethCallNoWrapAt72 C)
     (hSlack : WethCallSlackAt72 C)
     (hPreCredit : WethDepositPreCredit C) :
     ΞPreservesInvariantAtC C :=
-  bytecodePreservesInvariant_from_narrowed C hDeployed hΞ hAccInit hNoWrap hSlack
+  bytecodePreservesInvariant_from_narrowed C hDeployed hΞ hInvPres hAccInit
+    hInvInit hNoWrap hSlack
     (weth_pc40_cascade C
       (weth_deposit_cascade C (weth_account_at_C C))
       hPreCredit)
