@@ -3292,6 +3292,21 @@ def WethStepInvFrPreserves (C : AccountAddress) : Prop :=
     op ≠ .RETURN → op ≠ .REVERT → op ≠ .STOP → op ≠ .SELFDESTRUCT →
     WethInvFr s'.accountMap C
 
+/-- **Narrowed CALL-only step preservation predicate.** Like
+`WethStepInvFrPreserves` but specialised to CALL — the only op for which
+the per-step preservation needs the framework's strong-induction IHs
+(via `step_CALL_arm_at_C_slack_invariant`'s `hAtCFrame`/`hFrame`).
+
+This isolates the genuinely-non-derivable case from the trivially
+derivable strict + SSTORE cases (handled inline by
+`weth_inv_step_pres` below). -/
+def WethCALLStepInvFr (C : AccountAddress) : Prop :=
+  ∀ s s' : EVM.State, ∀ f' cost : ℕ, ∀ arg,
+    WethReachable C s →
+    fetchInstr s.executionEnv s.pc = .ok (.CALL, arg) →
+    EVM.step (f' + 1) cost (some (.CALL, arg)) s = .ok s' →
+    WethInvFr s'.accountMap C
+
 /-- Step closure of `WethReachable` under non-halt operations. The 61
 per-PC walks (`WethTrace_step_at_*` above) provide the ingredients —
 aggregating them into this aggregate is mechanical case-splitting.
@@ -4797,6 +4812,62 @@ theorem weth_call_slack_from_cascade
   cases hSlack with
   | inl h0 => exact Or.inr (Or.inl h0)
   | inr hSl => exact Or.inr (Or.inr hSl)
+
+/-- **Per-step `WethInvFr` preservation discharger.** Discharges
+`WethStepInvFrPreserves C` for **strict + SSTORE** ops directly via
+the existing closed-form dischargers; the **CALL** case is delegated
+to a separate `WethCALLStepInvFr C` assumption (the only branch that
+needs the framework's strong-induction IHs).
+
+Case-split on `WethReachable_op_in_allowed`'s op-classification:
+
+* **Strict ops** (most PCs): `EVM_step_strict_preserves_WethInvFr`
+  bridges `EVM.step` to `EvmYul.step` and dispatches to
+  `EvmYul_step_preserves_WethInvFr_of_strict`.
+* **SSTORE PCs (40, 60)**: narrow via `WethReachable_sstore_pc` to
+  one of the two SSTORE PCs, then invoke
+  `weth_sstore_preserves_pc40_from_cascade` /
+  `weth_sstore_preserves_pc60_from_cascade` with the cascade-fact
+  predicates derived from σ-has-C (= `weth_account_at_C`) and the
+  Θ-pre-credit slack `hPreCredit` (real-world `WethAssumptions` fact).
+* **CALL PC (72)**: delegate to the `hCall : WethCALLStepInvFr C`
+  argument. This is the only branch that needs strong-induction IHs
+  (via the framework's `step_CALL_arm_at_C_slack_invariant`), which
+  the per-step interface cannot provide. -/
+theorem weth_inv_step_pres
+    (C : AccountAddress)
+    (hCall : WethCALLStepInvFr C)
+    (hPreCredit : WethDepositPreCredit C) :
+    WethStepInvFrPreserves C := by
+  intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
+  have hInv : WethInvFr s.accountMap C := hR.2.2.2
+  have hCO : C = s.executionEnv.codeOwner := hR.1.1
+  -- Op class via the bytecode-walk classification.
+  have hAllowed : WethOpAllowed op :=
+    WethReachable_op_in_allowed C s op arg hR hFetch
+  rcases hAllowed with hStrict | hOpCall | hOpSStore
+  · -- Strict op: closed-form preservation.
+    exact EVM_step_strict_preserves_WethInvFr op arg C f' cost s s'
+      hStrict hStep hInv
+  · -- CALL: delegate to the per-state CALL-preservation assumption.
+    subst hOpCall
+    exact hCall s s' f' cost arg hR hFetch hStep
+  · -- SSTORE: narrow to PC 40 or PC 60, dispatch to the cascade-based
+    -- discharger.
+    subst hOpSStore
+    rcases WethReachable_sstore_pc hR hFetch with hPC40 | hPC60
+    · -- PC 40: deposit SSTORE.
+      have h40 : WethPC40CascadeFacts C :=
+        weth_pc40_cascade C
+          (weth_deposit_cascade C (weth_account_at_C C))
+          hPreCredit
+      exact weth_sstore_preserves_pc40_from_cascade C h40 s s' f' cost arg
+        hR hCO hInv hPC40 hFetch hStep
+    · -- PC 60: withdraw SSTORE.
+      have h60 : WethPC60CascadeFacts C :=
+        weth_pc60_cascade C (weth_account_at_C C)
+      exact weth_sstore_preserves_pc60_from_cascade C h60 s s' f' cost arg
+        hR hCO hInv hPC60 hFetch hStep
 
 /-- Initial Weth-execution state (pc = 0, empty stack) inhabits
 `WethReachable`, given the deployment-pinned code-identity and the
