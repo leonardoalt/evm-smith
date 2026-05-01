@@ -4647,6 +4647,109 @@ def WethCallSlackAt72 (C : AccountAddress) : Prop :=
               (.ofNat s.executionEnv.codeOwner)) = some acc ∧
         μ₂.toNat ≤ acc.balance.toNat)
 
+/-- Extract the post-SSTORE slack witness from a Weth-reachable state at
+PC 72. Discharged from the trace cascade threaded through PCs 60..72:
+PC 60's pre-SSTORE WethInvFr, plus the SSTORE replace law and the
+bound `x ≤ oldVal` from PC 55's LT-not-taken, gives the slack
+`x + storageSum_post ≤ balanceOf_post`. PCs 61..71 (PUSH1, DUP5,
+CALLER, GAS) preserve the accountMap so the slack survives unchanged,
+with the residual `x` propagating to stack[2] at PC 72 (= the CALL
+value `μ₂`). -/
+private theorem WethReachable_pc72_slack
+    (C : AccountAddress) (s : EVM.State)
+    (hR : WethReachable C s) (hPC72 : s.pc.toNat = 72) :
+    ∃ x : UInt256, s.stack[2]? = some x ∧
+      x.toNat + storageSum s.accountMap C ≤ balanceOf s.accountMap C := by
+  obtain ⟨⟨_, _, hPC⟩, _⟩ := hR
+  rcases hPC with
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, hSlack⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
+  all_goals first
+    | exact hSlack
+    | (exfalso; omega)
+
+/-- **`WethCallSlackAt72` is a theorem given σ-has-C.** Discharges the
+post-SSTORE slack at PC 72 from the threaded WethTrace cascade plus
+σ-has-C. The slack itself comes from `WethReachable_pc72_slack`; the
+caller-account-found uses the address roundtrip identity
+`AccountAddress.ofUInt256 (.ofNat C) = C` combined with `C =
+codeOwner`. The funds bound `μ₂ ≤ acc.balance` follows from
+`μ₂ + storageSum ≤ balanceOf` by `storageSum ≥ 0` (i.e.,
+`balanceOf σ C = acc.balance` when `σ.find? C = some acc`). -/
+theorem weth_call_slack
+    (C : AccountAddress)
+    (hAccC : WethAccountAtC C) :
+    WethCallSlackAt72 C := by
+  intro s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  -- Slack from the trace cascade.
+  obtain ⟨x, hStk2, hSlack⟩ := WethReachable_pc72_slack C s hR hPC72
+  -- Identify μ₂ = x via the stack shape.
+  have hμ₂_eq : μ₂ = x := by
+    have h_stk2 : s.stack[2]? = some μ₂ := by
+      rw [hStk]; rfl
+    rw [h_stk2] at hStk2
+    injection hStk2
+  -- Combined slack: μ₂ + storageSum ≤ balanceOf.
+  have h_slack_μ : μ₂.toNat + storageSum s.accountMap C ≤ balanceOf s.accountMap C := by
+    rw [hμ₂_eq]; exact hSlack
+  refine ⟨h_slack_μ, ?_⟩
+  -- Caller-account-found via roundtrip.
+  -- σ-has-C: ∃ acc, σ.find? C = some acc.
+  obtain ⟨acc, h_find⟩ := hAccC s hR
+  -- C = s.executionEnv.codeOwner from WethReachable.
+  have hCO : C = s.executionEnv.codeOwner := hR.1.1
+  -- Roundtrip: AccountAddress.ofUInt256 (.ofNat codeOwner) = codeOwner.
+  have hRoundtrip :
+      AccountAddress.ofUInt256 (.ofNat s.executionEnv.codeOwner)
+        = s.executionEnv.codeOwner := by
+    show Fin.ofNat _ (((Fin.ofNat UInt256.size
+            s.executionEnv.codeOwner.val).val) % AccountAddress.size)
+         = s.executionEnv.codeOwner
+    have hAddrLtUSize : AccountAddress.size ≤ UInt256.size := by decide
+    have hCoLtAddr : s.executionEnv.codeOwner.val < AccountAddress.size :=
+      s.executionEnv.codeOwner.isLt
+    have hCoLtU : s.executionEnv.codeOwner.val < UInt256.size :=
+      Nat.lt_of_lt_of_le hCoLtAddr hAddrLtUSize
+    have h1 : (Fin.ofNat UInt256.size s.executionEnv.codeOwner.val).val
+              = s.executionEnv.codeOwner.val := by
+      show s.executionEnv.codeOwner.val % UInt256.size
+            = s.executionEnv.codeOwner.val
+      exact Nat.mod_eq_of_lt hCoLtU
+    rw [h1]
+    show Fin.ofNat _ (s.executionEnv.codeOwner.val % AccountAddress.size)
+         = s.executionEnv.codeOwner
+    rw [Nat.mod_eq_of_lt hCoLtAddr]
+    apply Fin.ext
+    show s.executionEnv.codeOwner.val % AccountAddress.size
+         = s.executionEnv.codeOwner.val
+    exact Nat.mod_eq_of_lt hCoLtAddr
+  -- Use the roundtrip + hCO to convert σ.find? C into the cumbersome form.
+  have h_find_roundtrip :
+      s.accountMap.find?
+          (AccountAddress.ofUInt256 (.ofNat s.executionEnv.codeOwner))
+        = some acc := by
+    rw [hRoundtrip, ← hCO]; exact h_find
+  -- Funds: μ₂ ≤ acc.balance.
+  -- balanceOf σ C = acc.balance when σ.find? C = some acc.
+  have h_balanceOf_eq : balanceOf s.accountMap C = acc.balance.toNat := by
+    unfold balanceOf
+    rw [h_find]; rfl
+  -- Goal: μ₂ = ⟨0⟩ ∨ ∃ acc, ... ∧ μ₂ ≤ acc.balance.
+  by_cases h_μ_zero : μ₂ = ⟨0⟩
+  · exact Or.inl h_μ_zero
+  · right
+    refine ⟨acc, h_find_roundtrip, ?_⟩
+    -- μ₂.toNat + storageSum ≤ balanceOf = acc.balance.
+    -- storageSum ≥ 0, so μ₂.toNat ≤ acc.balance.toNat.
+    rw [h_balanceOf_eq] at h_slack_μ
+    omega
+
 /-- **`WethPC72CascadeFacts` is a theorem given the two narrower
 structural facts.** The cascade-fact predicate's three conjuncts are:
 
