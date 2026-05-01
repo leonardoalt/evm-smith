@@ -208,7 +208,14 @@ private def WethTrace (C : AccountAddress) (s : EVM.State) : Prop :=
      -- x). The cascade is threaded forward from PC 49's SLOAD-strong
      -- result through PCs 49..59 walks.
   -- Withdraw block CALL setup (PCs 61..79).
-   (s.pc.toNat = 61 ∧ s.stack.length = 1) ∨   -- post-SSTORE [x]
+   -- The post-SSTORE slack is threaded forward from PC 60 (pre-SSTORE
+   -- WethInvFr `storageSum ≤ balanceOf` plus the SSTORE-replace law,
+   -- using the fact that x ≤ oldVal at PC 60). At every PC in
+   -- {61, 63, 65, 67, 69, 70, 71, 72}, the bottom-of-stack residual
+   -- `x` (the withdrawal amount) satisfies the slack.
+   (s.pc.toNat = 61 ∧ s.stack.length = 1 ∧
+     ∃ x : UInt256, s.stack[0]? = some x ∧
+       x.toNat + storageSum s.accountMap C ≤ balanceOf s.accountMap C) ∨
    (s.pc.toNat = 63 ∧ s.stack.length = 2) ∨
    (s.pc.toNat = 65 ∧ s.stack.length = 3) ∨
    (s.pc.toNat = 67 ∧ s.stack.length = 4) ∨
@@ -554,7 +561,8 @@ private theorem WethTrace_decodeSome
   rw [hCode]
   -- 64 disjuncts; PCs 16, 26, 55, 77 carry a stack[0]? witness so are
   -- 3-conjunct (need ⟨hpc, _, _⟩); PC 60 carries a `True` placeholder
-  -- (for future cascade-fact threading) so is also 3-conjunct. The rest
+  -- (for future cascade-fact threading) so is also 3-conjunct. PC 61
+  -- carries a slack witness (`x + storageSum ≤ balanceOf`). The rest
   -- are 2-conjunct. PCs 80, 81, 83, 85 each appear twice (different
   -- stack lengths from PC 55/77 entry); both are 2-conjunct.
   rcases hPC with
@@ -563,7 +571,7 @@ private theorem WethTrace_decodeSome
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc])
@@ -728,7 +736,9 @@ private theorem mk_wethTrace_aux
            oldVal = (s'.accountMap.find? C).option ⟨0⟩
                       (Account.lookupStorage (k := slot)) ∧
            x.toNat ≤ oldVal.toNat) ∨
-       (s'.pc.toNat = 61 ∧ s'.stack.length = 1) ∨
+       (s'.pc.toNat = 61 ∧ s'.stack.length = 1 ∧
+         ∃ x : UInt256, s'.stack[0]? = some x ∧
+           x.toNat + storageSum s'.accountMap C ≤ balanceOf s'.accountMap C) ∨
        (s'.pc.toNat = 63 ∧ s'.stack.length = 2) ∨
        (s'.pc.toNat = 65 ∧ s'.stack.length = 3) ∨
        (s'.pc.toNat = 67 ∧ s'.stack.length = 4) ∨
@@ -1436,6 +1446,46 @@ private theorem WethTrace_step_at_39
     · rw [show s'.accountMap = s.accountMap from hAcc']
       exact hOldVal
 
+/-! ### Closed-form post-state `accountMap` shape for an EVM SSTORE step
+
+Used by the per-PC SSTORE walks (PCs 40, 60) to thread cascade-fact
+data forward through the SSTORE post-state. -/
+
+/-- Closed-form post-state `accountMap` shape for an EVM SSTORE step
+at the codeOwner. The two popped values `(slot, newVal)` index the
+storage update: post-state's accountMap inserts `acc.updateStorage
+slot newVal` at the codeOwner. -/
+private theorem step_SSTORE_accountMap
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (slot newVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (acc : Account .EVM)
+    (h_find : s.accountMap.find? s.executionEnv.codeOwner = some acc)
+    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
+    s'.accountMap
+      = s.accountMap.insert s.executionEnv.codeOwner
+          (acc.updateStorage slot newVal) := by
+  -- Reduce EVM.step to the binaryStateOp dispatch.
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  -- Reduce: s' = ({ s with toState := State.sstore s.toState ... }).replaceStackAndIncrPC tl.
+  -- Its `.accountMap` is the inserted-storage map.
+  simp only [accountMap_replaceStackAndIncrPC]
+  show (EvmYul.State.sstore s.toState slot newVal).accountMap
+       = s.accountMap.insert s.executionEnv.codeOwner
+           (acc.updateStorage slot newVal)
+  unfold EvmYul.State.sstore
+  simp only [EvmYul.State.lookupAccount, h_find, Option.option]
+  -- The remaining transformation: setAccount + addAccessedStorageKey + substate.refundBalance.
+  -- All but setAccount preserve accountMap.
+  rfl
+
 /-! ### PC 40 — `SSTORE` (deposit: write storage[sender]) -/
 
 private theorem WethTrace_step_at_40
@@ -1979,6 +2029,13 @@ private theorem WethTrace_step_at_60
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
     (hpc : s.pc.toNat = 60) (hLen : s.stack.length = 3)
+    (hCascade60 : ∃ slot oldVal x : UInt256,
+       s.stack = slot :: UInt256.sub oldVal x :: x :: [] ∧
+       oldVal = (s.accountMap.find? C).option ⟨0⟩
+                  (Account.lookupStorage (k := slot)) ∧
+       x.toNat ≤ oldVal.toNat)
+    (hAcc : accountPresentAt s.accountMap C)
+    (hInv : WethInvFr s.accountMap C)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s') :
     WethTrace C s' := by
@@ -1992,12 +2049,140 @@ private theorem WethTrace_step_at_60
     obtain ⟨hPC', hStk', hEE'⟩ :=
       step_SSTORE_at_pc s s' f' cost op arg _ hd1 hd2 tl hStk_eq
         hFetch hCode hpcEq decode_bytecode_at_60 hStep
+    -- Extract the cascade: slot, oldVal, x.
+    obtain ⟨slot, oldVal, x, hStkCas, hOldVal, hBound⟩ := hCascade60
+    -- Combine hStk_eq : s.stack = hd1 :: hd2 :: tl
+    -- with hStkCas : s.stack = slot :: (oldVal - x) :: x :: [] to identify
+    -- hd1 = slot, hd2 = oldVal - x, tl = [x].
+    have hStkEq2 : (hd1 :: hd2 :: tl) = slot :: UInt256.sub oldVal x :: x :: [] := by
+      rw [← hStk_eq]; exact hStkCas
+    have hd1_eq : hd1 = slot := by injection hStkEq2
+    have hd2_eq : hd2 = UInt256.sub oldVal x := by
+      injection hStkEq2 with _ h; injection h
+    have tl_eq : tl = x :: [] := by
+      injection hStkEq2 with _ h; injection h
+    -- σ has C.
+    obtain ⟨acc, h_find⟩ := hAcc
+    -- Convert oldVal to acc.storage.findD slot ⟨0⟩ via h_find.
+    have h_findD : acc.storage.findD slot ⟨0⟩ = oldVal := by
+      rw [h_find] at hOldVal
+      show acc.storage.findD slot ⟨0⟩ = oldVal
+      rw [hOldVal]
+      rfl
+    -- Bound: (oldVal - x).toNat ≤ oldVal.toNat.
+    have h_subVal : (UInt256.sub oldVal x).toNat ≤ oldVal.toNat := by
+      have hSub_eq : UInt256.sub oldVal x = oldVal - x := rfl
+      rw [hSub_eq, UInt256_sub_toNat_of_le _ _ hBound]
+      exact Nat.sub_le _ _
+    -- Post-state accountMap shape via step_SSTORE_accountMap.
+    have h_find_CO : s.accountMap.find? s.executionEnv.codeOwner = some acc := by
+      rw [← hCO]; exact h_find
+    -- Align `op` to `.SSTORE` via the decode lemma.
+    have hDec_at_pc : decode s.executionEnv.code s.pc
+        = some (.StackMemFlow .SSTORE, none) := by
+      rw [hCode, hpcEq]; exact decode_bytecode_at_60
+    obtain ⟨hOp, hArg⟩ := op_arg_eq_of_fetchInstr_decode hDec_at_pc hFetch
+    subst hOp
+    have h_am : s'.accountMap
+        = s.accountMap.insert s.executionEnv.codeOwner
+            (acc.updateStorage slot (UInt256.sub oldVal x)) := by
+      have hStk_pre : s.stack = slot :: UInt256.sub oldVal x :: tl := by
+        rw [hStk_eq, hd1_eq, hd2_eq]
+      exact step_SSTORE_accountMap s s' f' cost arg slot (UInt256.sub oldVal x) tl
+        hStk_pre acc h_find_CO hStep
+    -- balanceOf preserved: storage-only update doesn't touch balance.
+    have h_bal_eq :
+        balanceOf s'.accountMap C = balanceOf s.accountMap C := by
+      rw [h_am, ← hCO]
+      apply balanceOf_insert_preserve_of_eq s.accountMap C acc _ h_find
+      exact Account_updateStorage_balance _ _ _
+    -- storageSum bound depending on slot existence.
+    have h_storageSum_le :
+        x.toNat + storageSum s'.accountMap C ≤ storageSum s.accountMap C := by
+      rw [h_am, ← hCO]
+      -- Case-split on acc.storage.find? slot.
+      cases h_slot : acc.storage.find? slot with
+      | some oldVal' =>
+        -- findD = oldVal' = oldVal.
+        have hOldEq : oldVal' = oldVal := by
+          have hh : acc.storage.findD slot ⟨0⟩ = oldVal' := by
+            unfold Batteries.RBMap.findD
+            rw [h_slot]; rfl
+          rw [hh] at h_findD; exact h_findD
+        -- Sub-case: (oldVal - x) = 0 (erase) vs ≠ 0 (replace).
+        by_cases h_newZero : (UInt256.sub oldVal x == default) = true
+        · -- Erase.
+          have h_newVal_eq : UInt256.sub oldVal x = (⟨0⟩ : UInt256) := by
+            have h_newZero' : ((UInt256.sub oldVal x).val == (default : UInt256).val) = true := h_newZero
+            have h1 : (UInt256.sub oldVal x).val = (default : UInt256).val :=
+              of_decide_eq_true h_newZero'
+            have h_def_val : (default : UInt256).val = (0 : Fin UInt256.size) := rfl
+            rw [h_def_val] at h1
+            -- h1 : (UInt256.sub oldVal x).val = 0.
+            apply UInt256.mk.injEq _ _ |>.mpr
+            exact h1
+          rw [h_newVal_eq]
+          -- Use storageSum_sstore_erase_eq with oldVal'.
+          have h_delta := storageSum_sstore_erase_eq s.accountMap C slot oldVal'
+                            acc h_find h_slot
+          -- h_delta : storageSum (insert ...) C + oldVal'.toNat = storageSum s.accountMap C
+          -- From h_newVal_eq: oldVal - x = 0 ⇒ since x ≤ oldVal, oldVal = x.
+          have h_xeq : oldVal.toNat = x.toNat := by
+            have h_subzero : (UInt256.sub oldVal x).toNat = 0 := by
+              rw [h_newVal_eq]; rfl
+            have hSub_eq : UInt256.sub oldVal x = oldVal - x := rfl
+            rw [hSub_eq, UInt256_sub_toNat_of_le _ _ hBound] at h_subzero
+            omega
+          have h_xeq' : oldVal'.toNat = x.toNat := by rw [hOldEq]; exact h_xeq
+          omega
+        · -- Replace.
+          have hNonZero : (UInt256.sub oldVal x == default) = false := by
+            cases hh : (UInt256.sub oldVal x == default) with
+            | true => exact absurd hh h_newZero
+            | false => rfl
+          have h_delta := storageSum_sstore_replace_eq s.accountMap C slot
+                            (UInt256.sub oldVal x) oldVal' hNonZero
+                            acc h_find h_slot
+          -- h_delta : storageSum_post + oldVal'.toNat = storageSum_pre + (oldVal - x).toNat.
+          -- (oldVal - x).toNat = oldVal.toNat - x.toNat (since x ≤ oldVal).
+          have h_subToNat : (UInt256.sub oldVal x).toNat = oldVal.toNat - x.toNat := by
+            have hSub_eq : UInt256.sub oldVal x = oldVal - x := rfl
+            rw [hSub_eq, UInt256_sub_toNat_of_le _ _ hBound]
+          -- x.toNat ≤ oldVal'.toNat (= oldVal.toNat).
+          have h_x_le : x.toNat ≤ oldVal'.toNat := by rw [hOldEq]; exact hBound
+          -- oldVal'.toNat ≤ storageSum_pre.
+          have h_old_ge : oldVal'.toNat ≤ storageSum s.accountMap C := by
+            apply storageSum_old_le s.accountMap C slot oldVal'
+            rw [h_find]; simp [h_slot]
+          have hOldEq' : oldVal'.toNat = oldVal.toNat := by rw [hOldEq]
+          omega
+      | none =>
+        -- findD = ⟨0⟩, so oldVal = ⟨0⟩, x ≤ 0 ⇒ x = 0.
+        have hOldZero : oldVal = (⟨0⟩ : UInt256) := by
+          have hh : acc.storage.findD slot ⟨0⟩ = (⟨0⟩ : UInt256) := by
+            unfold Batteries.RBMap.findD
+            rw [h_slot]; rfl
+          rw [hh] at h_findD; exact h_findD.symm
+        have hBound' : x.toNat ≤ 0 := by
+          have h0 : (⟨0⟩ : UInt256).toNat = 0 := rfl
+          rw [hOldZero, h0] at hBound; exact hBound
+        have hx_zero : x.toNat = 0 := Nat.le_zero.mp hBound'
+        -- x = 0 forces 0 + storageSum_post ≤ storageSum_pre.
+        rw [hx_zero, Nat.zero_add]
+        -- storageSum_post ≤ storageSum_pre via _findD lemma.
+        exact storageSum_sstore_replace_eq_findD s.accountMap C slot
+          (UInt256.sub oldVal x) oldVal acc h_find h_findD h_subVal
     refine mk_wethTrace_aux hCO hCode hEE' ?_
     iterate 43 right
     left
-    refine ⟨?_, ?_⟩
+    refine ⟨?_, ?_, ?_⟩
     · rw [hPC', hpcEq]; exact ofNat_add_ofNat_toNat_lt256 60 1
     · rw [hStk']; exact hLenTl
+    · -- Slack: x + storageSum s'.accountMap C ≤ balanceOf s'.accountMap C.
+      refine ⟨x, ?_, ?_⟩
+      · -- s'.stack[0]? = some x: s'.stack = tl = [x].
+        rw [hStk', tl_eq]; rfl
+      · rw [h_bal_eq]; exact Nat.le_trans h_storageSum_le hInv
 
 /-! ### PC 61 — `PUSH1 0` (withdraw: CALL retSize) -/
 
@@ -2597,42 +2782,8 @@ we need to bridge `s'.accountMap` (EVM step's output) to that shape.
 step + the pre-state stack shape `(slot :: newVal :: tl)` and the
 `s.accountMap.find? C = some acc` lookup, the post-state's
 `accountMap` is `s.accountMap.insert C (acc.updateStorage slot
-newVal)`. -/
-
-/-- Closed-form post-state `accountMap` shape for an EVM SSTORE step
-at the codeOwner. The two popped values `(slot, newVal)` index the
-storage update: post-state's accountMap inserts `acc.updateStorage
-slot newVal` at the codeOwner. -/
-private theorem step_SSTORE_accountMap
-    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
-    (slot newVal : UInt256) (tl : Stack UInt256)
-    (hStk : s.stack = slot :: newVal :: tl)
-    (acc : Account .EVM)
-    (h_find : s.accountMap.find? s.executionEnv.codeOwner = some acc)
-    (hStep : EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s') :
-    s'.accountMap
-      = s.accountMap.insert s.executionEnv.codeOwner
-          (acc.updateStorage slot newVal) := by
-  -- Reduce EVM.step to the binaryStateOp dispatch.
-  unfold EVM.step at hStep
-  simp only [bind, Except.bind, pure, Except.pure] at hStep
-  unfold EvmYul.step at hStep
-  simp only [Id.run] at hStep
-  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
-  rw [hStk] at hStep
-  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
-  subst hStep
-  -- Reduce: s' = ({ s with toState := State.sstore s.toState ... }).replaceStackAndIncrPC tl.
-  -- Its `.accountMap` is the inserted-storage map.
-  simp only [accountMap_replaceStackAndIncrPC]
-  show (EvmYul.State.sstore s.toState slot newVal).accountMap
-       = s.accountMap.insert s.executionEnv.codeOwner
-           (acc.updateStorage slot newVal)
-  unfold EvmYul.State.sstore
-  simp only [EvmYul.State.lookupAccount, h_find, Option.option]
-  -- The remaining transformation: setAccount + addAccessedStorageKey + substate.refundBalance.
-  -- All but setAccount preserve accountMap.
-  rfl
+newVal)`. (Defined earlier, before the per-PC walks, so the PC 60
+walk can use it to thread the post-SSTORE slack.) -/
 
 /-- **Closed-form decrement bridge.** Given an EVM SSTORE step at
 the codeOwner with stack `(slot :: newVal :: tl)` where the slot's
@@ -2891,7 +3042,7 @@ private theorem WethReachable_op_in_allowed
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   all_goals (rw [pc_eq_ofNat_of_toNat s _ (by decide) hpc] at hFetch)
@@ -3120,7 +3271,7 @@ private theorem WethReachable_sstore_pc
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   -- Every disjunct rewrites the PC and the decoded op. SSTORE only at
@@ -3582,7 +3733,7 @@ private theorem WethReachable_call_pc
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   -- Every disjunct rewrites the PC and the decoded op. CALL only at
@@ -3807,7 +3958,7 @@ private theorem WethReachable_pc60_cascade
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   -- PC 60's case has hCascade in scope; all others derive False from hpc + hPC60.
@@ -3992,7 +4143,7 @@ private theorem WethReachable_pc40_cascade
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, hCascade⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|
-    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
+    ⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|
     ⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩|⟨hpc, _⟩
   all_goals first
@@ -4510,7 +4661,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hCascade36⟩|⟨hpc, hLen, hCascade37⟩|⟨hpc, hLen, hCascade38⟩|
     ⟨hpc, hLen, hCascade39⟩|⟨hpc, hLen, hCascade40⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen, hStk01⟩|⟨hpc, hLen, hCascade49⟩|⟨hpc, hLen, hCascade50⟩|⟨hpc, hLen, hCascade51⟩|⟨hpc, hLen, hCascade52⟩|⟨hpc, hLen, hCascade55⟩|⟨hpc, hLen, hCascade56⟩|⟨hpc, hLen, hCascade57⟩|
-    ⟨hpc, hLen, hCascade58⟩|⟨hpc, hLen, hCascade59⟩|⟨hpc, hLen, _⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
+    ⟨hpc, hLen, hCascade58⟩|⟨hpc, hLen, hCascade59⟩|⟨hpc, hLen, hCascade60⟩|⟨hpc, hLen, _⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen, hStk0⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩
   -- Case PC=0 (PUSH1 0). Lands at PC=2 ≠ 32.
@@ -4949,7 +5100,7 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   -- Case PC=60 (SSTORE). Lands at PC=61 ≠ 32.
   · have hpcEq : s.pc = UInt256.ofNat 60 := pc_eq_ofNat_of_toNat s 60 (by decide) hpc
     have hT_s' : WethTrace C s' :=
-      WethTrace_step_at_60 C s s' f' cost op arg hT' hpc hLen hFetch hStep
+      WethTrace_step_at_60 C s s' f' cost op arg hT' hpc hLen hCascade60 hAcc hInv hFetch hStep
     refine WethReachable_of_WethTrace_pc_ne_32 hAcc' hInv' hT_s' ?_
     match hStk_eq : s.stack, hLen with
     | hd1 :: hd2 :: tl, _hLen2 =>
