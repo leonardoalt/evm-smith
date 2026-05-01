@@ -215,22 +215,14 @@ structure WethAssumptions
   via the framework's `Ξ_invariant_preserved_bundled_bdd`. -/
   inv_at_initial   : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
                           I.codeOwner = C → WethInvFr σ C
-  /-- `WethInvFr` is preserved per CALL step (PC 72).
-
-  This is the genuinely-non-derivable per-step preservation case:
-  the framework's `step_CALL_arm_at_C_slack_invariant` (private)
-  threads the post-CALL invariant via the strong-induction IHs
-  `ΞInvariantAtCFrame C (f+1)` and `ΞInvariantFrameAtC C (f+1)`,
-  which the framework's `hReach_step` slot does not expose to the
-  per-step interface.
-
-  The previous `inv_step_pres : WethStepInvFrPreserves C` field has
-  been **narrowed** to this CALL-specific predicate: the strict + SSTORE
-  branches of `WethStepInvFrPreserves` are now discharged in-Lean by
-  `weth_inv_step_pres` (which combines `EVM_step_strict_preserves_WethInvFr`
-  with `weth_sstore_preserves_pc{40,60}_from_cascade`), leaving only
-  the CALL branch as the remaining structural assumption. -/
-  call_inv_step_pres : WethCALLStepInvFr C
+  -- Note: the previous `call_inv_step_pres : WethCALLStepInvFr C` field
+  -- has been removed. The framework's invariant-aware slack-dispatch
+  -- X-loop (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
+  -- EVMYulLean) exposes `WethInvFr s'.accountMap C` to its `hReach_step`
+  -- callback (already established internally via
+  -- `step_bundled_invariant_at_C_invariant_at_C_slack_dispatch`'s CALL
+  -- arm), so no per-step CALL invariant predicate is needed. The Weth
+  -- side discharges this via `bytecodePreservesInvariant_inv_aware_fully_narrowed`.
   -- Note: the previous `xi_preserves_C_other : ...` field has been
   -- replaced by an in-Lean theorem `weth_xi_preserves_C_other`
   -- (discharged from the framework's
@@ -382,34 +374,19 @@ theorem weth_solvency_invariant
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
-  -- Derive ΞPreservesInvariantAtC C directly from the per-PC
-  -- cascade-fact predicates via `bytecodePreservesInvariant_from_cascades`,
-  -- which composes the closed-form glue lemmas
-  -- (`weth_sstore_preserves_from_cascades`,
-  -- `weth_call_slack_from_cascade`) with `bytecodePreservesInvariant`.
-  -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
-  -- inside the discharger, so consumers no longer supply it.
-  -- Discharge `WethStepInvFrPreserves C` via `weth_inv_step_pres`
-  -- (closed-form for strict + SSTORE) plus the residual CALL-only
-  -- structural assumption `call_inv_step_pres`.
-  have hInvPres : WethStepInvFrPreserves C :=
-    weth_inv_step_pres C hAssumptions.call_inv_step_pres
-      hAssumptions.deposit_slack
-  -- Derive `ΞPreservesAccountAt C` as a Lean theorem from the bundle's
-  -- structural fields. The non-C arm — formerly the structural field
-  -- `xi_preserves_C_other` — is now discharged in-Lean by
-  -- `weth_xi_preserves_C_other` via the framework's universal
-  -- Ξ-preservation closure.
+  -- Derive `ΞPreservesAccountAt C` from the framework's fully universal
+  -- closure (no Reachable, no per-step assumptions).
   have hXiPresAcc : ΞPreservesAccountAt C :=
-    weth_xi_preserves_C C hAssumptions.deployed
-      hAssumptions.call_inv_step_pres
-      hAssumptions.deposit_slack
-      hAssumptions.inv_at_initial
-      (weth_xi_preserves_C_other C)
+    Ξ_preserves_account_at_a_universal C
+  -- Derive `ΞPreservesInvariantAtC C` via the invariant-aware
+  -- entry point. The framework's invariant-aware slack-dispatch X-loop
+  -- exposes `WethInvFr s'.accountMap C` to its `hReach_step` callback
+  -- (already established internally via the CALL/SSTORE arms), so no
+  -- per-step CALL invariant predicate (formerly `call_inv_step_pres`)
+  -- is needed.
   have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant_fully_narrowed C
+    bytecodePreservesInvariant_inv_aware_fully_narrowed C
       hAssumptions.deployed hXiPresAcc
-      hInvPres
       hAssumptions.account_at_initial
       hAssumptions.inv_at_initial
       hAssumptions.call_no_wrap
