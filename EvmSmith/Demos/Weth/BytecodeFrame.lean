@@ -4296,14 +4296,13 @@ private theorem weth_sstore_preserves_pc60_from_cascade
     (C : AccountAddress) (hCascade : WethPC60CascadeFacts C) :
     ∀ (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat)),
       WethReachable C s →
-      StateWF s.accountMap →
       C = s.executionEnv.codeOwner →
       WethInvFr s.accountMap C →
       s.pc.toNat = 60 →
       fetchInstr s.executionEnv s.pc = .ok (.StackMemFlow .SSTORE, arg) →
       EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
       WethInvFr s'.accountMap C := by
-  intro s s' f' cost arg hR _hWF hCO hInv hPC60 hFetch hStep
+  intro s s' f' cost arg hR hCO hInv hPC60 hFetch hStep
   -- The decode at PC 60 is SSTORE with arg = none.
   have hFetchNone : fetchInstr s.executionEnv s.pc =
       .ok (.StackMemFlow .SSTORE, none) := by
@@ -4370,14 +4369,13 @@ private theorem weth_sstore_preserves_pc40_from_cascade
     (C : AccountAddress) (hCascade : WethPC40CascadeFacts C) :
     ∀ (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat)),
       WethReachable C s →
-      StateWF s.accountMap →
       C = s.executionEnv.codeOwner →
       WethInvFr s.accountMap C →
       s.pc.toNat = 40 →
       fetchInstr s.executionEnv s.pc = .ok (.StackMemFlow .SSTORE, arg) →
       EVM.step (f' + 1) cost (some (.StackMemFlow .SSTORE, arg)) s = .ok s' →
       WethInvFr s'.accountMap C := by
-  intro s s' f' cost arg hR hWF hCO hInv hPC40 hFetch hStep
+  intro s s' f' cost arg hR hCO hInv hPC40 hFetch hStep
   have hFetchNone : fetchInstr s.executionEnv s.pc =
       .ok (.StackMemFlow .SSTORE, none) := by
     obtain ⟨⟨_, hCode, _⟩, _⟩ := hR
@@ -4497,12 +4495,12 @@ theorem weth_sstore_preserves_from_cascades
     (h40 : WethPC40CascadeFacts C)
     (h60 : WethPC60CascadeFacts C) :
     WethSStorePreserves C := by
-  intro s s' f' cost arg hR hWF hCO hInv hFetch hStep
+  intro s s' f' cost arg hR _hWF hCO hInv hFetch hStep
   rcases WethReachable_sstore_pc hR hFetch with hPC40 | hPC60
   · exact weth_sstore_preserves_pc40_from_cascade C h40 s s' f' cost arg
-      hR hWF hCO hInv hPC40 hFetch hStep
+      hR hCO hInv hPC40 hFetch hStep
   · exact weth_sstore_preserves_pc60_from_cascade C h60 s s' f' cost arg
-      hR hWF hCO hInv hPC60 hFetch hStep
+      hR hCO hInv hPC60 hFetch hStep
 
 /-- Per-state CALL slack precondition at PC 72. Slack-callback form:
 given the seven popped CALL parameters and the residual stack tail,
