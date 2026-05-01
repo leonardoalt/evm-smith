@@ -5967,4 +5967,92 @@ theorem bytecodePreservesInvariant_inv_aware_fully_narrowed
     (weth_sstore_preserves_from_cascades C h40 h60)
     (weth_call_slack_from_cascade C h72)
 
+/-- **Per-CALL-step `WethInvFr` preservation as a Lean theorem.**
+
+Discharges the formerly-structural `WethAssumptions.call_inv_step_pres`
+field's predicate (`WethCALLStepInvFr C`). Requires the standard Weth
+deployment / σ-presence / σ_P-invariant facts plus `StateWF s.accountMap`
+and the `cA`-exclusion at `C` (these latter two are framework-level
+state-well-formedness hypotheses that are normally threaded through Υ
+via `Υ_invariant_preserved`'s preconditions but are not part of
+`WethReachable`).
+
+Strategy:
+* Derive `ΞPreservesInvariantAtC C` via `bytecodePreservesInvariant_inv_aware_fully_narrowed`
+  (no `WethCALLStepInvFr` dependency — that's the whole point).
+* Convert the witness to `ΞInvariantAtCFrame C (f+1)` /
+  `ΞInvariantFrameAtC C (f+1)` IHs via the framework's witness
+  conversion theorems.
+* Apply `step_CALL_arm_at_C_slack_invariant` (now public) with the
+  IHs and the slack callback derived from `weth_call_slack`.
+
+The `hWF` and `hNC` hypotheses cannot be derived from `WethReachable`
+(they're framework-level), so consumers supply them per-state. -/
+theorem weth_call_inv_step_pres
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
+    (hNoWrap : WethCallNoWrapAt72 C)
+    (hPreCredit : WethDepositPreCredit C)
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (hWF : StateWF s.accountMap)
+    (hNC : ∀ a ∈ s.createdAccounts, a ≠ C)
+    (hR : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (.CALL, arg))
+    (hStep : EVM.step (f' + 1) cost (some (.CALL, arg)) s = .ok s') :
+    WethInvFr s'.accountMap C := by
+  -- Derive the invariant-witness in-Lean.
+  have hΞ : ΞPreservesAccountAt C := Ξ_preserves_account_at_a_universal C
+  have hWitness : ΞPreservesInvariantAtC C :=
+    bytecodePreservesInvariant_inv_aware_fully_narrowed C hDeployed hΞ
+      hAccInit hInvInit hNoWrap hPreCredit
+  -- Convert witness to per-fuel IHs at fuel `f' + 1`.
+  have hAtCFrame : ΞInvariantAtCFrame C (f' + 1) :=
+    ΞInvariantAtCFrame_of_witness C hWitness (f' + 1)
+  have hFrame : ΞInvariantFrameAtC C (f' + 1) :=
+    ΞInvariantFrameAtC_of_witness C hWitness (f' + 1)
+  -- Pull `WethReachable`'s constituents.
+  have hCO : C = s.executionEnv.codeOwner := hR.1.1
+  have hInv : WethInvFr s.accountMap C := hR.2.2.2
+  -- Slack callback derived via `weth_call_slack` (theorem).
+  have hSlack : WethCallSlackAt72 C := weth_call_slack C (weth_account_at_C C)
+  -- PC = 72 follows from `WethReachable` + CALL fetch.
+  have hPC72 : s.pc.toNat = 72 := WethReachable_call_pc hR hFetch
+  -- Per-state CALL precondition callback for `step_CALL_arm_at_C_slack_invariant`.
+  have h_call_pre :
+      ∀ (μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ : UInt256) (tl : Stack UInt256),
+        s.stack = μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: tl →
+        (∀ acc,
+            s.accountMap.find? (AccountAddress.ofUInt256 μ₁) = some acc →
+            acc.balance.toNat + μ₂.toNat < UInt256.size) ∧
+        (μ₂ = ⟨0⟩ ∨ ∃ acc,
+            s.accountMap.find?
+                (AccountAddress.ofUInt256
+                  (.ofNat s.executionEnv.codeOwner)) = some acc ∧
+            μ₂.toNat ≤ acc.balance.toNat) ∧
+        (C ≠ AccountAddress.ofUInt256
+                (.ofNat s.executionEnv.codeOwner) ∨
+         μ₂ = ⟨0⟩ ∨
+         μ₂.toNat + storageSum s.accountMap C
+           ≤ balanceOf s.accountMap C) := by
+    intro μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+    -- Pull from the per-PC-72 callbacks: `WethCallNoWrapAt72` + `weth_call_slack`.
+    refine ⟨?_, ?_, ?_⟩
+    · -- recipient no-wrap.
+      exact hNoWrap s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+    · -- sender funds disjunction.
+      exact (hSlack s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk).2
+    · -- slack disjunction (weakened to include `C ≠ ...`).
+      have hSlackPart := (hSlack s hR hPC72 μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk).1
+      -- `μ₂.toNat + storageSum ≤ balanceOf` holds unconditionally; weaken
+      -- to the three-disjunct form.
+      exact Or.inr (Or.inr hSlackPart)
+  -- Apply the framework's CALL helper.
+  have hBundle :=
+    step_CALL_arm_at_C_slack_invariant C f' cost arg s s' hWF hCO hNC
+      hAtCFrame hFrame hInv h_call_pre hStep
+  exact hBundle.1
+
 end EvmSmith.Weth
