@@ -214,21 +214,22 @@ structure WethAssumptions
   via the framework's `Ξ_invariant_preserved_bundled_bdd`. -/
   inv_at_initial   : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
                           I.codeOwner = C → WethInvFr σ C
-  /-- `WethInvFr` is preserved per non-halt step. Bundled as a structural
-  assumption pending discharge via:
+  /-- `WethInvFr` is preserved per CALL step (PC 72).
 
-  * For strict ops (most PCs): `EVM_step_strict_preserves_WethInvFr`
-    (already in BytecodeFrame).
-  * For SSTORE PCs (40, 60): `WethSStorePreserves` (existing
-    cascade-based discharger), modulo the `StateWF` precondition.
-  * For CALL PC (72): `step_CALL_arm_at_C_slack_invariant` (private
-    framework lemma) needing the strong-induction IHs not exposed by
-    the framework's `hReach_step` slot.
+  This is the genuinely-non-derivable per-step preservation case:
+  the framework's `step_CALL_arm_at_C_slack_invariant` (private)
+  threads the post-CALL invariant via the strong-induction IHs
+  `ΞInvariantAtCFrame C (f+1)` and `ΞInvariantFrameAtC C (f+1)`,
+  which the framework's `hReach_step` slot does not expose to the
+  per-step interface.
 
-  Threading these closed-form dischargers requires either modifying
-  the framework's `hReach_step` signature to expose StateWF/IHs, or
-  adding StateWF as a fifth conjunct to `WethReachable`. -/
-  inv_step_pres    : WethStepInvFrPreserves C
+  The previous `inv_step_pres : WethStepInvFrPreserves C` field has
+  been **narrowed** to this CALL-specific predicate: the strict + SSTORE
+  branches of `WethStepInvFrPreserves` are now discharged in-Lean by
+  `weth_inv_step_pres` (which combines `EVM_step_strict_preserves_WethInvFr`
+  with `weth_sstore_preserves_pc{40,60}_from_cascade`), leaving only
+  the CALL branch as the remaining structural assumption. -/
+  call_inv_step_pres : WethCALLStepInvFr C
   /-- Ξ preserves account presence at C.
 
   Real-world justification: Weth's bytecode has no SELFDESTRUCT and no
@@ -436,10 +437,16 @@ theorem weth_solvency_invariant
   -- `weth_call_slack_from_cascade`) with `bytecodePreservesInvariant`.
   -- The non-halt step closure is derived in-Lean by `weth_step_closure C`
   -- inside the discharger, so consumers no longer supply it.
+  -- Discharge `WethStepInvFrPreserves C` via `weth_inv_step_pres`
+  -- (closed-form for strict + SSTORE) plus the residual CALL-only
+  -- structural assumption `call_inv_step_pres`.
+  have hInvPres : WethStepInvFrPreserves C :=
+    weth_inv_step_pres C hAssumptions.call_inv_step_pres
+      hAssumptions.deposit_slack
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant_fully_narrowed C
       hAssumptions.deployed hAssumptions.xi_preserves_C
-      hAssumptions.inv_step_pres
+      hInvPres
       hAssumptions.account_at_initial
       hAssumptions.inv_at_initial
       hAssumptions.call_no_wrap
