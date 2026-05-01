@@ -4906,20 +4906,24 @@ sink is excluded). Each non-halt PC walks to a destination PC ≠ 32
 (or PC = 32 with `len = 1` for the JUMPI-taken case at PC 16). Halt
 PCs (31, 41, 79, 85) are ruled out by the op-inequalities. -/
 
-/-- **Pres-aware step closure** for Weth. Maintains `WethReachable` under
-non-halt steps, **given** the post-step σ-presence as an external
-parameter (`hPresStep`) rather than re-deriving it via a
-`ΞPreservesAccountAt C` witness.
+/-- **Invariant-aware step closure** for Weth. Maintains `WethReachable`
+under non-halt steps, **given** the post-step σ-presence (`hPresStep`)
+and the post-step `WethInvFr s'.accountMap C` (`hInv'`) as external
+parameters rather than re-deriving them via witnesses or per-step
+preservation predicates.
 
 This matches the framework's
-`Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` interface,
-which provides `hPresStep` directly to the `hReach_step` closure (the
-X-loop has already computed it via `EVM_step_preserves_present_no_create_bdd`
-under the strong-induction `ΞPreservesAccountAtBdd`). This breaks the
-chicken-and-egg cycle that kept `xi_preserves_C` a structural assumption. -/
-private theorem weth_step_closure_with_pres
+`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`
+interface: the X-loop computes `hInv'` internally via the CALL/SSTORE
+arms (`step_bundled_invariant_at_C_invariant_at_C_slack_dispatch`) and
+threads it into `hReach_step`. This breaks the chicken-and-egg cycle
+that kept `call_inv_step_pres` a structural assumption.
+
+The thin wrapper `weth_step_closure_with_pres` below recovers the
+legacy interface (without `hInv'`) by computing it from a per-step
+preservation predicate `hInvPres : WethStepInvFrPreserves C`. -/
+private theorem weth_step_closure_with_pres_inv_aware
     (C : AccountAddress)
-    (hInvPres : WethStepInvFrPreserves C)
     (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (hR : WethReachable C s)
@@ -4928,17 +4932,14 @@ private theorem weth_step_closure_with_pres
     (hRet : op ≠ .RETURN) (hRev : op ≠ .REVERT)
     (hStop : op ≠ .STOP) (_hSD : op ≠ .SELFDESTRUCT)
     (_hPresZ : accountPresentAt s.accountMap C)
-    (hPresStep : accountPresentAt s'.accountMap C) :
+    (hPresStep : accountPresentAt s'.accountMap C)
+    (hInv' : WethInvFr s'.accountMap C) :
     WethReachable C s' := by
   obtain ⟨hT, _hNot, hAcc, hInv⟩ := hR
   have hT' := hT
   obtain ⟨hCO, hCode, hPC⟩ := hT
   -- Account-presence at s' is the supplied `hPresStep` parameter.
   have hAcc' : accountPresentAt s'.accountMap C := hPresStep
-  -- WethInvFr at s'.accountMap C from the per-step preservation predicate.
-  have hInv' : WethInvFr s'.accountMap C :=
-    hInvPres s s' f' cost op arg ⟨hT', _hNot, hAcc, hInv⟩ hFetch hStep
-      hRet hRev hStop _hSD
   -- Case split on the 64 `WethTrace` disjuncts.
   rcases hPC with
     ⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|⟨hpc, hLen⟩|
@@ -5584,6 +5585,32 @@ private theorem weth_step_closure_with_pres
       rw [hCode, hpcEq]; exact decode_bytecode_at_85
     have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
     exact absurd hOp hRev
+
+/-- **Pres-aware step closure** for Weth. Maintains `WethReachable` under
+non-halt steps, **given** the post-step σ-presence as an external
+parameter (`hPresStep`) rather than re-deriving it via a
+`ΞPreservesAccountAt C` witness.
+
+Thin wrapper over `weth_step_closure_with_pres_inv_aware`: computes
+`hInv'` from the per-step preservation predicate `hInvPres`, then
+delegates. -/
+private theorem weth_step_closure_with_pres
+    (C : AccountAddress)
+    (hInvPres : WethStepInvFrPreserves C)
+    (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (hR : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s')
+    (hRet : op ≠ .RETURN) (hRev : op ≠ .REVERT)
+    (hStop : op ≠ .STOP) (_hSD : op ≠ .SELFDESTRUCT)
+    (_hPresZ : accountPresentAt s.accountMap C)
+    (hPresStep : accountPresentAt s'.accountMap C) :
+    WethReachable C s' := by
+  have hInv' : WethInvFr s'.accountMap C :=
+    hInvPres s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
+  exact weth_step_closure_with_pres_inv_aware C s s' f' cost op arg hR hFetch hStep
+    hRet hRev hStop _hSD _hPresZ hPresStep hInv'
 
 /-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`.
 
