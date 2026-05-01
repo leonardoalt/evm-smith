@@ -5686,6 +5686,31 @@ theorem weth_xi_preserves_C
   -- hΞ_other
   · exact hΞ_other
 
+/-- **`xi_preserves_C_other` as a Lean theorem.** The non-C arm of
+Ξ-preservation of σ-presence at C is now fully discharged by the
+framework's `Ξ_preserves_account_at_a_universal` (no Reachable, no
+hReach_no_create, fully unconditional). The `I.codeOwner ≠ C`
+hypothesis is unused but kept for signature compatibility with the
+former `xi_preserves_C_other` structural field.
+
+This eliminates the last structural assumption around Ξ-preservation
+at C: `xi_preserves_C` is fully derived in `weth_xi_preserves_C` from
+the framework's strong-induction closure plus the now-derived
+non-C-arm. -/
+theorem weth_xi_preserves_C_other
+    (C : AccountAddress) :
+    ∀ (fuel : ℕ) (cA : Batteries.RBSet AccountAddress compare)
+        (gbh : BlockHeader) (bs : ProcessedBlocks)
+        (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
+        (I : ExecutionEnv .EVM),
+      I.codeOwner ≠ C →
+      accountPresentAt σ C →
+      match EVM.Ξ fuel cA gbh bs σ σ₀ g A I with
+      | .ok (.success (_, σ', _, _) _) => accountPresentAt σ' C
+      | _ => True := by
+  intro fuel cA gbh bs σ σ₀ g A I _hCO h_present
+  exact Ξ_preserves_account_at_a_universal C fuel cA gbh bs σ σ₀ g A I h_present
+
 /-- **`bytecodePreservesInvariant` — Weth's bytecode-level §H.2 entry.**
 
 Discharges `ΞPreservesInvariantAtC C` from the deployment witness
