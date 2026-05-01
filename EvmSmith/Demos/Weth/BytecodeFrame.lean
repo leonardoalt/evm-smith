@@ -5883,4 +5883,88 @@ theorem bytecodePreservesInvariant_fully_narrowed
       (weth_deposit_cascade C (weth_account_at_C C))
       hPreCredit)
 
+/-! ## Invariant-aware variant — discharge `WethCALLStepInvFr` as a theorem
+
+The framework's `ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`
+exposes `WethInvFr s'.accountMap C` to the `hReach_step` callback at every
+non-halt step (the framework already established it via the internal
+CALL/SSTORE arms). This eliminates the need for a per-step CALL invariant
+predicate (`WethCALLStepInvFr C`): the step closure receives `hInv'`
+externally rather than computing it via `hInvPres`. -/
+
+/-- **Invariant-aware `bytecodePreservesInvariant`.** Like
+`bytecodePreservesInvariant` but uses the framework's invariant-aware
+slack-dispatch entry point and `weth_step_closure_with_pres_inv_aware`,
+removing the dependency on `WethStepInvFrPreserves C`'s CALL arm. -/
+theorem bytecodePreservesInvariant_inv_aware
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hΞ : ΞPreservesAccountAt C)
+    (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
+    (hSStore : WethSStorePreserves C)
+    (hCall : WethCallSlack C) :
+    ΞPreservesInvariantAtC C := by
+  apply ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware
+    WethOpAllowed C (WethReachable C)
+  · -- hReach_Z
+    intro s g h
+    exact WethReachable_Z_preserves C s g h
+  · -- hReach_step (invariant-aware: receives hInv' from the framework)
+    intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop hSD hInv'
+    have hAcc : accountPresentAt s.accountMap C := hR.2.2.1
+    have h_no_create : op ≠ .CREATE ∧ op ≠ .CREATE2 :=
+      weth_no_create C s op arg hR hFetch
+    have hAcc' : accountPresentAt s'.accountMap C :=
+      EVM_step_preserves_present_no_create C hΞ op arg f' cost s s'
+        h_no_create hStep hAcc
+    exact weth_step_closure_with_pres_inv_aware C s s' f' cost op arg hR
+      hFetch hStep hRet hRev hStop hSD hAcc hAcc' hInv'
+  · -- hReach_decodeSome
+    intro s h
+    exact WethReachable_decodeSome C s h
+  · -- hReach_op
+    intro s op arg hR hFetch
+    exact WethReachable_op_in_allowed C s op arg hR hFetch
+  · -- hDischarge
+    exact WethOpAllowed_discharge
+  · -- hReach_call_slack
+    intro s arg hR hWF hCO hNC hInv hFetch μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+    exact hCall s arg hR hWF hCO hNC hInv hFetch μ₀ μ₁ μ₂ μ₃ μ₄ μ₅ μ₆ tl hStk
+  · -- hReach_sstore
+    intro s s' f' cost arg hR hWF hCO hInv hFetch hStep
+    exact hSStore s s' f' cost arg hR hWF hCO hInv hFetch hStep
+  · -- hReachInit
+    intro cA gbh bs σ σ₀ g A I hCO
+    exact WethReachable_initial C hDeployed cA gbh bs σ σ₀ g A I hCO
+      (hAccInit σ I hCO) (hInvInit σ I hCO)
+
+/-- **Invariant-aware variant of `bytecodePreservesInvariant_fully_narrowed`.**
+Composes `bytecodePreservesInvariant_inv_aware` with the in-Lean
+discharge of `WethCallSlack` / `WethSStorePreserves` from cascade facts.
+Requires **only** `WethCallNoWrapAt72` and `WethDepositPreCredit` —
+no `WethStepInvFrPreserves C` needed. -/
+theorem bytecodePreservesInvariant_inv_aware_fully_narrowed
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hΞ : ΞPreservesAccountAt C)
+    (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
+    (hNoWrap : WethCallNoWrapAt72 C)
+    (hPreCredit : WethDepositPreCredit C) :
+    ΞPreservesInvariantAtC C := by
+  have hSlack72 : WethCallSlackAt72 C :=
+    weth_call_slack C (weth_account_at_C C)
+  have h72 : WethPC72CascadeFacts C := weth_pc72_cascade C hNoWrap hSlack72
+  have h40 : WethPC40CascadeFacts C :=
+    weth_pc40_cascade C
+      (weth_deposit_cascade C (weth_account_at_C C))
+      hPreCredit
+  have h60 : WethPC60CascadeFacts C := weth_pc60_cascade C (weth_account_at_C C)
+  exact bytecodePreservesInvariant_inv_aware C hDeployed hΞ hAccInit hInvInit
+    (weth_sstore_preserves_from_cascades C h40 h60)
+    (weth_call_slack_from_cascade C h72)
+
 end EvmSmith.Weth
