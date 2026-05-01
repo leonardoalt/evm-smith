@@ -3265,25 +3265,22 @@ These three predicates capture the load-bearing per-state facts that
 plus the bytecode-level slack reasoning. -/
 
 /-- **Bytecode-level per-step `WethInvFr` preservation predicate.**
-A blanket black-box: every reachable non-halt step preserves
-`WethInvFr`. Used to thread the fourth conjunct of `WethReachable`
-(`WethInvFr s.accountMap C`) through `weth_step_closure`'s 61 per-PC
-walks.
+Every reachable non-halt step preserves `WethInvFr`. Used to thread the
+fourth conjunct of `WethReachable` (`WethInvFr s.accountMap C`) through
+`weth_step_closure`'s 61 per-PC walks.
 
-This is supplied as an opaque assumption pending the closed-form
-discharge:
-* For strict ops (most PCs): trivially preserved via
-  `EVM_step_strict_preserves_WethInvFr` (already a theorem).
-* For SSTORE PCs (40, 60): via `WethSStorePreserves` (existing
-  cascade-based discharger), modulo a `StateWF` precondition the
-  framework's `hReach_step` slot doesn't expose.
-* For CALL PC (72): via `step_CALL_arm_at_C_slack_invariant` (private
-  framework lemma), which needs the strong-induction IHs the
-  framework's `hReach_step` slot doesn't expose either.
-
-Bundled here as a structural assumption to keep the refactor focused
-on threading `WethInvFr` through `WethReachable` without modifying
-the framework's `hReach_step` shape. -/
+Discharged in-Lean (modulo CALL) by `weth_inv_step_pres`:
+* For strict ops (most PCs): closed-form via
+  `EVM_step_strict_preserves_WethInvFr`.
+* For SSTORE PCs (40, 60): closed-form via
+  `weth_sstore_preserves_pc{40,60}_from_cascade` with cascade facts
+  derived from σ-has-C (= `weth_account_at_C`) and the Θ-pre-credit
+  `WethDepositPreCredit`.
+* For CALL PC (72): delegated to a `WethCALLStepInvFr C` argument —
+  the only branch needing the framework's strong-induction IHs (via
+  `step_CALL_arm_at_C_slack_invariant`'s
+  `ΞInvariantAtCFrame`/`ΞInvariantFrameAtC` slots), which are not
+  exposed by the framework's `hReach_step` interface. -/
 def WethStepInvFrPreserves (C : AccountAddress) : Prop :=
   ∀ s s' : EVM.State, ∀ f' cost : ℕ, ∀ op arg,
     WethReachable C s →
