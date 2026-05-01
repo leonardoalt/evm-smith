@@ -5646,6 +5646,91 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
   exact weth_step_closure_with_pres C hInvPres s s' f' cost op arg hR
     hFetch hStep hRet hRev hStop hSD hAcc hAcc'
 
+/-! ## §J.6.7-Weth — discharge of `xi_preserves_C` as a Lean theorem
+
+Routes through `Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step`
+(EVMYulLean §J.6.7) with `WethReachable C` as the Reachable predicate.
+
+The pres-step framework variant supplies the post-step σ-presence to the
+hReach_step closure directly (computed inside the X-loop via the
+strong-induction `ΞPreservesAccountAtBdd`), so the closure does not need
+an external `ΞPreservesAccountAt C` witness. This breaks the
+chicken-and-egg cycle that previously forced `xi_preserves_C` to be a
+structural assumption.
+
+The C-arm is fully closed-form. The non-C arm — Ξ executions on
+contracts other than `C` — is bundled as `xi_preserves_C_other`, a
+strictly narrower assumption: it only constrains executions where
+`I.codeOwner ≠ C` (whereas the previous `xi_preserves_C` constrained
+executions at any `I.codeOwner`). Real-world: SELFDESTRUCT only removes
+the running address `Iₐ ≠ C`; CREATE/CREATE2 only insert; so C is
+never removed by non-C executions. -/
+
+/-- **`xi_preserves_C` as a Lean theorem from a narrower `xi_preserves_C_other`
+assumption.** The full ΞPreservesAccountAt C witness is derived from:
+
+* The deployment-pinned bytecode (`hDeployed`).
+* The σ-presence and invariant at the initial state (`hAccInit`,
+  `hInvInit`) — already structural fields in `WethAssumptions`.
+* The CALL-only per-step invariant preservation
+  (`call_inv_step_pres`) — already a structural field.
+* The PC 40 SSTORE pre-credit slack (`hPreCredit`) — already
+  `deposit_slack`.
+* The non-C arm witness (`hΞ_other`) — the new, strictly narrower
+  assumption replacing `xi_preserves_C`. -/
+theorem weth_xi_preserves_C
+    (C : AccountAddress) (hDeployed : DeployedAtC C)
+    (hCallInvPres : WethCALLStepInvFr C)
+    (hPreCredit : WethDepositPreCredit C)
+    (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → accountPresentAt σ C)
+    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
+        I.codeOwner = C → WethInvFr σ C)
+    (hΞ_other : ∀ (fuel : ℕ) (cA : Batteries.RBSet AccountAddress compare)
+                  (gbh : BlockHeader) (bs : ProcessedBlocks)
+                  (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
+                  (I : ExecutionEnv .EVM),
+        I.codeOwner ≠ C →
+        accountPresentAt σ C →
+        match EVM.Ξ fuel cA gbh bs σ σ₀ g A I with
+        | .ok (.success (_, σ', _, _) _) => accountPresentAt σ' C
+        | _ => True) :
+    ΞPreservesAccountAt C := by
+  -- Derive the per-step WethInvFr preservation predicate from the
+  -- narrowed CALL-only field plus the in-Lean strict + SSTORE walks.
+  have hInvPres : WethStepInvFrPreserves C :=
+    weth_inv_step_pres C hCallInvPres hPreCredit
+  apply Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step
+          C C (WethReachable C)
+  -- hReach_Z
+  · intro s g hR; exact WethReachable_Z_preserves C s g hR
+  -- hReach_step (pres-aware)
+  · intro s s' f' cost op arg hR hFetch hStep hRet hRev hStop hSD hPresZ hPresStep
+    exact weth_step_closure_with_pres C hInvPres s s' f' cost op arg hR
+      hFetch hStep hRet hRev hStop hSD hPresZ hPresStep
+  -- hReach_decodeSome
+  · intro s hR; exact WethReachable_decodeSome C s hR
+  -- hReach_no_create
+  · intro s op arg hR hFetch; exact weth_no_create C s op arg hR hFetch
+  -- hReachInit (C arm only — receives I.codeOwner = C and σ-presence at C)
+  · intro cA gbh bs σ σ₀ g A I hCO hPresσ
+    refine ⟨?_, ?_, ?_, ?_⟩
+    -- WethTrace via WethTrace_initial.
+    · exact WethTrace_initial C hDeployed cA gbh bs σ σ₀ g A I hCO
+    -- ¬ (pc=32 ∧ stack=0): at the fresh state pc=0 (default), stack=[] (default),
+    -- so pc.toNat=0 ≠ 32.
+    · intro ⟨h32, _⟩
+      -- freshState.pc = (default : EVM.State).pc = ⟨0⟩, so .toNat = 0.
+      have : (default : EVM.State).pc.toNat = 0 := by decide
+      rw [this] at h32
+      cases h32
+    -- accountPresentAt freshState.accountMap C: = accountPresentAt σ C.
+    · exact hPresσ
+    -- WethInvFr freshState.accountMap C: = WethInvFr σ C from hInvInit.
+    · exact hInvInit σ I hCO
+  -- hΞ_other
+  · exact hΞ_other
+
 /-- **`bytecodePreservesInvariant` — Weth's bytecode-level §H.2 entry.**
 
 Discharges `ΞPreservesInvariantAtC C` from the deployment witness
