@@ -230,62 +230,35 @@ structure WethAssumptions
   with `weth_sstore_preserves_pc{40,60}_from_cascade`), leaving only
   the CALL branch as the remaining structural assumption. -/
   call_inv_step_pres : WethCALLStepInvFr C
-  /-- Ξ preserves account presence at C.
+  /-- **Non-C arm of Ξ-preservation of σ-presence at C.** Ξ executions
+  on contracts **other than C** preserve `accountPresentAt σ C`.
+
+  This **replaces** the previous, strictly stronger `xi_preserves_C :
+  ΞPreservesAccountAt C` field. The full `ΞPreservesAccountAt C` is now
+  derived in `BytecodeFrame.lean` as a Lean theorem
+  (`weth_xi_preserves_C`) via the framework's
+  `Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` (§J.6.7),
+  with `WethReachable C` as the Reachable predicate. The C-arm is fully
+  closed-form; the non-C arm — Ξ executions where the running contract's
+  bytecode is unknown to us — is bundled here.
 
   Real-world justification: Weth's bytecode has no SELFDESTRUCT and no
   CREATE/CREATE2; SELFDESTRUCT in any other contract removes only the
   running address `Iₐ ≠ C`; CREATE/CREATE2 only insert. So C's account
-  is never removed.
-
-  Discharging from Lean via `Ξ_preserves_account_at_a_of_Reachable`
-  (universal-`I` form) requires a `Reachable` predicate that satisfies
-  the framework's closures **for all `I.codeOwner`**, including
-  contracts whose bytecode we don't know. Specifically:
-
-  * `hReach_decodeSome` must hold at every Reachable state, but for
-    arbitrary code (when `I.codeOwner ≠ C`) decode may be `none`.
-  * `hReach_no_create` similarly requires bytecode knowledge.
-  * `hReach_step` (op-conditional or universal) at `I.codeOwner ≠ C`
-    needs a closure over arbitrary bytecode.
-
-  A genuine discharge requires a bytecode-deployment-closure
-  hypothesis, e.g. "no contract reachable from C's call graph has
-  SELFDESTRUCT at `Iₐ = C` or CREATE2 with a salt hitting C." The
-  framework's Reachable interface does not currently provide a clean
-  way to encode such a global hypothesis without bundling a
-  ΞPreservesAccountAt-style witness.
-
-  The framework now ships an op-conditional variant
-  (`Ξ_preserves_account_at_a_of_Reachable_op_conditional`) that solves
-  the post-halt-state issue (e.g. Weth's PC 86 sink past the bytecode
-  end), plus a C-restricted variant
-  (`Ξ_preserves_account_at_a_of_Reachable_for_C`) whose `hReachInit`
-  slot only fires for `I.codeOwner = C` executions; the non-C arm is
-  delegated to an external `hΞ_other` witness.
-
-  Wiring `Ξ_preserves_account_at_a_of_Reachable_for_C` to discharge
-  `xi_preserves_C` as a Lean theorem requires:
-
-  1. A `WethReachable`-derivative without the `accountPresentAt
-     s.accountMap C` third conjunct, so the step closure does not
-     need an external `ΞPreservesAccountAt C` witness (currently
-     `weth_step_closure C` consumes one to thread `accountPresentAt`
-     across CALL ops).
-  2. A non-C-arm witness `hΞ_other`, capturing "Ξ on contracts other
-     than C preserves σ's `find? C`". Real-world: SELFDESTRUCT only
-     removes Iₐ = I.codeOwner ≠ C; CREATE/CREATE2 only insert. A
-     framework-level discharge requires `EVM_step_preserves_codeOwner`
-     and "non-Iₐ accounts are preserved by SELFDESTRUCT", neither
-     currently in `MutualFrame.lean`.
-
-  Pending those framework additions, kept as a structural assumption.
-  When wired up, this field will be replaced by:
-
-      xi_preserves_C_other : ∀ ..., I.codeOwner ≠ C → ...
-
-  with `xi_preserves_C` derived in BytecodeFrame via the new framework
-  variant. -/
-  xi_preserves_C   : ΞPreservesAccountAt C
+  is never removed by non-C executions. A framework-level discharge
+  would require `EVM_step_preserves_codeOwner` plus "non-Iₐ accounts
+  are preserved by SELFDESTRUCT" — neither currently in
+  `MutualFrame.lean`. -/
+  xi_preserves_C_other : ∀ (fuel : ℕ)
+      (cA : Batteries.RBSet AccountAddress compare)
+      (gbh : BlockHeader) (bs : ProcessedBlocks)
+      (σ σ₀ : AccountMap .EVM) (g : UInt256) (A : Substate)
+      (I : ExecutionEnv .EVM),
+    I.codeOwner ≠ C →
+    accountPresentAt σ C →
+    match EVM.Ξ fuel cA gbh bs σ σ₀ g A I with
+    | .ok (.success (_, σ', _, _) _) => accountPresentAt σ' C
+    | _ => True
   /-- Recipient-balance no-wrap at PC 72's CALL: chain-bound real-world
   fact. **Replaces** the no-wrap part of the previous opaque
   `pc72_cascade : WethPC72CascadeFacts C` field. -/
@@ -443,9 +416,18 @@ theorem weth_solvency_invariant
   have hInvPres : WethStepInvFrPreserves C :=
     weth_inv_step_pres C hAssumptions.call_inv_step_pres
       hAssumptions.deposit_slack
+  -- Derive `ΞPreservesAccountAt C` as a Lean theorem from the narrower
+  -- non-C-arm assumption `xi_preserves_C_other` plus the bundle's
+  -- structural fields.
+  have hXiPresAcc : ΞPreservesAccountAt C :=
+    weth_xi_preserves_C C hAssumptions.deployed
+      hAssumptions.call_inv_step_pres
+      hAssumptions.deposit_slack
+      hAssumptions.inv_at_initial
+      hAssumptions.xi_preserves_C_other
   have hXi : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant_fully_narrowed C
-      hAssumptions.deployed hAssumptions.xi_preserves_C
+      hAssumptions.deployed hXiPresAcc
       hInvPres
       hAssumptions.account_at_initial
       hAssumptions.inv_at_initial

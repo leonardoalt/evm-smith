@@ -5682,8 +5682,6 @@ theorem weth_xi_preserves_C
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hCallInvPres : WethCALLStepInvFr C)
     (hPreCredit : WethDepositPreCredit C)
-    (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-        I.codeOwner = C → accountPresentAt σ C)
     (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → WethInvFr σ C)
     (hΞ_other : ∀ (fuel : ℕ) (cA : Batteries.RBSet AccountAddress compare)
