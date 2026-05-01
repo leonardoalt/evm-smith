@@ -3335,34 +3335,6 @@ case yields `WethTrace s'` (via the matching `WethTrace_step_at_N`) plus
 either `s'.pc.toNat ≠ 32` or `s'.stack.length ≠ 0` (from the per-PC step
 shape). The two helpers project these into `WethReachable s'`. -/
 
-/-- **`WethTraceShape`** — the structural-only part of `WethReachable`,
-omitting the `accountPresentAt` and `WethInvFr` conjuncts.
-
-This is the predicate the **trace-only step closure**
-(`weth_trace_step_closure`) maintains, and it is the predicate fed to
-`Ξ_preserves_account_at_a_of_Reachable_for_C` to discharge
-`weth_xi_preserves_C` as a Lean theorem.
-
-Stripping the σ-presence conjunct breaks the chicken-and-egg cycle:
-the framework's `Ξ_preserves_account_at_a_of_Reachable_for_C` uses the
-strong-induction `ΞPreservesAccountAtBdd` to thread `accountPresentAt`
-through the X loop **independently** of the Reachable predicate; so the
-Reachable closure does not need to maintain σ-presence itself. -/
-private def WethTraceShape (C : AccountAddress) (s : EVM.State) : Prop :=
-  WethTrace C s ∧ ¬ (s.pc.toNat = 32 ∧ s.stack.length = 0)
-
-private theorem WethTraceShape_of_pc_ne_32
-    {C : AccountAddress} {s : EVM.State}
-    (hT : WethTrace C s) (hpc_ne : s.pc.toNat ≠ 32) :
-    WethTraceShape C s :=
-  ⟨hT, fun ⟨h1, _⟩ => hpc_ne h1⟩
-
-private theorem WethTraceShape_of_len_ne_0
-    {C : AccountAddress} {s : EVM.State}
-    (hT : WethTrace C s) (hlen : s.stack.length ≠ 0) :
-    WethTraceShape C s :=
-  ⟨hT, fun ⟨_, h2⟩ => hlen h2⟩
-
 private theorem WethReachable_of_WethTrace_pc_ne_32
     {C : AccountAddress} {s : EVM.State}
     (hAcc : accountPresentAt s.accountMap C)
@@ -3378,21 +3350,6 @@ private theorem WethReachable_of_WethTrace_len_ne_0
     (hT : WethTrace C s) (hlen : s.stack.length ≠ 0) :
     WethReachable C s :=
   ⟨hT, fun ⟨_, h2⟩ => hlen h2, hAcc, hInv⟩
-
-/-- Project a `WethReachable` to a `WethTraceShape`. -/
-private theorem WethTraceShape_of_WethReachable
-    {C : AccountAddress} {s : EVM.State}
-    (h : WethReachable C s) : WethTraceShape C s :=
-  ⟨h.1, h.2.1⟩
-
-/-- Build a `WethReachable` from a `WethTraceShape` plus the σ-presence
-and invariant conjuncts. -/
-private theorem WethReachable_of_WethTraceShape
-    {C : AccountAddress} {s : EVM.State}
-    (hShape : WethTraceShape C s)
-    (hAcc : accountPresentAt s.accountMap C)
-    (hInv : WethInvFr s.accountMap C) : WethReachable C s :=
-  ⟨hShape.1, hShape.2, hAcc, hInv⟩
 
 /-! ### PC-narrowing lemmas for SSTORE / CALL
 
