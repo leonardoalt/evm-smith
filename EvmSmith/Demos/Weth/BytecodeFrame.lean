@@ -4949,18 +4949,35 @@ sink is excluded). Each non-halt PC walks to a destination PC ≠ 32
 (or PC = 32 with `len = 1` for the JUMPI-taken case at PC 16). Halt
 PCs (31, 41, 79, 85) are ruled out by the op-inequalities. -/
 
-/-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`. -/
-theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
-  intro hΞ hInvPres s s' f' cost op arg hR hFetch hStep hRet hRev hStop _hSD
+/-- **Pres-aware step closure** for Weth. Maintains `WethReachable` under
+non-halt steps, **given** the post-step σ-presence as an external
+parameter (`hPresStep`) rather than re-deriving it via a
+`ΞPreservesAccountAt C` witness.
+
+This matches the framework's
+`Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` interface,
+which provides `hPresStep` directly to the `hReach_step` closure (the
+X-loop has already computed it via `EVM_step_preserves_present_no_create_bdd`
+under the strong-induction `ΞPreservesAccountAtBdd`). This breaks the
+chicken-and-egg cycle that kept `xi_preserves_C` a structural assumption. -/
+private theorem weth_step_closure_with_pres
+    (C : AccountAddress)
+    (hInvPres : WethStepInvFrPreserves C)
+    (s s' : EVM.State) (f' cost : ℕ)
+    (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (hR : WethReachable C s)
+    (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
+    (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s')
+    (hRet : op ≠ .RETURN) (hRev : op ≠ .REVERT)
+    (hStop : op ≠ .STOP) (_hSD : op ≠ .SELFDESTRUCT)
+    (_hPresZ : accountPresentAt s.accountMap C)
+    (hPresStep : accountPresentAt s'.accountMap C) :
+    WethReachable C s' := by
   obtain ⟨hT, _hNot, hAcc, hInv⟩ := hR
   have hT' := hT
   obtain ⟨hCO, hCode, hPC⟩ := hT
-  -- Account-presence at s'.accountMap C from per-step preservation.
-  have h_no_create : op ≠ .CREATE ∧ op ≠ .CREATE2 :=
-    weth_no_create C s op arg ⟨hT', _hNot, hAcc, hInv⟩ hFetch
-  have hAcc' : accountPresentAt s'.accountMap C :=
-    EVM_step_preserves_present_no_create C hΞ op arg f' cost s s'
-      h_no_create hStep hAcc
+  -- Account-presence at s' is the supplied `hPresStep` parameter.
+  have hAcc' : accountPresentAt s'.accountMap C := hPresStep
   -- WethInvFr at s'.accountMap C from the per-step preservation predicate.
   have hInv' : WethInvFr s'.accountMap C :=
     hInvPres s s' f' cost op arg ⟨hT', _hNot, hAcc, hInv⟩ hFetch hStep
@@ -5610,6 +5627,24 @@ theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
       rw [hCode, hpcEq]; exact decode_bytecode_at_85
     have ⟨hOp, _⟩ := op_arg_eq_of_fetchInstr_decode hDec hFetch
     exact absurd hOp hRev
+
+/-- Step-closure aggregate. Discharges `WethStepClosure C` for any `C`.
+
+Wraps `weth_step_closure_with_pres` by deriving the post-step σ-presence
+from the supplied `ΞPreservesAccountAt C` witness via
+`EVM_step_preserves_present_no_create`. Kept as a thin wrapper over the
+pres-aware variant for legacy callers that supply `hΞ`. -/
+theorem weth_step_closure (C : AccountAddress) : WethStepClosure C := by
+  intro hΞ hInvPres s s' f' cost op arg hR hFetch hStep hRet hRev hStop hSD
+  -- Derive post-step σ-presence from the supplied `hΞ`.
+  have hAcc : accountPresentAt s.accountMap C := hR.2.2.1
+  have h_no_create : op ≠ .CREATE ∧ op ≠ .CREATE2 :=
+    weth_no_create C s op arg hR hFetch
+  have hAcc' : accountPresentAt s'.accountMap C :=
+    EVM_step_preserves_present_no_create C hΞ op arg f' cost s s'
+      h_no_create hStep hAcc
+  exact weth_step_closure_with_pres C hInvPres s s' f' cost op arg hR
+    hFetch hStep hRet hRev hStop hSD hAcc hAcc'
 
 /-- **`bytecodePreservesInvariant` — Weth's bytecode-level §H.2 entry.**
 
