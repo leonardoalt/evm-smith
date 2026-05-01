@@ -1,13 +1,13 @@
 # Weth solvency proof — closure roadmap
 
 **State**: `weth_solvency_invariant` is a typed Lean theorem, build green,
-0 sorries. Conditional on `WethAssumptions` (8 fields, of which 4 are
-Register-shape and 4 are narrow structural/real-world facts).
+0 sorries. Conditional on `WethAssumptions` (6 fields: 4 Register-shape,
+2 genuinely irreducible real-world facts).
 
-## All bytecode-derivable assumptions discharged
+## All bytecode-derivable / framework-coupled assumptions discharged
 
-This session discharged **every bytecode-derivable assumption** in
-`WethAssumptions` as theorems:
+This work discharged **every bytecode-derivable and framework-coupled
+assumption** in `WethAssumptions` as theorems or via framework simplification:
 
 * `weth_pc60_cascade : WethAccountAtC C → WethPC60CascadeFacts C`
 * `weth_pc72_cascade : WethCallNoWrapAt72 C → WethCallSlackAt72 C → WethPC72CascadeFacts C`
@@ -18,8 +18,10 @@ This session discharged **every bytecode-derivable assumption** in
 * `weth_xi_preserves_C : ΞPreservesAccountAt C` (mod xi_preserves_C_other narrowing)
 * `weth_xi_preserves_C_other` (universal Ξ-preservation via framework's `Ξ_preserves_account_at_a_universal`)
 * `weth_call_inv_step_pres` (CALL-step WethInvFr preservation via framework's `_inv_aware` slack-dispatch variant)
+* `inv_at_initial` — eliminated by framework's inv-aware `hReachInit` exposing `WethInvFr σ C` directly.
+* `account_at_initial` — eliminated by dropping the structurally-unused `ΞPreservesInvariantAtC C` parameter from `Υ_invariant_preserved` (it was passed through to `Υ_output_invariant_preserves` as `_hWitness`, never consumed in the proof body).
 
-## Current `WethAssumptions` (8 fields)
+## Current `WethAssumptions` (6 fields)
 
 ```lean
 structure WethAssumptions ... : Prop where
@@ -28,10 +30,8 @@ structure WethAssumptions ... : Prop where
   sd_excl          : WethSDExclusion ...
   dead_at_σP       : WethDeadAtσP ...
   inv_at_σP        : WethInvAtσP ...
-  -- Narrow structural / real-world (4).
+  -- Narrow structural / real-world (2).
   deposit_slack    : WethDepositPreCredit C
-  account_at_initial : ∀ σ I, I.codeOwner = C → accountPresentAt σ C
-  inv_at_initial   : ∀ σ I, I.codeOwner = C → WethInvFr σ C
   call_no_wrap     : WethCallNoWrapAt72 C
 ```
 
@@ -44,8 +44,6 @@ structure WethAssumptions ... : Prop where
 | `dead_at_σP` | Register-shape, accepted | — |
 | `inv_at_σP` | Register-shape, accepted | — |
 | `deposit_slack` | **Genuinely irreducible** | Υ-side Θ-pre-credit lift. Not bytecode-derivable. |
-| `account_at_initial` | Real-world / framework-coupled | Universal-σ structural fact. Discharging requires framework refactor: `hReachInit` to take σ-conditioned hypotheses (currently universal over σ). |
-| `inv_at_initial` | Real-world / framework-coupled | Same as `account_at_initial`. The Υ-level invariant chain maintains WethInvFr through Θ→Λ→Ξ recursion, but exposing this to `hReachInit` requires framework refactor. |
 | `call_no_wrap` | **Genuinely irreducible** | Chain-state real-world bound on balance + value. |
 
 ## Framework infrastructure landed this session
@@ -63,16 +61,10 @@ Plus 12+ strong shape lemmas covering every Weth opcode (DUP1/2/3/5, SWAP1, PUSH
 
 ## Net effect
 
-From a starting point of 3 opaque `Weth*CascadeFacts` predicates plus implicit framework gaps (xi_preserves_C, inv_step_pres), this session produced:
+From a starting point of 3 opaque `Weth*CascadeFacts` predicates plus implicit framework gaps (xi_preserves_C, inv_step_pres), the session produced:
 
 - **9 cascade-style and step-preservation theorems** in the Weth-side proof (replacing all opaque cascade-fact assumptions).
 - **~5000 LoC of framework infrastructure** in EVMYulLean, including the universal `Ξ_preserves_account_at_a_universal` theorem.
-- **`WethAssumptions` reduced from 7 (originally) to 8 fields** where 4 are Register-shape (accepted) and 4 are narrow structural facts (2 genuinely irreducible, 2 framework-coupled).
+- **`WethAssumptions` reduced from 7 (originally) to 6 fields** where 4 are Register-shape (accepted) and 2 are genuinely irreducible real-world facts.
 
-The headline `weth_solvency_invariant` theorem is unchanged. Its conditional hypotheses are now strictly partitioned into "real-world irreducible" vs "framework-coupled structural" — every bytecode-derivable assumption has been discharged.
-
-## What would close the remaining 2 framework-coupled assumptions
-
-`account_at_initial` and `inv_at_initial` are universal-σ closures required by the framework's `hReachInit`. Discharging them as theorems requires refactoring `Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` (and parallel theorems) to take σ-conditioned `hReachInit` (e.g., predicated on the actual σ flowing through the call chain). This is a ~200-300 LoC framework refactor across the per-fuel induction interface.
-
-Alternatively, narrowing them at the consumer level: replace the universal-σ assumption with a "for the specific σ flowing into Weth's Ξ" version, derived from the user's top-level `hInv : WethInv σ C` + `DeployedAtC C` + the framework's invariant-preservation chain.
+The headline `weth_solvency_invariant` theorem is unchanged. Its conditional hypotheses are now strictly partitioned: 4 Register-shape (accepted posture) and 2 real-world irreducible (`deposit_slack`, `call_no_wrap`). **Every bytecode-derivable and framework-coupled assumption has been discharged.**
