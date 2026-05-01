@@ -196,8 +196,9 @@ structure WethAssumptions
   per every reachable state).
 
   Real-world justification: Λ enters Weth at C with σ[C] = some acc
-  (framework guarantee). Combined with `xi_preserves_C` below, this
-  feeds the σ-conjunct of `WethReachable` through the entire X loop. -/
+  (framework guarantee). Combined with the (now-derived)
+  `weth_xi_preserves_C` theorem, this feeds the σ-conjunct of
+  `WethReachable` through the entire X loop. -/
   account_at_initial : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
                           I.codeOwner = C → accountPresentAt σ C
   /-- `WethInvFr` at Ξ entry: at every state at which Ξ is invoked at C
