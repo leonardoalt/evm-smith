@@ -5895,14 +5895,18 @@ externally rather than computing it via `hInvPres`. -/
 /-- **Invariant-aware `bytecodePreservesInvariant`.** Like
 `bytecodePreservesInvariant` but uses the framework's invariant-aware
 slack-dispatch entry point and `weth_step_closure_with_pres_inv_aware`,
-removing the dependency on `WethStepInvFrPreserves C`'s CALL arm. -/
+removing the dependency on `WethStepInvFrPreserves C`'s CALL arm.
+
+The framework's inv-aware `hReachInit` callback now exposes
+`WethInvFr σ C` (Ξ's invariant precondition) at the call site, so the
+σ-universal `hInvInit` closure has been eliminated — the precondition
+is supplied directly by the framework. The remaining `hAccInit` is the
+σ-presence-at-Ξ-entry hypothesis (still bundled). -/
 theorem bytecodePreservesInvariant_inv_aware
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
-    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-        I.codeOwner = C → WethInvFr σ C)
     (hSStore : WethSStorePreserves C)
     (hCall : WethCallSlack C) :
     ΞPreservesInvariantAtC C := by
@@ -5935,23 +5939,26 @@ theorem bytecodePreservesInvariant_inv_aware
   · -- hReach_sstore
     intro s s' f' cost arg hR hWF hCO hInv hFetch hStep
     exact hSStore s s' f' cost arg hR hWF hCO hInv hFetch hStep
-  · -- hReachInit
-    intro cA gbh bs σ σ₀ g A I hCO
+  · -- hReachInit (inv-aware: framework now supplies WethInvFr σ C precondition)
+    intro cA gbh bs σ σ₀ g A I hCO hInv
     exact WethReachable_initial C hDeployed cA gbh bs σ σ₀ g A I hCO
-      (hAccInit σ I hCO) (hInvInit σ I hCO)
+      (hAccInit σ I hCO) hInv
 
 /-- **Invariant-aware variant of `bytecodePreservesInvariant_fully_narrowed`.**
 Composes `bytecodePreservesInvariant_inv_aware` with the in-Lean
 discharge of `WethCallSlack` / `WethSStorePreserves` from cascade facts.
 Requires **only** `WethCallNoWrapAt72` and `WethDepositPreCredit` —
-no `WethStepInvFrPreserves C` needed. -/
+no `WethStepInvFrPreserves C` needed.
+
+The `hInvInit` (universal-σ `WethInvFr` closure) parameter has been
+eliminated: the framework's inv-aware `hReachInit` now exposes
+`WethInvFr σ C` (Ξ's invariant precondition) at the call site
+directly. -/
 theorem bytecodePreservesInvariant_inv_aware_fully_narrowed
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hΞ : ΞPreservesAccountAt C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
-    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-        I.codeOwner = C → WethInvFr σ C)
     (hNoWrap : WethCallNoWrapAt72 C)
     (hPreCredit : WethDepositPreCredit C) :
     ΞPreservesInvariantAtC C := by
@@ -5963,7 +5970,7 @@ theorem bytecodePreservesInvariant_inv_aware_fully_narrowed
       (weth_deposit_cascade C (weth_account_at_C C))
       hPreCredit
   have h60 : WethPC60CascadeFacts C := weth_pc60_cascade C (weth_account_at_C C)
-  exact bytecodePreservesInvariant_inv_aware C hDeployed hΞ hAccInit hInvInit
+  exact bytecodePreservesInvariant_inv_aware C hDeployed hΞ hAccInit
     (weth_sstore_preserves_from_cascades C h40 h60)
     (weth_call_slack_from_cascade C h72)
 
@@ -5992,8 +5999,6 @@ theorem weth_call_inv_step_pres
     (C : AccountAddress) (hDeployed : DeployedAtC C)
     (hAccInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
         I.codeOwner = C → accountPresentAt σ C)
-    (hInvInit : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-        I.codeOwner = C → WethInvFr σ C)
     (hNoWrap : WethCallNoWrapAt72 C)
     (hPreCredit : WethDepositPreCredit C)
     (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
@@ -6007,7 +6012,7 @@ theorem weth_call_inv_step_pres
   have hΞ : ΞPreservesAccountAt C := Ξ_preserves_account_at_a_universal C
   have hWitness : ΞPreservesInvariantAtC C :=
     bytecodePreservesInvariant_inv_aware_fully_narrowed C hDeployed hΞ
-      hAccInit hInvInit hNoWrap hPreCredit
+      hAccInit hNoWrap hPreCredit
   -- Convert witness to per-fuel IHs at fuel `f' + 1`.
   have hAtCFrame : ΞInvariantAtCFrame C (f' + 1) :=
     ΞInvariantAtCFrame_of_witness C hWitness (f' + 1)

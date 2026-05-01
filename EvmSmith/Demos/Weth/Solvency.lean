@@ -201,20 +201,16 @@ structure WethAssumptions
   `WethReachable` through the entire X loop. -/
   account_at_initial : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
                           I.codeOwner = C → accountPresentAt σ C
-  /-- `WethInvFr` at Ξ entry: at every state at which Ξ is invoked at C
-  with `I.codeOwner = C`, the relational invariant `storageSum σ C ≤
-  balanceOf σ C` holds.
-
-  Real-world justification: Ξ's pre-state σ at `I.codeOwner = C` is
-  always a state where the framework's outer Θ/Λ chain has already
-  established the invariant (the top-level `weth_solvency_invariant`'s
-  `hInv` precondition; the framework's invariant chain through Θ/Λ
-  preserves it).
-
-  Bundled as a structural assumption pending the closed-form discharge
-  via the framework's `Ξ_invariant_preserved_bundled_bdd`. -/
-  inv_at_initial   : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-                          I.codeOwner = C → WethInvFr σ C
+  -- Note: the previous `inv_at_initial : ∀ σ I, I.codeOwner = C →
+  -- WethInvFr σ C` field has been **eliminated**. The framework's
+  -- invariant-aware slack-dispatch X-loop
+  -- (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
+  -- EVMYulLean) was refactored to expose `WethInvFr σ C` (Ξ's invariant
+  -- precondition, already part of `ΞPreservesInvariantAtC`'s signature)
+  -- to its `hReachInit` callback. The Weth side feeds this directly into
+  -- `WethReachable_initial`'s `hInv` parameter, removing the need for a
+  -- σ-universal closure. See `bytecodePreservesInvariant_inv_aware`'s
+  -- `hReachInit` arm in `BytecodeFrame.lean`.
   -- Note: the previous `call_inv_step_pres : WethCALLStepInvFr C` field
   -- has been removed. The framework's invariant-aware slack-dispatch
   -- X-loop (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
@@ -388,7 +384,6 @@ theorem weth_solvency_invariant
     bytecodePreservesInvariant_inv_aware_fully_narrowed C
       hAssumptions.deployed hXiPresAcc
       hAssumptions.account_at_initial
-      hAssumptions.inv_at_initial
       hAssumptions.call_no_wrap
       hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.
