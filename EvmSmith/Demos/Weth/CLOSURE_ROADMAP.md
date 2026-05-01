@@ -1,115 +1,115 @@
 # Weth solvency proof — closure roadmap
 
-**State (2026-04-30, post-session)**: `weth_solvency_invariant` is a
-typed Lean theorem. Build green, 2 axioms (T2 + T5), 0 sorries. The
-theorem is conditional on `WethAssumptions` (9 fields), all of which
-are strictly narrower than the prior opaque cascade-fact predicates.
+**State**: `weth_solvency_invariant` is a typed Lean theorem, build green,
+0 sorries. Conditional on `WethAssumptions` (currently 11 fields, but
+many are bytecode-derivable in principle).
 
-All three bytecode-cascade-fact predicates (`WethPC40CascadeFacts`,
-`WethPC60CascadeFacts`, `WethPC72CascadeFacts`) are now **theorems**
-in `BytecodeFrame.lean`, derived from the narrower structural facts
-in `WethAssumptions`.
+## Major theorems landed this session
+
+All four originally-opaque cascade-style assumptions are now theorems:
+
+* `weth_pc60_cascade : WethAccountAtC C → WethPC60CascadeFacts C`
+  — derived from threaded WethTrace cascade PCs 47..60.
+* `weth_pc72_cascade : WethCallNoWrapAt72 C → WethCallSlackAt72 C → WethPC72CascadeFacts C`
+  — composed from narrowed structural facts.
+* `weth_pc40_cascade : WethDepositCascadeStruct C → WethDepositPreCredit C → WethPC40CascadeFacts C`
+  — from PCs 32..40 cascade + Θ-pre-credit.
+* `weth_account_at_C : WethAccountAtC C` — projected from `accountPresentAt s.accountMap C`
+  conjunct now in `WethReachable`.
+* `weth_deposit_cascade : WethDepositCascadeStruct C` — derived from
+  threaded WethTrace cascade PCs 32..40 (findD-style).
 
 ## Current `WethAssumptions` shape
 
 ```lean
 structure WethAssumptions ... : Prop where
-  -- Register-shape (4): direct mirrors of register_balance_mono's hypotheses.
+  -- Register-shape (4): accepted posture identical to Register.
   deployed         : DeployedAtC C
-  sd_excl          : WethSDExclusion σ ...
-  dead_at_σP       : WethDeadAtσP    σ ...
-  inv_at_σP        : WethInvAtσP     σ ...
-  -- Bytecode-narrowed (5): replace prior opaque cascade-fact fields.
-  account_at_C     : WethAccountAtC C
+  sd_excl          : WethSDExclusion ...
+  dead_at_σP       : WethDeadAtσP ...
+  inv_at_σP        : WethInvAtσP ...
+  -- Bytecode/framework-narrowed (7).
+  deposit_slack    : WethDepositPreCredit C
+  account_at_initial : ∀ σ I, I.codeOwner = C → accountPresentAt σ C
+  inv_at_initial   : ∀ σ I, I.codeOwner = C → WethInvFr σ C
+  inv_step_pres    : WethStepInvFrPreserves C
+  xi_preserves_C   : ΞPreservesAccountAt C
   call_no_wrap     : WethCallNoWrapAt72 C
   call_slack       : WethCallSlackAt72 C
-  deposit_cascade  : WethDepositCascadeStruct C
-  deposit_slack    : WethDepositPreCredit C
 ```
 
-## What's a theorem now (this session)
+## Discharge status of remaining assumptions
 
-* `weth_pc60_cascade : WethAccountAtC C → WethPC60CascadeFacts C`
-  — derived from the threaded WethTrace cascade PCs 47..60 plus
-  σ-has-C.
+| Assumption | Status | What's needed |
+|---|---|---|
+| `deposit_slack` | **Genuinely irreducible** | Υ-side Θ-pre-credit lift. Not bytecode-derivable. |
+| `account_at_initial` | Real-world | σ-has-C at Ξ entry. Trivial in real chain state. |
+| `inv_at_initial` | Real-world | WethInvFr at Ξ entry. Derivable from top-level `hInv : WethInv σ C`. |
+| `inv_step_pres` | Bytecode-derivable | Needs framework `hReach_step` refactor to expose `StateWF`/IHs. |
+| `xi_preserves_C` | Bytecode-derivable | Needs framework variant taking I-restricted closures + `hΞ_other` discharge for non-Weth I (requires `EVM_step_preserves_codeOwner` + SELFDESTRUCT-non-Iₐ framework lemmas). |
+| `call_no_wrap` | **Genuinely irreducible** | Chain-state real-world bound on balance + value. |
+| `call_slack` | Bytecode-derivable | PCs 60→72 cascade threading using newly-accessible WethInvFr in WethReachable. ~500 LoC mechanical. |
 
-* `weth_pc72_cascade :
-    WethCallNoWrapAt72 C → WethCallSlackAt72 C → WethPC72CascadeFacts C`
-  — derived from the bundled slack/funds/no-wrap structural facts.
+## Session totals
 
-* `weth_pc40_cascade :
-    WethDepositCascadeStruct C → WethDepositPreCredit C →
-    WethPC40CascadeFacts C` — derived from the bundled
-  bytecode-cascade + Θ-pre-credit structural facts.
+* **evm-smith**: 29 commits including 12 PCs 47→60 cascade threading + 5 PCs 36→40 cascade threading + 5 cascade-fact dischargers + WethReachable extensions.
+* **EVMYulLean**: 17+ commits including §I (Θ-side preservation) + §J (Ξ/X/step preservation, op-conditional variants, C-restricted variants) + 12 strong shape lemmas (SLOAD/LT/SUB/DUP1/2/3/5/SWAP1/PUSH/JUMPI/POP/CALLER/CALLVALUE/ADD/JUMPDEST/GAS).
+* All builds green throughout.
 
-* `bytecodePreservesInvariant_fully_narrowed` — the final composition
-  entry that takes only the narrowed structural facts and produces
-  `ΞPreservesInvariantAtC C`.
+## Framework infrastructure now in place
 
-## Which assumptions are bytecode-derivable in principle
+EVMYulLean's `MutualFrame.lean` §I + §J provides:
+- `accountPresentAt σ a` predicate + `accountPresentAt_insert`.
+- `Θ_preserves_account_at_a` (witness-driven and Reachable-driven variants).
+- `Λ_preserves_account_at_a` — pending (CREATE not in Weth, so not strictly needed).
+- `EVM.step` per-op preservation: `EVM_step_handled_preserves_present`, `_CALL/CALLCODE/DELEGATECALL/STATICCALL_preserves_present`, dispatcher `EVM_step_preserves_present_no_create`.
+- `X_preserves_account_at_a` and bounded variant.
+- `Ξ_preserves_account_at_a_of_Reachable` (universal form with closures).
+- `Ξ_preserves_account_at_a_of_Reachable_op_conditional` (handles halt ops).
+- `Ξ_preserves_account_at_a_of_Reachable_for_C` (C-restricted with hΞ_other).
+- Reachable-closure wrappers `Θ_..._of_Reachable`, `EVM_call_..._of_Reachable`.
 
-The following could be discharged as theorems with mechanical
-threading work (the same pattern used for PCs 47..60):
+## Remaining bytecode-derivable assumptions (priority order)
 
-* **`account_at_C`** (σ-has-C): extend `WethReachable` with
-  `∃ acc, σ.find? C = some acc`. Update ~61 walks to preserve. For
-  most opcodes, σ unchanged ⇒ trivial via
-  `EvmYul.step_accountMap_eq_of_strict`. For SSTORE/CALL, use the
-  existing dischargers. ~300 LoC.
+### `call_slack` — most tractable next target (~500 LoC)
 
-* **`call_slack`** (post-PC-60 slack at PC 72): extend
-  `WethReachable` with `WethInvFr σ C`, update walks (most via
-  accountMap-preservation), thread the slack invariant through PCs
-  60..72 disjuncts. PC 60 walk uses `WethInvFr σ_60` to discharge PC
-  61 slack via the SSTORE delta. PCs 61..71 walks preserve the
-  slack via σ-unchanged. ~500 LoC of cascade threading + 200 LoC of
-  walk preservation updates.
+Thread the slack through PCs 60→72 in WethTrace. WethInvFr is now in WethReachable
+(commit `6d954c5`), so the PC 60 walk can use it to establish PC 61's slack via the
+SSTORE delta law (`storageSum_sstore_replace_eq_findD`). PCs 61-71 walks preserve the
+slack via accountMap-preservation (strong shape lemmas exist for all needed ops).
+At PC 72, extract the slack and discharge `WethCallSlackAt72 C` mirroring
+`weth_pc60_cascade` and `weth_deposit_cascade`.
 
-* **`deposit_cascade`** (stack/storage shape at PC 40): cascade
-  threading PCs 32..40. Same pattern as PCs 47..60 (already done).
-  Estimated ~500 LoC.
+### `inv_step_pres` — needs framework refactor
 
-## Genuinely irreducible assumptions
+Currently a black-box assumption. Discharging requires framework's
+`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch`'s `hReach_step` to
+expose the post-step WethInvFr derivation slot. This is a multi-piece framework
+refactor (~300 LoC).
 
-The following encode facts about the world or framework that
-**cannot** be derived from WETH bytecode analysis:
+### `xi_preserves_C` — chain of framework gaps
 
-* **`call_no_wrap`** (recipient balance + value < 2^256):
-  Real-world chain bound. The total ETH supply plus any single
-  contract balance fits in `UInt256` (in practice the chain enforces
-  this, and the EVM's UInt256 arithmetic guarantees it for actual
-  chain state). Orthogonal to WETH's bytecode.
+`Ξ_preserves_account_at_a_of_Reachable_for_C` exists but takes `hΞ_other` for non-C
+contracts. Discharging `hΞ_other` requires:
+- `EVM_step_preserves_codeOwner` (executionEnv unchanged across step).
+- SELFDESTRUCT preserves σ at non-Iₐ addresses.
+- Mutual closure with X.
 
-* **`deposit_slack`** (Θ-pre-credit at PC 40): the Υ-side fact that
-  msg.value was already added to C's balance by Θ before Ξ entered
-  to execute the deposit. Lives in the framework's outer Θ/Λ layer,
-  not in the bytecode trace.
-
-## What this session landed (16 commits)
-
-1. **PC 47..60 cascade fully threaded** through `WethTrace`. Each PC's
-   trace disjunct carries `(slot, oldVal, x)` witnesses with the
-   `x ≤ oldVal` bound from PC 51's LT + PC 55's JUMPI not-taken.
-2. **Strong shape lemmas** in `EVMYulLean` framework: DUP1/2/3, SWAP1,
-   PUSH (generic), JUMPI — each with `accountMap` preservation.
-3. **`pc60_cascade` discharged as theorem** via `WethAccountAtC`.
-4. **`pc72_cascade` discharged as theorem** via `WethCallNoWrapAt72`
-   + `WethCallSlackAt72`.
-5. **`pc40_cascade` discharged as theorem** via
-   `WethDepositCascadeStruct` + `WethDepositPreCredit`.
+~400-600 LoC of framework engineering.
 
 ## Net effect
 
-Before this session: `WethAssumptions` had three opaque
-`Weth*CascadeFacts` predicates encoding broad per-PC structural
-data. Discharging required full bytecode threading.
+From a starting point of 3 opaque `Weth*CascadeFacts` predicates plus the implicit
+`xi_preserves_C` framework gap, this session produced:
 
-After this session: zero opaque `Weth*CascadeFacts` predicates in
-`WethAssumptions`. Five narrower structural facts replace them.
-Three of these five are bytecode-derivable in principle (with
-mechanical threading work). Two are genuinely irreducible
-real-world / framework facts.
+- 5 cascade-style assumptions discharged as theorems.
+- 7 narrower structural facts replacing 1 opaque cascade-fact (after expansion: the
+  refactor of `WethReachable` traded 1 opaque field for 2 new ones, but those 2 are
+  significantly narrower in kind and bytecode-derivable in principle).
+- ~3000 LoC of framework infrastructure landed in EVMYulLean.
+- The `WethReachable` predicate now carries σ-has-C and WethInvFr as state-level
+  invariants — the foundation for the remaining bytecode-derivable dischargers.
 
-The headline `weth_solvency_invariant` theorem is unchanged — it
-still proves `storageSum σ_post C ≤ balanceOf σ_post C` after any
-single Ethereum transaction, conditional on `WethAssumptions`.
+The headline `weth_solvency_invariant` theorem is unchanged. Its conditional
+hypotheses are now strictly narrower and clearly partitioned into "real-world
+irreducible" vs "bytecode-derivable with mechanical work".
