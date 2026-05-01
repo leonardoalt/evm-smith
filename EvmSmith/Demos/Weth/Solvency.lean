@@ -174,17 +174,22 @@ structure WethAssumptions
   dead_at_σP       : WethDeadAtσP σ fuel H_f H H_gen blocks tx S_T C
   /-- σ_P preserves the invariant. -/
   inv_at_σP        : WethInvAtσP σ fuel H_f H H_gen blocks tx S_T C
-  /-- Θ-pre-credit slack at PC 40: `storageSum - oldVal + newVal ≤
-  balanceOf` at PC 40. This is the **Υ-side** fact: `msg.value` was
-  added to C's balance by Θ before Ξ entered, so the post-SSTORE
-  storageSum (= storageSum + msg.value) is bounded by the post-Θ
-  balance. **Cannot be derived from bytecode walks alone** — it
-  lives in the framework's outer Θ/Λ layer.
-
-  Note: the previous `deposit_cascade : WethDepositCascadeStruct C`
-  field has been replaced by an in-Lean theorem `weth_deposit_cascade`
-  (commit 083ea45), so consumers no longer need to supply it. -/
-  deposit_slack    : WethDepositPreCredit C
+  -- Note: the previous `deposit_slack : WethDepositPreCredit C` field
+  -- has been **eliminated**. It was only ever consumed (transitively)
+  -- to build the `ΞPreservesInvariantAtC C` witness threaded into
+  -- `Υ_invariant_preserved`. Since the framework's
+  -- `Υ_invariant_preserved` no longer requires that witness (it was
+  -- structurally unused — see the docstring of `Υ_invariant_preserved`
+  -- in `EVMYulLean/EvmYul/Frame/UpsilonFrame.lean`), the
+  -- pre-credit-slack hypothesis is no longer reached and has been
+  -- dropped. The discharger
+  -- `bytecodePreservesInvariant_inv_aware_fully_narrowed` (in
+  -- `BytecodeFrame.lean`) still consumes a `WethDepositPreCredit C`
+  -- argument for users who want to call it directly, but it is no
+  -- longer threaded through the top-level solvency composition.
+  -- Note: the previous `deposit_cascade : WethDepositCascadeStruct C`
+  -- field had already been replaced by an in-Lean theorem
+  -- `weth_deposit_cascade` (commit 083ea45).
   -- Note: the previous `account_at_initial : ∀ σ I, I.codeOwner = C →
   -- accountPresentAt σ C` field has been **eliminated**. It was only ever
   -- consumed (transitively) to feed the `hReachInit` callback inside the
