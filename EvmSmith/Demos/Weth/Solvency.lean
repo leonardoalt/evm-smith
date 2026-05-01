@@ -289,13 +289,10 @@ structure WethAssumptions
   fact. **Replaces** the no-wrap part of the previous opaque
   `pc72_cascade : WethPC72CascadeFacts C` field. -/
   call_no_wrap     : WethCallNoWrapAt72 C
-  /-- Post-SSTORE slack at PC 72: μ₂ + storageSum ≤ balanceOf, plus
-  caller-account-found-with-balance-≥-μ₂ in the cumbersome
-  `AccountAddress.ofUInt256 (.ofNat codeOwner)` form. **Replaces** the
-  slack/funds parts of the previous opaque `pc72_cascade` field.
-  Derivable from threading the post-PC-60-SSTORE invariant through
-  PCs 61..72 (pending `WethReachable`/WethInvFr extension). -/
-  call_slack       : WethCallSlackAt72 C
+  -- Note: the previous `call_slack : WethCallSlackAt72 C` field has
+  -- been replaced by an in-Lean theorem `weth_call_slack` (discharged
+  -- from the threaded WethTrace cascade at PCs 60..72 plus σ-has-C),
+  -- so consumers no longer need to supply it.
 
 /-! ## Conversion to framework predicates
 
@@ -445,7 +442,7 @@ theorem weth_solvency_invariant
       hAssumptions.inv_step_pres
       hAssumptions.account_at_initial
       hAssumptions.inv_at_initial
-      hAssumptions.call_no_wrap hAssumptions.call_slack
+      hAssumptions.call_no_wrap
       hAssumptions.deposit_slack
   -- Apply Υ_invariant_preserved.
   have h :=
