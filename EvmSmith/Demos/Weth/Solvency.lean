@@ -185,22 +185,17 @@ structure WethAssumptions
   field has been replaced by an in-Lean theorem `weth_deposit_cascade`
   (commit 083ea45), so consumers no longer need to supply it. -/
   deposit_slack    : WethDepositPreCredit C
-  /-- σ-has-C at Ξ entry: every state at which Ξ is invoked at C with
-  `I.codeOwner = C` has `σ.find? C = some _`.
-
-  This **replaces** the previous opaque `account_at_C : WethAccountAtC C`
-  field. `WethAccountAtC` is now a **theorem** (`weth_account_at_C`),
-  discharged via the σ-has-C conjunct now embedded in `WethReachable`.
-  The remaining structural fact is just σ-presence at the *initial*
-  state — strictly narrower (one bit at one moment vs. an existential
-  per every reachable state).
-
-  Real-world justification: Λ enters Weth at C with σ[C] = some acc
-  (framework guarantee). Combined with the (now-derived)
-  `weth_xi_preserves_C` theorem, this feeds the σ-conjunct of
-  `WethReachable` through the entire X loop. -/
-  account_at_initial : ∀ (σ : AccountMap .EVM) (I : ExecutionEnv .EVM),
-                          I.codeOwner = C → accountPresentAt σ C
+  -- Note: the previous `account_at_initial : ∀ σ I, I.codeOwner = C →
+  -- accountPresentAt σ C` field has been **eliminated**. It was only ever
+  -- consumed (transitively) to feed the `hReachInit` callback inside the
+  -- consumer's `bytecodePreservesInvariant_inv_aware_fully_narrowed`
+  -- entry point, which built the `ΞPreservesInvariantAtC C` witness
+  -- threaded into `Υ_invariant_preserved`. The framework's
+  -- `Υ_invariant_preserved` has since been simplified to drop the
+  -- (structurally unused) `ΞPreservesInvariantAtC C` parameter, so the
+  -- witness is no longer needed and `account_at_initial` along with it.
+  -- See the docstring of `Υ_invariant_preserved` in
+  -- `EVMYulLean/EvmYul/Frame/UpsilonFrame.lean` for the rationale.
   -- Note: the previous `inv_at_initial : ∀ σ I, I.codeOwner = C →
   -- WethInvFr σ C` field has been **eliminated**. The framework's
   -- invariant-aware slack-dispatch X-loop
@@ -370,26 +365,15 @@ theorem weth_solvency_invariant
   have hFactor :=
     weth_Υ_body_factors fuel σ H_f H H_gen blocks tx S_T C
       hAssumptions.inv_at_σP hAssumptions.dead_at_σP
-  -- Derive `ΞPreservesAccountAt C` from the framework's fully universal
-  -- closure (no Reachable, no per-step assumptions).
-  have hXiPresAcc : ΞPreservesAccountAt C :=
-    Ξ_preserves_account_at_a_universal C
-  -- Derive `ΞPreservesInvariantAtC C` via the invariant-aware
-  -- entry point. The framework's invariant-aware slack-dispatch X-loop
-  -- exposes `WethInvFr s'.accountMap C` to its `hReach_step` callback
-  -- (already established internally via the CALL/SSTORE arms), so no
-  -- per-step CALL invariant predicate (formerly `call_inv_step_pres`)
-  -- is needed.
-  have hXi : ΞPreservesInvariantAtC C :=
-    bytecodePreservesInvariant_inv_aware_fully_narrowed C
-      hAssumptions.deployed hXiPresAcc
-      hAssumptions.account_at_initial
-      hAssumptions.call_no_wrap
-      hAssumptions.deposit_slack
-  -- Apply Υ_invariant_preserved.
+  -- Apply Υ_invariant_preserved. The previously-required
+  -- `ΞPreservesInvariantAtC C` witness has been dropped from
+  -- `Υ_invariant_preserved`'s signature (it was structurally unused in
+  -- the chain), so we no longer need to construct it here. The
+  -- `bytecodePreservesInvariant_inv_aware_fully_narrowed` discharger and
+  -- its `account_at_initial` precondition are no longer reached.
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
-      hWF hInvFr hS_T hBen hXi hTail hFactor
+      hWF hInvFr hS_T hBen hTail hFactor
   -- Re-thread the match: the framework returns WethInvFr; restate as WethInv.
   cases hΥ : EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
   | error _ => trivial
