@@ -10,6 +10,17 @@ All paths are relative to the `evm-smith` repository root.
 - `EvmSmith/Demos/Weth/Program.lean` — WETH bytecode + decode lemmas.
 - `EvmSmith/Demos/Weth/Invariant.lean` — `WethInv` predicate.
 - `EvmSmith/Demos/Weth/BytecodeFrame.lean` — trace/walks/cascade machinery.
+- `EvmSmith/Demos/Weth/InvariantClosure.lean` — consumer-side
+  relational-invariant closure: `StorageSumLeBalance` predicate,
+  §H invariant predicates and §H.2 mutual closure, the
+  transaction-level entry point `Υ_invariant_preserved` and its
+  Υ-tail wrappers. Sits on top of the contract-agnostic framework
+  primitives in `EVMYulLean/EvmYul/Frame/`. None of the theorems
+  in this file reference WETH's bytecode — the closure is generic
+  in shape and lives consumer-side only because we have one
+  consumer. Lifting it into `EvmYul/Frame/` as a parametric module
+  over `I : AccountMap → AccountAddress → Prop` is a small refactor
+  we'll do once a second consumer demonstrates the pattern.
 - `EvmSmith/Demos/Weth/Solvency.lean` — top-level theorem.
 
 ## What WETH does (in 86 bytes)
@@ -197,15 +208,15 @@ refresh after proof edits.
 ```mermaid
 graph TD
   EvmSmith_Weth_weth_solvency_invariant["weth_solvency_invariant"]:::weth
-  EvmYul_Frame_Υ_invariant_preserved["Υ_invariant_preserved"]:::frame
+  EvmYul_Frame_Υ_invariant_preserved["Υ_invariant_preserved"]:::weth
   EvmSmith_Weth_weth_Υ_body_factors["weth_Υ_body_factors"]:::weth
   EvmSmith_Weth_WethAssumptions_sd_excl["sd_excl"]:::weth
   EvmSmith_Weth_WethAssumptions_inv_at_σP["inv_at_σP"]:::weth
   EvmSmith_Weth_weth_Υ_tail_invariant["weth_Υ_tail_invariant"]:::weth
   EvmSmith_Weth_WethAssumptions_dead_at_σP["dead_at_σP"]:::weth
-  EvmYul_Frame_Υ_output_invariant_preserves["Υ_output_invariant_preserves"]:::frame
+  EvmYul_Frame_Υ_output_invariant_preserves["Υ_output_invariant_preserves"]:::weth
   EvmYul_Frame_mem_filter_pred["mem_filter_pred"]:::frame
-  EvmYul_Frame_Υ_tail_invariant_preserves["Υ_tail_invariant_preserves"]:::frame
+  EvmYul_Frame_Υ_tail_invariant_preserves["Υ_tail_invariant_preserves"]:::weth
   EvmYul_Frame_InternalFilter_mem_foldl_cond_insert["mem_foldl_cond_insert"]:::frame
   EvmSmith_Weth_weth_solvency_invariant --> EvmYul_Frame_Υ_invariant_preserved
   EvmSmith_Weth_weth_solvency_invariant --> EvmSmith_Weth_weth_Υ_body_factors
@@ -222,10 +233,20 @@ graph TD
 ```
 
 `weth_solvency_invariant` is a thin wrapper: it composes the
-framework's `Υ_invariant_preserved` with two demo-side
+consumer-side `Υ_invariant_preserved` (in
+`EvmSmith/Demos/Weth/InvariantClosure.lean`) with two demo-side
 factorisations (`weth_Υ_body_factors`, `weth_Υ_tail_invariant`) and
-threads three fields of `WethAssumptions`. The interesting bytecode
-content lives in the second graph.
+threads three fields of `WethAssumptions`. The
+`Υ_invariant_preserved` chain itself, including
+`Υ_output_invariant_preserves` and `Υ_tail_invariant_preserves`,
+lives consumer-side too — the framework only carries the
+balance-monotonicity entry-point analogue (`Υ_balanceOf_ge`) and
+the generic Υ-tail helpers both chains share. (Mermaid node IDs
+retain the `EvmYul_Frame_*` prefix because the Lean namespace was
+kept as `EvmYul.Frame` for diff minimality during the extraction;
+the class name is the source of truth for framework-vs-consumer
+classification.) The interesting bytecode content lives in the
+second graph.
 
 ### Bytecode walk (depth 2 from `bytecodePreservesInvariant_inv_aware_fully_narrowed`)
 
@@ -244,7 +265,7 @@ graph TD
   EvmSmith_Weth_WethReachable_initial["WethReachable_initial"]:::weth
   EvmSmith_Weth_WethReachable_decodeSome["WethReachable_decodeSome"]:::weth
   EvmYul_Frame_EVM_step_preserves_present_no_create["EVM_step_preserves_present_no_create"]:::frame
-  EvmYul_Frame_ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware["ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware"]:::frame
+  EvmYul_Frame_ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware["ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware"]:::weth
   EvmSmith_Weth_WethReachable_Z_preserves["WethReachable_Z_preserves"]:::weth
   EvmSmith_Weth_WethReachable_op_in_allowed["WethReachable_op_in_allowed"]:::weth
   EvmSmith_Weth_WethOpAllowed_discharge["WethOpAllowed_discharge"]:::weth
@@ -293,10 +314,13 @@ graph TD
 ```
 
 `bytecodePreservesInvariant_inv_aware_fully_narrowed` discharges
-`ΞPreservesInvariantAtC C` from the framework's
-`_inv_aware`-slack-dispatch entry point, the three cascade
-theorems (`weth_pc{40,60,72}_cascade`), and the per-PC walks
-aggregated under `weth_step_closure_with_pres_inv_aware`. Each
+`ΞPreservesInvariantAtC C` from the consumer-side
+`_inv_aware`-slack-dispatch entry point (in
+`EvmSmith/Demos/Weth/InvariantClosure.lean`; the framework only
+contributes the underlying pres-step pieces in §J.6.6/.6.7), the
+three cascade theorems (`weth_pc{40,60,72}_cascade`), and the
+per-PC walks aggregated under
+`weth_step_closure_with_pres_inv_aware`. Each
 cascade theorem in turn extracts its data from the corresponding
 `WethReachable_pc{40,60,72}_cascade` predicate disjunct of the
 trace. (This theorem is no longer threaded through
@@ -355,7 +379,8 @@ invariant** — `storageSum σ_P C ≤ balanceOf σ_P C`.
 
 Real-world basis: this is the σ-to-σ_P propagation step.
 Discharging from Lean requires exposed `Θ_invariant_preserved` /
-`Λ_invariant_preserved` framework theorems.
+`Λ_invariant_preserved` theorems (consumer-side, in
+`EvmSmith/Demos/Weth/InvariantClosure.lean`).
 
 ### Genuinely irreducible chain bound (1)
 

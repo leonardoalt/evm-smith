@@ -1,14 +1,41 @@
-# Framework infrastructure landed in EVMYulLean
+# Infrastructure landed for the WETH solvency proof
 
-This report documents the additions to the upstream EVMYulLean
-framework (`leonardoalt/EVMYulLean`) needed to support the WETH
-solvency proof.
+This report documents the infrastructure built to support the WETH
+solvency proof. After an architectural cleanup, the work splits
+cleanly into two halves:
+
+1. **Framework additions** — contract-agnostic, landed inside
+   `leonardoalt/EVMYulLean@main` under `EvmYul/Frame/`. Reusable by
+   any future single-contract invariant proof.
+2. **Consumer-side closure** — the relational-solvency invariant
+   chain (`storageSum ≤ balanceOf` plus the full mutual closure that
+   preserves it across Υ). Lives at
+   `EvmSmith/Demos/Weth/InvariantClosure.lean` in this repository
+   (~5400 LoC).
+
+The framework half is the amortizable investment. The consumer-side
+half is **not** WETH-specific in shape — the predicate and its
+preservation chain don't reference WETH's bytecode at all; only the
+*location* is consumer-side, because we currently have one
+consumer. Once a second consumer demonstrates the same relational
+shape, this content is the natural candidate for lifting back into
+the frame library as a parametric module over `I : AccountMap →
+AccountAddress → Prop`. For now, future relational-shape proofs
+either copy and specialise it, or trigger the lift.
 
 ## Repository
 
-- Submodule: `EVMYulLean/` (the `EvmYul/Frame/` subtree is where the
-  framework additions live).
+- Framework submodule: `EVMYulLean/` (the `EvmYul/Frame/` subtree
+  is where the framework additions live).
 - Pinned to `leonardoalt/EVMYulLean@main`.
+- Consumer-side closure: `EvmSmith/Demos/Weth/InvariantClosure.lean`
+  (this repo).
+
+---
+
+# Part 1 — Framework additions
+
+All paths in this section are relative to the `EVMYulLean/` submodule.
 
 ## Headline addition: universal `Ξ`-preservation theorem
 
@@ -108,20 +135,19 @@ Convenience entries for consumers using a `Reachable` predicate:
 | `EVM_call_preserves_account_at_a_of_Reachable` | Same for EVM.call. |
 | `Ξ_preserves_account_at_a_of_Reachable_for_C` | Restricted to `I.codeOwner = C`. |
 
-### §J.6.6/.6.7 — `_inv_aware` variants
+### §J.6.6/.6.7 — `_inv_aware` pres-step variants
 
-The framework's `hReach_step` callback didn't expose `StorageSumLeBalance s'.accountMap C`
-to consumers, even though the X-loop's induction has it locally. This
-caused a chicken-and-egg circularity for any contract whose Reachable
-predicate depends on the invariant.
-
-The `_inv_aware` variants thread the post-step invariant through:
+These pres-step variants thread the post-step σ-presence through the
+`hReach_step` callback. They are parameterised over the consumer's
+`Reachable` and don't reference any specific invariant predicate, so
+they live framework-side; the consumer-side relational closure (Part
+2 below) pairs them with `StorageSumLeBalance` to build its own
+slack-dispatch wrapper.
 
 | Theorem | What it says |
 |---|---|
 | `X_preserves_account_at_a_bdd_op_conditional_with_pres_step` | X-loop variant with σ-presence in step closure. |
 | `Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` | Same at Ξ-level. |
-| `ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware` | Slack-dispatch variant exposing `StorageSumLeBalance s'.accountMap C` to `hReach_step`. |
 
 ---
 
@@ -169,48 +195,131 @@ In `EvmYul/Frame/StorageSum.lean`:
 
 ---
 
-## UpsilonFrame simplification
+## Generic Υ-tail helpers (storage-sum side)
 
-`Υ_invariant_preserved` previously took a `ΞPreservesInvariantAtC C`
-parameter that was structurally unused (passed through to
-`Υ_output_invariant_preserves` as `_hWitness`, never consumed). Drop
-the parameter to simplify the consumer interface.
-
-This eliminated the chain that required `account_at_initial` as a
-structural assumption in WETH's proof.
-
----
-
-## Θ-pre-credit framework lemma
+In `EvmYul/Frame/UpsilonFrame.lean` (parallel to the existing
+balance-mono helpers):
 
 | Theorem | What it says |
 |---|---|
-| `theta_σ'₁_pre_credit_slack_at_C` | Given `StorageSumLeBalance σ C` and balance no-wrap, post-credit state σ'₁ satisfies `v + storageSum σ'₁ C ≤ balanceOf σ'₁ C`. |
+| `storageSum_tail_generic` | `storageSum` invariant under the post-dispatch Υ tail (gas refund + SD/dead sweeps + tstorage wipe) at any C in the tail's exclusion set. |
+| `Υ_tail_storageSum_eq` | Specialisation tying that to the boundary hypotheses (`*SDExclusion`, `*DeadAtσP`). |
+| `storageSum_increaseBalance_ne` | `storageSum σ C` invariant under `increaseBalance σ a v` when `a ≠ C`. |
 
-Composes the existing `theta_σ'₁_storageSum_eq` (storage unchanged at
-C through credit) with balance-delta arithmetic
-(`balanceOf σ'₁ C = balanceOf σ C + v` at recipient = C). Backs the
-Θ-pre-credit fact for any consumer that needs it.
+These were promoted to public visibility (alongside the existing
+balance-side helpers `balanceOf_tail_generic`,
+`Υ_tail_balanceOf_ge`, `dead_increaseBalance_ne`,
+`balanceOf_increaseBalance_ne`) so consumer-side relational closures
+can compose them directly.
 
 ---
 
-## Total volume
+## Visibility changes
+
+Seven framework helpers in `UpsilonFrame.lean` flipped from `private`
+to public so the consumer-side closure can invoke them:
+`storageSum_tail_generic`, `Υ_tail_storageSum_eq`,
+`Υ_tail_balanceOf_ge`, `balanceOf_increaseBalance_ne`,
+`storageSum_increaseBalance_ne`, `balanceOf_tail_generic`,
+`dead_increaseBalance_ne`.
+
+Five in `MutualFrame.lean` likewise: `applyPrecompile_bundled`,
+`stateWF_theta_σ₁`, `stateWF_lambda_σStar_some`,
+`opIsSystemCallOrCreate`, `op_classification`.
+
+---
+
+## Framework-side volume
 
 - ~17 commits to `MutualFrame.lean`.
 - ~5 commits to `StepShapes.lean` / `PcWalk.lean` / `StorageSum.lean`.
-- 1 commit to `UpsilonFrame.lean`.
+- A handful of commits to `UpsilonFrame.lean`.
 - ~5000 LoC total framework infrastructure added.
 
-## Reusability
+## Framework-side reusability
 
 All framework additions are contract-agnostic. The
 `Ξ_preserves_account_at_a_universal` theorem in particular is the kind
 of result that's true for any EVM execution and would be needed by any
 contract proof that reasons about cross-call account presence.
 
-The `_inv_aware` variants are the canonical pattern for any contract
-proof whose `Reachable` predicate carries an X-loop invariant: the
-framework now exposes the post-step invariant directly to the
-reachability-preservation callback, breaking the chicken-and-egg
-circularity that previously forced consumers to admit a per-step
-invariant-preservation predicate.
+The pres-step `_inv_aware` variants in §J.6.6/.6.7 are the framework
+half of the canonical pattern for any contract proof whose `Reachable`
+predicate carries an X-loop invariant — they expose the post-step
+σ-presence to the reachability-preservation callback, eliminating the
+chicken-and-egg circularity that previously forced consumers to admit
+a per-step preservation predicate.
+
+---
+
+# Part 2 — Consumer-side closure (`InvariantClosure.lean`)
+
+In `EvmSmith/Demos/Weth/InvariantClosure.lean`, ~5400 LoC. This file
+hosts the **relational-solvency invariant chain** — the
+`StorageSumLeBalance` predicate and the full mutual-induction
+closure that preserves it across Υ. The closure is generic in
+*shape* (no theorem here references WETH's bytecode); it lives
+outside the generic framework because we currently have one
+consumer. Once a second consumer demonstrates the same shape, this
+file is the natural candidate for lifting into `EvmYul/Frame/` as a
+parametric module over the invariant `I` — the lift is essentially
+a rename + an extra `(I : AccountMap → AccountAddress → Prop)`
+parameter on each theorem signature. Brief overview here;
+per-theorem details and the proof flow live in `REPORT_WETH.md`.
+
+## What's in it
+
+- **The predicate.**
+  `StorageSumLeBalance σ C := storageSum σ C ≤ balanceOf σ C`.
+- **§H invariant predicates.** `ΞPreservesInvariantAtC`,
+  `ΞInvariantAtCFrame`, `ΞInvariantFrameAtC` — analogues of the
+  framework's `ΞPreservesAtC` / `ΞAtCFrame` / `ΞFrameAtC` whose
+  success-branch conjunct is `StorageSumLeBalance σ' C` instead of
+  `β` monotonicity.
+- **§H.2 mutual closure.** `Θ_invariant_preserved_bdd`,
+  `Λ_invariant_preserved_bdd`, `Ξ_invariant_preserved_bundled_bdd`,
+  `call_invariant_preserved`,
+  `ΞPreservesInvariantAtC_of_Reachable_general*` (including the
+  `_inv_aware` slack-dispatch variant
+  `ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
+  which exposes `StorageSumLeBalance s'.accountMap C` to
+  `hReach_step`). Joint fuel-induction parallel to the framework's
+  balance-mono `Ξ_balanceOf_ge_bundled_bdd` chain.
+- **Transaction-level entry.** `Υ_invariant_preserved` — the
+  consumer-facing top-level theorem (parametric in the relational
+  invariant), plus its Υ-tail wrappers `Υ_tail_invariant_preserves`,
+  `Υ_output_invariant_preserves`, and the `ΥBodyFactorsInvariant`
+  predicate.
+- **Θ-pre-credit slack.** `theta_σ'₁_pre_credit_slack_at_C` — given
+  `StorageSumLeBalance σ C` and balance no-wrap, post-credit state
+  σ'₁ satisfies `v + storageSum σ'₁ C ≤ balanceOf σ'₁ C` (backs
+  WETH's `deposit` slack). Composes
+  `theta_σ'₁_storageSum_eq` with balance-delta arithmetic.
+- **§H per-step `StorageSumLeBalance` preservation** at non-`C`
+  codeOwner — the relational-shape per-step lemmas used by §H.2.
+
+## What it sits on top of (framework-side)
+
+§I/§J (account-presence preservation), the universal Ξ-preservation
+result, the strong shape lemmas, and the generic Υ-tail helpers
+(both balance-side and storage-sum-side).
+
+## Entry-point simplification
+
+The `Υ_invariant_preserved` entry point was simplified during the
+extraction: it previously took a `ΞPreservesInvariantAtC C`
+parameter that was structurally unused (passed through to
+`Υ_output_invariant_preserves` as `_hWitness`, never consumed).
+Dropping the parameter simplified the consumer interface and
+eliminated the chain that required `account_at_initial` as a
+structural assumption in WETH's proof.
+
+---
+
+## Axioms unchanged
+
+These additions introduce zero new axioms. The framework still has
+exactly the two axioms documented in
+`EVMYulLean/FRAME_LIBRARY.md`'s audit
+(`precompile_preserves_accountMap`, `lambda_derived_address_ne_C`).
+The consumer-side closure adds none.

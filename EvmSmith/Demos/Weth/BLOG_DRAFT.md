@@ -200,11 +200,18 @@ Concretely, the proof:
    predicate. **61 such per-PC walks**, aggregated into a single
    `weth_step_closure` theorem.
 
-4. **Bridges to the EVM's transaction processor**. The framework's
-   `Υ_invariant_preserved` theorem says: if your contract's invariant
-   is preserved by every internal step, then it's preserved by the
-   transaction. We feed it the per-step preservation, and it gives us
-   the headline theorem.
+4. **Bridges to the EVM's transaction processor**. A
+   relational-invariant top-level theorem `Υ_invariant_preserved`
+   says: if your contract's invariant is preserved by every internal
+   step, then it's preserved by the transaction. We feed it the
+   per-step preservation, and it gives us the headline theorem.
+   This bridge is itself a worked-example pattern (in
+   `EvmSmith/Demos/Weth/InvariantClosure.lean`, alongside the WETH
+   proof) built on top of generic frame primitives carried by the
+   underlying EVMYulLean framework — the framework supplies the
+   contract-agnostic Ξ/Θ/Λ/X preservation closures and Υ-tail
+   helpers, and this WETH-style relational-invariant bridge sits on
+   top.
 
 ## What's still assumed?
 
@@ -364,15 +371,34 @@ statements**, not Solidity, not bytecode, not test results.
 
 ## What's the scale?
 
-There are two very different cost categories:
+There are three cost categories, in decreasing order of reusability:
 
-**Framework infrastructure** (reusable for any future EVM bytecode
-proof): ~5000 lines of new Lean added to EVMYulLean. This is the
-amortizable investment — mutual induction proofs of Ξ/Θ/Λ/X
-properties (account-presence preservation, accountMap-preservation
-strong shape lemmas, invariant-aware Reachable closures). None of it
-is WETH-specific. A second contract proof on the same framework
+**Generic framework infrastructure** (reusable by *any* future EVM
+bytecode proof, regardless of invariant shape): ~5000 lines of new
+Lean added to EVMYulLean. This is the most amortizable layer —
+mutual induction proofs of Ξ/Θ/Λ/X properties (account-presence
+preservation, accountMap-preservation strong shape lemmas, the
+universal Ξ-preservation result, generic Υ-tail helpers, pres-step
+variants for invariant-aware Reachable closures). None of it is
+WETH-specific. A second contract proof on the same framework
 inherits all of it for free.
+
+**Relational-invariant closure** (reusable by future proofs of the
+same `S ≤ β` shape, *and* generalisable): ~5400 lines of Lean in
+`EvmSmith/Demos/Weth/InvariantClosure.lean` — the
+`StorageSumLeBalance` predicate, the parallel mutual closure that
+preserves it across Θ/Λ/Ξ, and the transaction-level
+`Υ_invariant_preserved` entry point. None of these theorems
+reference WETH's bytecode; the closure is generic in shape and
+lives consumer-side only because we currently have one consumer.
+A future contract with the *same* shape inherits it directly. A
+future contract with a *different* relational invariant (say
+`Σ supply ≤ totalSupply`) would either copy and specialise this
+file or — the eventual right move — trigger the lift into the
+frame library as a parametric module over `I : AccountMap →
+AccountAddress → Prop`. We deliberately deferred that
+parameterisation: premature with one consumer, a small refactor
+once a second consumer establishes the pattern.
 
 **WETH-specific** (the per-contract proof): ~3000 lines of Lean —
 the bytecode-trace predicate, ~61 per-PC walks, the cascade
@@ -380,10 +406,13 @@ threading through deposit and withdraw, the dischargers for each
 cascade-fact predicate, the headline theorem composition.
 
 So for *this* 86-byte contract: ~3000 lines of WETH-specific proof.
-For a *future* contract built on the same framework: dominated by
-bytecode-specific cascade threading and per-PC walks — likely a few
-hundred lines of Lean per hundred bytes of bytecode, plus whatever
-contract-specific invariants need their own dischargers.
+For a *future* contract with WETH-style solvency on the same
+framework: dominated by bytecode-specific cascade threading and
+per-PC walks — likely a few hundred lines of Lean per hundred bytes
+of bytecode, plus whatever contract-specific invariants need their
+own dischargers, and the relational-invariant closure inherited
+directly. For a future contract with a *different* relational
+invariant: add the cost of porting the closure pattern.
 
 The framework investment is steep but one-time. The per-contract
 cost is what matters going forward.
