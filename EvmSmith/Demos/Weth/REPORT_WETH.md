@@ -133,7 +133,7 @@ disjunct's data to the next.
 ```lean
 theorem weth_xi_preserves_C : ΞPreservesAccountAt C
 theorem weth_xi_preserves_C_other  -- universal Ξ-preservation
-theorem weth_call_inv_step_pres   -- CALL-step WethInvFr preservation
+theorem weth_call_inv_step_pres   -- CALL-step StorageSumLeBalance preservation
 theorem weth_step_closure : WethStepClosure C
 ```
 
@@ -146,7 +146,7 @@ across single EVM steps and across nested CALLs.
 private def WethReachable (C : AccountAddress) (s : EVM.State) : Prop :=
   WethTrace C s ∧ ¬ (s.pc.toNat = 32 ∧ s.stack.length = 0) ∧
   accountPresentAt s.accountMap C ∧
-  WethInvFr s.accountMap C
+  StorageSumLeBalance s.accountMap C
 ```
 
 Four conjuncts: (1) the trace predicate carrying per-PC structural

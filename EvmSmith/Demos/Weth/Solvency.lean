@@ -1,4 +1,5 @@
 import EvmYul.Frame
+import EvmSmith.Demos.Weth.InvariantClosure
 import EvmSmith.Demos.Weth.Invariant
 import EvmSmith.Demos.Weth.BytecodeFrame
 
@@ -126,7 +127,7 @@ def WethInvAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
   | .ok (σ', A', _, _) =>
       ∀ σ_P g',
         σ' = Υ_tail_state σ_P g' A' H H_f tx S_T →
-        WethInvFr σ_P C
+        StorageSumLeBalance σ_P C
   | _ => True
 
 /-- **Weth assumptions bundle.** Packages the structural hypotheses
@@ -192,10 +193,10 @@ structure WethAssumptions
   -- See the docstring of `Υ_invariant_preserved` in
   -- `EVMYulLean/EvmYul/Frame/UpsilonFrame.lean` for the rationale.
   -- Note: the previous `inv_at_initial : ∀ σ I, I.codeOwner = C →
-  -- WethInvFr σ C` field has been **eliminated**. The framework's
+  -- StorageSumLeBalance σ C` field has been **eliminated**. The framework's
   -- invariant-aware slack-dispatch X-loop
   -- (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
-  -- EVMYulLean) was refactored to expose `WethInvFr σ C` (Ξ's invariant
+  -- EVMYulLean) was refactored to expose `StorageSumLeBalance σ C` (Ξ's invariant
   -- precondition, already part of `ΞPreservesInvariantAtC`'s signature)
   -- to its `hReachInit` callback. The Weth side feeds this directly into
   -- `WethReachable_initial`'s `hInv` parameter, removing the need for a
@@ -204,7 +205,7 @@ structure WethAssumptions
   -- Note: the previous `call_inv_step_pres : WethCALLStepInvFr C` field
   -- has been removed. The framework's invariant-aware slack-dispatch
   -- X-loop (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
-  -- EVMYulLean) exposes `WethInvFr s'.accountMap C` to its `hReach_step`
+  -- EVMYulLean) exposes `StorageSumLeBalance s'.accountMap C` to its `hReach_step`
   -- callback (already established internally via
   -- `step_bundled_invariant_at_C_invariant_at_C_slack_dispatch`'s CALL
   -- arm), so no per-step CALL invariant predicate is needed. The Weth
@@ -331,7 +332,7 @@ The proof is direct composition: `Υ_invariant_preserved` consumes
 (projected via `weth_Υ_tail_invariant`), and `ΥBodyFactorsInvariant`
 (projected via `weth_Υ_body_factors`).
 
-`WethInv` and `WethInvFr` (the framework's underlying predicate) are
+`WethInv` and `StorageSumLeBalance` (the framework's underlying predicate) are
 definitionally equal — both unfold to `storageSum σ C ≤ balanceOf σ
 C`. The conclusion is restated using the demo-side `WethInv`. -/
 theorem weth_solvency_invariant
@@ -347,8 +348,8 @@ theorem weth_solvency_invariant
     match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
     | .ok (σ', _, _, _) => WethInv σ' C
     | .error _ => True := by
-  -- WethInv σ C ↔ WethInvFr σ C (definitional; both = storageSum σ C ≤ balanceOf σ C).
-  have hInvFr : WethInvFr σ C := hInv
+  -- WethInv σ C ↔ StorageSumLeBalance σ C (definitional; both = storageSum σ C ≤ balanceOf σ C).
+  have hInvFr : StorageSumLeBalance σ C := hInv
   -- Project structural hypotheses to framework predicates.
   have hTail :=
     weth_Υ_tail_invariant σ fuel H_f H H_gen blocks tx S_T C hAssumptions.sd_excl
@@ -364,13 +365,13 @@ theorem weth_solvency_invariant
   have h :=
     Υ_invariant_preserved fuel σ H_f H H_gen blocks tx S_T C
       hWF hInvFr hS_T hBen hTail hFactor
-  -- Re-thread the match: the framework returns WethInvFr; restate as WethInv.
+  -- Re-thread the match: the framework returns StorageSumLeBalance; restate as WethInv.
   cases hΥ : EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
   | error _ => trivial
   | ok r =>
     obtain ⟨σ', _A, _z, _g⟩ := r
     rw [hΥ] at h
-    -- `h : WethInvFr σ' C`; the goal at the .ok branch is `WethInv σ' C`.
+    -- `h : StorageSumLeBalance σ' C`; the goal at the .ok branch is `WethInv σ' C`.
     exact h
 
 end EvmSmith.Weth

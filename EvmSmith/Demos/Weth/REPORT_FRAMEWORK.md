@@ -110,7 +110,7 @@ Convenience entries for consumers using a `Reachable` predicate:
 
 ### §J.6.6/.6.7 — `_inv_aware` variants
 
-The framework's `hReach_step` callback didn't expose `WethInvFr s'.accountMap C`
+The framework's `hReach_step` callback didn't expose `StorageSumLeBalance s'.accountMap C`
 to consumers, even though the X-loop's induction has it locally. This
 caused a chicken-and-egg circularity for any contract whose Reachable
 predicate depends on the invariant.
@@ -121,7 +121,7 @@ The `_inv_aware` variants thread the post-step invariant through:
 |---|---|
 | `X_preserves_account_at_a_bdd_op_conditional_with_pres_step` | X-loop variant with σ-presence in step closure. |
 | `Ξ_preserves_account_at_a_of_Reachable_for_C_with_pres_step` | Same at Ξ-level. |
-| `ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware` | Slack-dispatch variant exposing `WethInvFr s'.accountMap C` to `hReach_step`. |
+| `ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware` | Slack-dispatch variant exposing `StorageSumLeBalance s'.accountMap C` to `hReach_step`. |
 
 ---
 
@@ -185,7 +185,7 @@ structural assumption in WETH's proof.
 
 | Theorem | What it says |
 |---|---|
-| `theta_σ'₁_pre_credit_slack_at_C` | Given `WethInvFr σ C` and balance no-wrap, post-credit state σ'₁ satisfies `v + storageSum σ'₁ C ≤ balanceOf σ'₁ C`. |
+| `theta_σ'₁_pre_credit_slack_at_C` | Given `StorageSumLeBalance σ C` and balance no-wrap, post-credit state σ'₁ satisfies `v + storageSum σ'₁ C ≤ balanceOf σ'₁ C`. |
 
 Composes the existing `theta_σ'₁_storageSum_eq` (storage unchanged at
 C through credit) with balance-delta arithmetic
