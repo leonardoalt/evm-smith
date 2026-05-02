@@ -90,7 +90,7 @@ Three reusable building blocks:
   joint mutual closure. Don't dive in unless you need to extend the
   bundle's outputs.
 
-The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md) and demonstrated end-to-end by `EvmSmith/Demos/Register/BalanceMono.lean`. Generalisation roadmap (open work): [`GENERALIZATION_PLAN.md`](./GENERALIZATION_PLAN.md).
+The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills/prove-balance-invariant.md) and demonstrated end-to-end by `EvmSmith/Demos/Register/BalanceMono.lean` (balance monotonicity) and `EvmSmith/Demos/Weth/Solvency.lean` (relative invariant under non-zero outbound CALL).
 
 ## Skills
 

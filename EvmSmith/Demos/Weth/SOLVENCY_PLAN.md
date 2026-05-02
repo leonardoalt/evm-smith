@@ -509,10 +509,11 @@ non-zero-CALL infrastructure. Realistic uncertainty: ±10-20%
   add a parameterised sibling without removing the v0 chain, then
   refactor Register's BytecodeFrame in a separate commit. Each
   commit must build clean.
-* **§H closure risk**: same shape as Phase A.2's open work in
-  `GENERALIZATION_PLAN.md`. Genuine multi-day proof effort. The
-  framework already has the `ΞFrameAtCStrong` / `ΞAtCFrameStrong`
-  scaffolding; reuse it for the invariant-tracking variant.
+* **§H closure risk**: same shape as Phase A.2's open work
+  (Partial Phase A in `EVMYulLean/FRAME_LIBRARY.md`). Genuine
+  multi-day proof effort. The framework already has the
+  `ΞFrameAtCStrong` / `ΞAtCFrameStrong` scaffolding; reuse it for
+  the invariant-tracking variant.
 * **Storage-sum primitives** depend on Batteries RBMap.foldl
   lemmas. If those don't materialise, build local helpers in
   `StorageSum.lean` (~200 additional LoC).

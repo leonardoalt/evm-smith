@@ -47,9 +47,10 @@ Use this skill when **all** of the following hold:
    `ΥTailInvariant`, `ΥBodyFactors`. The latter two are mostly
    mechanical — the structural facts (no SELFDESTRUCT in your
    bytecode, code at `C` preserved) currently surface as
-   caller-supplied hypotheses (`*SDExclusion`, `*DeadAtσP`) until
-   the framework's substate-tracking refactor (Step 5 of
-   `GENERALIZATION_PLAN.md`) fully lands.
+   caller-supplied hypotheses (`*SDExclusion`, `*DeadAtσP`); the
+   framework's paused substate-tracking refactor (see
+   `EVMYulLean/FRAME_LIBRARY.md` "Partial Phase A") would derive
+   these inside Lean.
 
 ## File layout
 
@@ -214,9 +215,9 @@ theorem <name>_balance_mono
 ```
 
 The two structural hypotheses `<Name>SDExclusion` and `<Name>DeadAtσP`
-are caller-supplied today (a follow-up framework lift will eliminate
-them — see [`GENERALIZATION_PLAN.md`](../../GENERALIZATION_PLAN.md)
-Step 5).
+are caller-supplied today (the framework's paused substate-tracking
+refactor would eliminate them — see
+`EVMYulLean/FRAME_LIBRARY.md` "Partial Phase A").
 
 ## Pitfalls
 
@@ -295,5 +296,5 @@ lake build EvmSmith.Demos.<Name>.BalanceMono
   [`EVMYulLean/EvmYul/Frame/StepShapes.lean`](../../EVMYulLean/EvmYul/Frame/StepShapes.lean)
 - PC-walk wrappers:
   [`EVMYulLean/EvmYul/Frame/PcWalk.lean`](../../EVMYulLean/EvmYul/Frame/PcWalk.lean)
-- Framework lift roadmap:
-  [`GENERALIZATION_PLAN.md`](../../GENERALIZATION_PLAN.md)
+- Frame library reference + remaining-work caveats:
+  [`EVMYulLean/FRAME_LIBRARY.md`](../../EVMYulLean/FRAME_LIBRARY.md)
