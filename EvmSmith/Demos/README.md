@@ -101,7 +101,27 @@ add3(1, 2, 3) → 6 (expected 6, ok? true)
 add3(10, 20, 30) → 60 (expected 60, ok? true)
 add3(100, 200, 300) → 600 (expected 600, ok? true)
 add3(0, 0, 0) → 0 (expected 0, ok? true)
+
+-- register storage prefix (PUSH1 0; CALLDATALOAD; CALLER; SSTORE) --
+register: SSTORE storage[sender=51966] = 3735928559; read back 3735928559 (ok? true)
+register: SSTORE storage[sender=48879] = 12345; read back 12345 (ok? true)
+register: SSTORE storage[sender=12648430] = 0; read back 0 (ok? true)
+
+-- weth deposit block (chained: 10 then 25) --
+weth deposit 1: +10 wei → storage[sender] = 10 (expected 10, ok? true)
+weth deposit 2: +25 wei → storage[sender] = 35 (expected 35, ok? true)
+
+-- weth withdraw pre-call block (deposit 100, then withdraw 30) --
+weth withdraw setup: deposited 100 wei → storage[sender] = 100
+weth withdraw: -30 wei → storage[sender] = 70 (expected 70, ok? true)
 ```
+
+`runOp` / `runSeq` use the **pure** semantics layer
+(`EvmYul.step`), which doesn't drive frame-aware opcodes (CALL,
+CREATE, …). The Register and WETH demos therefore exercise the
+storage-mutating *prefixes* of those programs, not the full traces.
+End-to-end on-chain behavior is exercised by the Foundry test
+suites in each demo's `foundry/` subdirectory.
 
 The upstream's `step` also emits the opcode name (e.g. `ADD`) to stderr
 via `dbg_trace` — normal, not an error.

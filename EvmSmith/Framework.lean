@@ -31,6 +31,13 @@ def withCalldata (s : EVM.State) (cd : ByteArray) : EVM.State :=
     { s.toState with executionEnv :=
       { s.toState.executionEnv with calldata := cd } } }
 
+/-- Insert a default `Account` at `s.executionEnv.codeOwner`. SSTORE
+    short-circuits to a no-op when its codeOwner has no entry in
+    `accountMap` (`lookupAccount Iₐ |>.option self ...`), so executing
+    storage-writing programs from a fresh `mkState` requires this. -/
+def withSelfAccount (s : EVM.State) : EVM.State :=
+  { s with accountMap := s.accountMap.insert s.executionEnv.codeOwner default }
+
 /-- Run one EVM opcode on a state using the pure semantics layer (`EvmYul.step`).
     No fuel, no gas, no `execLength` bump. Post-state differs from pre-state only
     in `stack` and `pc` (and per-opcode effects). -/

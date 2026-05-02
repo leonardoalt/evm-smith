@@ -1,5 +1,7 @@
 import EvmSmith.Framework
 import EvmSmith.Demos.Add3.Program
+import EvmSmith.Demos.Register.Program
+import EvmSmith.Demos.Weth.Program
 
 /-!
 # IO demos — shows the framework in action
@@ -65,5 +67,90 @@ def demoAdd3 : IO Unit := do
   run 10 20 30
   run 100 200 300
   run 0 0 0
+
+/-- Register: run the storage-write prefix (`PUSH1 0; CALLDATALOAD;
+    CALLER; SSTORE`) — the first 4 ops of `Register.program` — and
+    show that `storage[sender]` ends up holding the calldata word. The
+    suffix (`CALL; POP; STOP`) is intentionally skipped because pure
+    `runSeq` doesn't drive the frame-aware Θ machinery; the on-chain
+    behavior of the CALL is exercised by the Foundry tests. -/
+def demoRegister : IO Unit := do
+  let storePrefix : EvmSmith.Program :=
+    [ (.Push .PUSH1, some (UInt256.ofNat 0, 1))
+    , (.CALLDATALOAD, none)
+    , (.CALLER,       none)
+    , (.SSTORE,       none)
+    ]
+  let run (sender : AccountAddress) (v : UInt256) : IO Unit := do
+    let owner : AccountAddress := 0xC0DE
+    let s0 := withCalldata (mkState []) v.toByteArray
+    let env := { s0.executionEnv with codeOwner := owner, source := sender }
+    let s1 := ({ s0 with executionEnv := env }) |> withSelfAccount
+    match runSeq storePrefix s1 with
+    | .ok s =>
+        let stored := storageAt s owner (addressSlot sender)
+        IO.println s!"register: SSTORE storage[sender={sender.val}] = {v.toNat}; read back {stored.toNat} (ok? {stored == v})"
+    | .error e =>
+        IO.println s!"register: error {repr e}"
+  run 0xCAFE   (UInt256.ofNat 0xdeadbeef)
+  run 0xBEEF   (UInt256.ofNat 12345)
+  run 0xC0FFEE (UInt256.ofNat 0)
+
+/-- Weth: run the **deposit block** twice on chained state and show
+    `storage[sender]` accumulates `msg.value` across calls. The block
+    runs end-to-end (no CALL inside it), so pure `runSeq` is enough. -/
+def demoWethDeposit : IO Unit := do
+  let owner  : AccountAddress := 0xCAFE
+  let sender : AccountAddress := 0xBEEF
+  -- Deposit's entry stack from the dispatcher is `[selector]`; the
+  -- block's first op is POP, which throws it away.
+  let entryStack : Stack UInt256 := [Weth.depositSelector]
+  let setEnv (s : EVM.State) (v : UInt256) : EVM.State :=
+    let env' := { s.executionEnv with
+                    codeOwner := owner, source := sender, weiValue := v }
+    { s with stack := entryStack, executionEnv := env' }
+  -- mkState [] needs an account at codeOwner so SSTORE has a target.
+  let s0 := (setEnv (mkState []) (UInt256.ofNat 10)) |> withSelfAccount
+  match runSeq Weth.depositBlock s0 with
+  | .error e => IO.println s!"weth deposit 1: error {repr e}"
+  | .ok s1 =>
+    let bal1 := storageAt s1 owner (addressSlot sender)
+    IO.println s!"weth deposit 1: +10 wei → storage[sender] = {bal1.toNat} (expected 10, ok? {bal1.toNat == 10})"
+    let s2 := setEnv s1 (UInt256.ofNat 25)
+    match runSeq Weth.depositBlock s2 with
+    | .error e => IO.println s!"weth deposit 2: error {repr e}"
+    | .ok s3 =>
+      let bal2 := storageAt s3 owner (addressSlot sender)
+      IO.println s!"weth deposit 2: +25 wei → storage[sender] = {bal2.toNat} (expected 35, ok? {bal2.toNat == 35})"
+
+/-- Weth: deposit 100 wei, then run `withdrawPreCallBlock` (the
+    state-update prefix of withdraw, up to but not including CALL) for
+    amount=30, and show `storage[sender]` decreases to 70. Skipping the
+    actual CALL is the same trick as in `demoRegister`: pure `runSeq`
+    isn't frame-aware. -/
+def demoWethWithdraw : IO Unit := do
+  let owner  : AccountAddress := 0xCAFE
+  let sender : AccountAddress := 0xBEEF
+  -- Step 1: deposit 100 wei to set up storage[sender] = 100.
+  let init := mkState []
+  let env0 := { init.executionEnv with
+                  codeOwner := owner, source := sender,
+                  weiValue := UInt256.ofNat 100 }
+  let s0 := ({ init with stack := [Weth.depositSelector], executionEnv := env0 }) |> withSelfAccount
+  match runSeq Weth.depositBlock s0 with
+  | .error e => IO.println s!"weth withdraw setup: error {repr e}"
+  | .ok s1 =>
+    let bal := storageAt s1 owner (addressSlot sender)
+    IO.println s!"weth withdraw setup: deposited 100 wei → storage[sender] = {bal.toNat}"
+    -- Step 2: run withdraw prefix with calldata = withdrawSelector ++ amount(30).
+    let cd : ByteArray :=
+      ⟨#[0x2e, 0x1a, 0x7d, 0x4d]⟩ ++ (UInt256.ofNat 30).toByteArray
+    let env1 := { s1.executionEnv with calldata := cd, weiValue := UInt256.ofNat 0 }
+    let s2 := { s1 with stack := [], executionEnv := env1 }
+    match runSeq Weth.withdrawPreCallBlock s2 with
+    | .error e => IO.println s!"weth withdraw: error {repr e}"
+    | .ok s3 =>
+      let bal' := storageAt s3 owner (addressSlot sender)
+      IO.println s!"weth withdraw: -30 wei → storage[sender] = {bal'.toNat} (expected 70, ok? {bal'.toNat == 70})"
 
 end EvmSmith
