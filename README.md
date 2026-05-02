@@ -2,6 +2,11 @@
 
 **A framework for AI systems to write EVM bytecode and prove it safe.**
 
+> ⚠️ **Experimental research codebase.** Not audited, not production-ready.
+> Don't deploy code based on this repo to a live chain. The proofs ship as
+> a research artifact demonstrating the workflow; the deployments themselves
+> are demos.
+
 The goal is to experiment with AI-generated smart contracts: an AI
 writes a contract directly in EVM assembly and, in the same workflow,
 writes Lean 4 proofs about the contract's behavior against the
@@ -14,12 +19,39 @@ The EVM semantics come from
 a Lean 4 formalization of the Ethereum Yellow Paper. EVM-Smith is a
 consumer of that formalization.
 
-**This repo currently requires the
+This repo's `EVMYulLean/` is a submodule pointing at the
 [`leonardoalt/EVMYulLean`](https://github.com/leonardoalt/EVMYulLean)
-fork**, which carries the Frame library — balance- and
-solvency-frame infrastructure that is not yet upstreamed. See
-[`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md) for
-what's in the fork.
+fork, which carries the **Frame library** — cross-transaction
+preservation infrastructure that lifts a single-contract bytecode
+walk into a per-account inductive invariant that survives the entire
+`Υ` driver, including arbitrary reentrancy, nested CREATE / CREATE2,
+and SELFDESTRUCT. The library supports balance lower bounds,
+relational solvency-style bounds (`Σ storage ≤ balance`),
+account-presence preservation, code-identity preservation, and other
+per-account state-shape invariants — see
+[`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)
+for the full surface. The two worked examples (Register's balance
+monotonicity and WETH's solvency) are entirely consumers of this
+library.
+
+## Proof status
+
+* **0 sorries** anywhere in the codebase or its dependency
+  (EVMYulLean, including the Frame library).
+* **2 practical axioms beyond Lean's standard foundations** in the
+  entire trust base: `precompile_preserves_accountMap` (T2:
+  precompile purity, provable by case inspection) and
+  `lambda_derived_address_ne_C` (T5: Keccak collision-resistance,
+  the standard cryptographic ground assumption every Ethereum
+  security argument relies on). Both are documented in
+  [`AXIOMS.md`](./AXIOMS.md). Verify with `#print axioms <theorem>`.
+* Every claim about a contract's bytecode behaviour is a **theorem**,
+  not an assumption.
+
+The proofs are conditional on a small, explicit set of structural
+hypotheses spelled out per demo (e.g. WETH's 5-field
+`WethAssumptions` bundle). See [`TRUST_ASSUMPTIONS.md`](./TRUST_ASSUMPTIONS.md)
+for the broader picture.
 
 ## How it's meant to be used
 
