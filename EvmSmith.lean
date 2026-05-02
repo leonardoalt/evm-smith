@@ -13,4 +13,4 @@ import EvmSmith.Demos.Weth.Program
 import EvmSmith.Demos.Weth.Invariant
 import EvmSmith.Demos.Weth.BytecodeFrame
 import EvmSmith.Demos.Weth.Solvency
-import EvmSmith.Tests.Guards
+import EvmSmith.Demos.Tests

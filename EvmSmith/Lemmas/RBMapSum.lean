@@ -233,7 +233,7 @@ private theorem filter_eq_self_of_all {α} {L : List α} {Q : α → Bool}
   | cons a L ih =>
     have ha : Q a = true := h a (by simp)
     have ih' := ih fun x hx => h x (by simp [hx])
-    simp [List.filter_cons, ha, ih']
+    simp [ha, ih']
 
 /-- `append` on RBNodes preserves the concatenation of `toList`. -/
 private theorem append_toList {α : Type*} :
@@ -355,12 +355,12 @@ private theorem del_toList_filter
           Batteries.RBNode.IsCut.lt_trans (hAll_y_lt_b z hz) hcy
         simp [hcz]
       have hy : decide (cut y ≠ .eq) = true := by simp [hcy]
-      simp only [hcy]
+      simp only []
       split
       all_goals
         simp only [Batteries.RBNode.balLeft_toList, Batteries.RBNode.toList_node,
-                   hy, hbFilter, iha']
-        simp [if_true]
+                   hbFilter, iha']
+        simp
     | .gt =>
       have haFilter : a.toList.filter (fun p => decide (cut p ≠ .eq)) = a.toList := by
         apply filter_eq_self_of_all
@@ -369,12 +369,12 @@ private theorem del_toList_filter
           Batteries.RBNode.IsCut.gt_trans (hAll_a_lt_y z hz) hcy
         simp [hcz]
       have hy : decide (cut y ≠ .eq) = true := by simp [hcy]
-      simp only [hcy]
+      simp only []
       split
       all_goals
         simp only [Batteries.RBNode.balRight_toList, Batteries.RBNode.toList_node,
-                   hy, haFilter, ihb']
-        simp [if_true]
+                   haFilter, ihb']
+        simp
     | .eq =>
       have haFilter : a.toList.filter (fun p => decide (cut p ≠ .eq)) = a.toList := by
         apply filter_eq_self_of_all
@@ -394,7 +394,7 @@ private theorem del_toList_filter
           rw [hyz] at hE; exact hE.symm
         simp [hcz]
       have hy : decide (cut y ≠ .eq) = false := by simp [hcy]
-      simp only [hcy, append_toList, haFilter, hbFilter, hy]
+      simp only [append_toList, haFilter, hbFilter]
       simp
 
 /-- Simplified variant: `(t.erase cut).toList = t.toList.filter (cut · ≠ .eq)`. -/
@@ -519,12 +519,12 @@ theorem findD_toNat_le_totalBalance
   show ((t.find? k).getD ⟨0⟩).toNat ≤ totalBalance t
   cases hfind : t.find? k with
   | none =>
-    simp only [hfind, Option.getD]
+    simp only [Option.getD]
     -- ⟨0⟩.toNat = 0 ≤ anything
     show (⟨0⟩ : UInt256).toNat ≤ totalBalance t
     exact Nat.zero_le _
   | some v =>
-    simp only [hfind, Option.getD]
+    simp only [Option.getD]
     have := totalBalance_erase_of_mem t k v hfind
     omega
 

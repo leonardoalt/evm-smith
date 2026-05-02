@@ -43,9 +43,8 @@ EvmSmith/
 │   ├── DemoProofs.lean       # Single-opcode safety theorems
 │   ├── Add3/                 # Arithmetic correctness
 │   ├── Register/             # Storage + reentrancy + balance monotonicity
-│   └── Weth/                 # Solvency invariant
-└── Tests/
-    └── Guards.lean           # ~40 #guard assertions evaluated at elaboration time
+│   ├── Weth/                 # Solvency invariant
+│   └── Tests.lean            # #guard assertions evaluated at elaboration time
 ```
 
 When an AI adds a new contract, the natural place is

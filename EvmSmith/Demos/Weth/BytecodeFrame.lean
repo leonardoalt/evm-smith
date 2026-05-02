@@ -1418,7 +1418,7 @@ private theorem WethTrace_step_at_38
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 38) (hLen : s.stack.length = 3)
+    (hpc : s.pc.toNat = 38) (_hLen : s.stack.length = 3)
     (hCascade38 : ∃ slot oldVal v : UInt256,
        s.stack = v :: oldVal :: slot :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -1449,7 +1449,7 @@ private theorem WethTrace_step_at_39
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 39) (hLen : s.stack.length = 2)
+    (hpc : s.pc.toNat = 39) (_hLen : s.stack.length = 2)
     (hCascade39 : ∃ slot oldVal newVal : UInt256,
        s.stack = newVal :: slot :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -1799,7 +1799,7 @@ private theorem WethTrace_step_at_51
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 51) (hLen : s.stack.length = 5)
+    (hpc : s.pc.toNat = 51) (_hLen : s.stack.length = 5)
     (hCascade51 : ∃ slot oldVal x : UInt256,
        s.stack = oldVal :: x :: oldVal :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -1862,7 +1862,7 @@ private theorem WethTrace_step_at_55
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 55) (hLen : s.stack.length = 5)
+    (hpc : s.pc.toNat = 55) (_hLen : s.stack.length = 5)
     (hCascade55 : ∃ slot oldVal x : UInt256,
        s.stack = revertLbl :: UInt256.lt oldVal x :: oldVal :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -1953,7 +1953,7 @@ private theorem WethTrace_step_at_57
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 57) (hLen : s.stack.length = 4)
+    (hpc : s.pc.toNat = 57) (_hLen : s.stack.length = 4)
     (hCascade57 : ∃ slot oldVal x : UInt256,
        s.stack = x :: oldVal :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -1985,7 +1985,7 @@ private theorem WethTrace_step_at_58
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 58) (hLen : s.stack.length = 4)
+    (hpc : s.pc.toNat = 58) (_hLen : s.stack.length = 4)
     (hCascade58 : ∃ slot oldVal x : UInt256,
        s.stack = oldVal :: x :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -2017,7 +2017,7 @@ private theorem WethTrace_step_at_59
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (op : Operation .EVM) (arg : Option (UInt256 × Nat))
     (h : WethTrace C s)
-    (hpc : s.pc.toNat = 59) (hLen : s.stack.length = 3)
+    (hpc : s.pc.toNat = 59) (_hLen : s.stack.length = 3)
     (hCascade59 : ∃ slot oldVal x : UInt256,
        s.stack = UInt256.sub oldVal x :: slot :: x :: [] ∧
        oldVal = (s.accountMap.find? C).option ⟨0⟩
@@ -4929,7 +4929,7 @@ private theorem weth_step_closure_with_pres_inv_aware
     (hR : WethReachable C s)
     (hFetch : fetchInstr s.executionEnv s.pc = .ok (op, arg))
     (hStep : EVM.step (f' + 1) cost (some (op, arg)) s = .ok s')
-    (hRet : op ≠ .RETURN) (hRev : op ≠ .REVERT)
+    (_hRet : op ≠ .RETURN) (hRev : op ≠ .REVERT)
     (hStop : op ≠ .STOP) (_hSD : op ≠ .SELFDESTRUCT)
     (_hPresZ : accountPresentAt s.accountMap C)
     (hPresStep : accountPresentAt s'.accountMap C)

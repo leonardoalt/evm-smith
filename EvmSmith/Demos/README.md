@@ -123,14 +123,17 @@ interactively.
 
 ## Running the tests
 
-`EvmSmith/Tests/Guards.lean` contains ~40 `#guard` assertions covering
-arithmetic, comparison/bitwise, stack manipulation, pushes, error
-paths, PC increment, and `runOp` / `runOpFull` parity. Each is
-evaluated at elaboration time; any failure aborts the build. No native
-linking, no FFI workaround required.
+`EvmSmith/Demos/Tests.lean` contains ~90 `#guard` assertions covering
+arithmetic (incl. wrap-around), comparison/bitwise, stack manipulation
+(DUP1-5, SWAP1-3), pushes (PUSH1/PUSH2/PUSH4/PUSH16), error paths, PC
+increment, `runOp` / `runOpFull` parity, plus WETH bytecode byte-level
+invariants (specific bytes pinned at known PCs), WETH selectors,
+control-flow labels, the deposit block opcode-by-opcode, and Add3
+program shape. Each is evaluated at elaboration time; any failure
+aborts the build. No native linking, no FFI workaround required.
 
 ```bash
-lake build EvmSmith.Tests.Guards
+lake build EvmSmith.Demos.Tests
 ```
 
 ## Running the Foundry tests
@@ -154,7 +157,7 @@ After editing `Add3/Program.lean :: bytecode`:
 lake exe add3-dump-bytecode     # regenerates the hex file
 ```
 
-A `#guard` in `EvmSmith/Tests/Guards.lean` pins the byte length as a
+A `#guard` in `EvmSmith/Demos/Tests.lean` pins the byte length as a
 structural backstop.
 
 ## Writing your own program + proof
