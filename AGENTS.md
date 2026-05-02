@@ -35,15 +35,12 @@ Lean proof of its correctness → `lake build` verifies both.
 - **[`EvmSmith/Demos/Register/`](./EvmSmith/Demos/Register/)** — a
   storage-using worked example: `storage[msg.sender] = x` followed by
   a value-0 `CALL` to `msg.sender`, exposing reentrancy. Exercises
-  `CALLER`/`SSTORE`/`CALL`/`POP`/`STOP`. Three locally proved
-  invariants (`Proofs.lean`: structural post-state, caller-account
-  update, account-frame). **Plus the headline cross-transaction
-  result**: `BalanceMono.lean :: register_balance_mono` —
-  Register's balance is non-decreasing across any single Ethereum
-  transaction, *under arbitrary reentrancy*, sorry-free. Proof
-  composes a per-PC bytecode walk in `BytecodeFrame.lean` with the
-  EVMYulLean frame library (see "Frame library" below). End-to-end
-  walkthrough:
+  `CALLER`/`SSTORE`/`CALL`/`POP`/`STOP`. **Headline cross-transaction
+  result**: `BalanceMono.lean :: register_balance_mono` — Register's
+  balance is non-decreasing across any single Ethereum transaction,
+  *under arbitrary reentrancy*, sorry-free. Proof composes a per-PC
+  bytecode walk in `BytecodeFrame.lean` with the EVMYulLean frame
+  library (see "Frame library" below). End-to-end walkthrough:
   [`BALANCE_MONOTONICITY.md`](./EvmSmith/Demos/Register/BALANCE_MONOTONICITY.md).
 - **[`EvmSmith/Demos/Weth/`](./EvmSmith/Demos/Weth/)** — a
   wrapped-ETH token contract in raw bytecode. Function dispatch via
@@ -76,15 +73,15 @@ that feeds `Υ_balanceOf_ge` (the transaction-level frame).
 
 Three reusable building blocks:
 
-* **[`StepShapes.lean`](./EVMYulLean/EvmYul/Frame/StepShapes.lean)**
-  (81 lemmas) — for each opcode, a single-step lemma describing the
-  post-state's `pc`, `stack`, `executionEnv` shape after `EVM.step`.
-  Coverage spans pushes, arithmetic primops, DUP/SWAP, control flow,
-  copy ops, environment readers, and CALL.
-* **[`PcWalk.lean`](./EVMYulLean/EvmYul/Frame/PcWalk.lean)**
-  (54 wrappers) — `step_OP_at_pc` lemmas combining `decode-bytecode`
-  extraction with the matching shape, so each PC case in a contract
-  walk compresses to one tactic invocation.
+* **[`StepShapes.lean`](./EVMYulLean/EvmYul/Frame/StepShapes.lean)** —
+  for each opcode, a single-step lemma describing the post-state's
+  `pc`, `stack`, `executionEnv` shape after `EVM.step`. Coverage
+  spans pushes, arithmetic primops, DUP/SWAP, control flow, copy
+  ops, environment readers, and CALL.
+* **[`PcWalk.lean`](./EVMYulLean/EvmYul/Frame/PcWalk.lean)** —
+  `step_OP_at_pc` lemmas combining `decode-bytecode` extraction with
+  the matching shape, so each PC case in a contract walk compresses
+  to one tactic invocation.
 * **[`MutualFrame.lean`](./EVMYulLean/EvmYul/Frame/MutualFrame.lean)** —
   `Θ_balanceOf_ge`, `Λ_balanceOf_ge`, `Ξ_balanceOf_ge_bundled`, the
   joint mutual closure. Don't dive in unless you need to extend the
@@ -142,11 +139,13 @@ git submodule update --init --recursive        # pulls forge-std for the Foundry
 # Verify all proofs + tests (10-30min cold, seconds incremental):
 lake build
 
-# Run the IO demos end-to-end:
+# Run the IO demos end-to-end (Add3 + Register + Weth):
 lake exe evm-smith
 
-# Run the Foundry tests for add3 (requires Foundry ≥ 1.0 on PATH):
-cd EvmSmith/Demos/Add3/foundry && forge test
+# Run any demo's Foundry suite (requires Foundry ≥ 1.0 on PATH):
+cd EvmSmith/Demos/Add3/foundry      && forge test
+cd EvmSmith/Demos/Register/foundry  && forge test
+cd EvmSmith/Demos/Weth/foundry      && forge test
 ```
 
 See `README.md` → "Requirements" and "Building" for the full
