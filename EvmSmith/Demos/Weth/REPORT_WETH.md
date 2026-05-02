@@ -372,6 +372,15 @@ In English: **after Θ/Λ dispatch but before the tail step, σ_P has
 Real-world basis: WETH's invariant maintenance preserves C's code
 identity through value-debit and CREATE-derivation rules.
 
+> Both `sd_excl` and `dead_at_σP` are caller-supplied hypotheses
+> today. The framework's paused Phase A — see "Open work" in
+> [`EVMYulLean/FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)
+> — would internalise both by adding a fourth conjunct
+> (substate-level SD-set tracking) to the at-C frame predicates.
+> The leaf infrastructure landed; the parallel rewrite of the
+> closure proofs that would tie it together is the part that
+> stalled.
+
 #### `inv_at_σP : WethInvAtσP ...`
 
 In English: **the post-Θ/Λ-dispatch state σ_P satisfies WETH's

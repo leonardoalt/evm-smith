@@ -234,7 +234,12 @@ Five in `MutualFrame.lean` likewise: `applyPrecompile_bundled`,
 - ~17 commits to `MutualFrame.lean`.
 - ~5 commits to `StepShapes.lean` / `PcWalk.lean` / `StorageSum.lean`.
 - A handful of commits to `UpsilonFrame.lean`.
-- ~5000 LoC total framework infrastructure added.
+- ~3500 LoC of framework infrastructure added this session
+  (post-extraction). An earlier round of framework work landed
+  ~9000 LoC of balance-monotonicity infrastructure on top of
+  upstream; this session's additions sit alongside it as
+  account-presence preservation, the universal Ξ-preservation
+  result, strong shape lemmas, and storage-sum primitives.
 
 ## Framework-side reusability
 

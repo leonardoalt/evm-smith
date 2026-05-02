@@ -374,14 +374,16 @@ statements**, not Solidity, not bytecode, not test results.
 There are three cost categories, in decreasing order of reusability:
 
 **Generic framework infrastructure** (reusable by *any* future EVM
-bytecode proof, regardless of invariant shape): ~5000 lines of new
-Lean added to EVMYulLean. This is the most amortizable layer —
-mutual induction proofs of Ξ/Θ/Λ/X properties (account-presence
-preservation, accountMap-preservation strong shape lemmas, the
-universal Ξ-preservation result, generic Υ-tail helpers, pres-step
-variants for invariant-aware Reachable closures). None of it is
-WETH-specific. A second contract proof on the same framework
-inherits all of it for free.
+bytecode proof, regardless of invariant shape): ~3500 lines of new
+Lean added to EVMYulLean's `EvmYul/Frame/` tree this session,
+sitting on top of an earlier ~9000-line balance-monotonicity chain.
+This is the most amortizable layer — mutual induction proofs of
+Ξ/Θ/Λ/X properties (account-presence preservation,
+accountMap-preservation strong shape lemmas, the universal
+Ξ-preservation result, generic Υ-tail helpers, pres-step variants
+for invariant-aware Reachable closures). None of it is WETH-specific.
+A second contract proof on the same framework inherits all of it
+for free.
 
 **Relational-invariant closure** (reusable by future proofs of the
 same `S ≤ β` shape, *and* generalisable): ~5400 lines of Lean in
@@ -400,12 +402,19 @@ AccountAddress → Prop`. We deliberately deferred that
 parameterisation: premature with one consumer, a small refactor
 once a second consumer establishes the pattern.
 
-**WETH-specific** (the per-contract proof): ~3000 lines of Lean —
-the bytecode-trace predicate, ~61 per-PC walks, the cascade
-threading through deposit and withdraw, the dischargers for each
-cascade-fact predicate, the headline theorem composition.
+**WETH-specific** (the per-contract proof): ~6800 lines of Lean —
+dominated by `BytecodeFrame.lean` (~6000 lines: 61 per-PC walks
+through the bytecode trace, plus cascade threading for the deposit
+and withdraw blocks and dischargers for each cascade-fact
+predicate), with `Solvency.lean` (~380 lines: the headline theorem
+composition + assumptions bundle), `Invariant.lean` (~160 lines:
+the `WethInv` abbreviation + transit lemmas), and `Program.lean`
+(~200 lines: the bytecode definition + the symbolic block-list
+forms used by the walk).
 
-So for *this* 86-byte contract: ~3000 lines of WETH-specific proof.
+So for *this* 86-byte contract: ~6800 lines of WETH-specific proof,
+roughly 80 lines of Lean per byte of bytecode (heavily front-loaded
+in the per-PC walk machinery).
 For a *future* contract with WETH-style solvency on the same
 framework: dominated by bytecode-specific cascade threading and
 per-PC walks — likely a few hundred lines of Lean per hundred bytes
