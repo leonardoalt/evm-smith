@@ -166,9 +166,18 @@ Except _ EVM.State`.
   bytes of `a + b + c`) go through `ffi.ByteArray.zeroes`, which is
   `opaque`. Proofs that need it would require an axiomatized
   round-trip lemma.
-- **Storage slot-level claims need `LawfulOrd UInt256`** (not
-  registered) and **`Batteries.RBMap.find?_erase_*` lemmas** (don't
-  exist upstream). Account-map-level claims are the workaround.
+- **Upstream Batteries gaps for storage-slot reasoning** — the
+  derived `Ord UInt256` doesn't carry `LawfulOrd`, and Batteries has
+  no `find?_erase_*` lemmas on `RBMap`. We register the needed
+  `OrientedCmp`/`TransCmp`/`ReflCmp` instances locally
+  (`EvmSmith/Lemmas/UInt256Order.lean`) and proved
+  `find?_erase_ne` plus a list-level erase characterisation
+  directly through `RBNode.del`
+  (`EvmSmith/Lemmas/BalanceOf.lean`, `Lemmas/RBMapSum.lean`,
+  `EVMYulLean/EvmYul/Frame/StorageSum.lean`). Storage-sum reasoning
+  works (the WETH solvency proof depends on it). See
+  `.claude/batteries-wishlist.md` for the upstream PRs that would
+  let us delete these workarounds.
 - **Partial correctness, not termination.** Theorems claim safety on
   successful runs (`Υ` returns `.ok`); failure paths (out-of-gas,
   REVERT, invalid opcode) leave the conclusion vacuous
