@@ -21,3 +21,7 @@ lean_exe «register-dump-bytecode» where
 
 lean_exe «weth-dump-bytecode» where
   root := `EvmSmith.Demos.Weth.DumpBytecode
+
+lean_exe «weth-call-graph» where
+  root := `EvmSmith.Demos.Weth.CallGraph
+  supportInterpreter := true
