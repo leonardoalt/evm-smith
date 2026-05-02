@@ -8,14 +8,20 @@ This module is the thin core of the framework. It gives you:
 
 * `mkState` — build a fresh `EVM.State` with an initial stack.
 * `withCalldata` — set the calldata on any state.
+* `withSelfAccount` — install a default account at `codeOwner` so
+  SSTORE has a target (without it SSTORE silently no-ops).
 * `runOp` / `runOpFull` — execute a single opcode (pure-semantics / full driver).
 * `Program`, `runSeq` — sequence multiple opcodes.
 * `topOf`, `stackOf` — small lenses for inspecting a post-state.
+* `addressSlot`, `storageAt` — helpers for inspecting account storage
+  (matches the EVM's "empty = 0" convention).
 
 The intended use: write an EVM bytecode program as a `Program` value, run it
 against an `EVM.State` to demonstrate behavior, and state/prove safety
 properties against the upstream semantics from `NethermindEth/EVMYulLean`.
-See `EvmSmith/Add3.lean` + `EvmSmith/Add3Proofs.lean` for a worked example.
+See `EvmSmith/Demos/Add3/` for a single-block worked example;
+`EvmSmith/Demos/Register/` and `EvmSmith/Demos/Weth/` for full
+cross-transaction proofs via the EVMYulLean Frame library.
 -/
 
 namespace EvmSmith

@@ -108,8 +108,8 @@ lemma runOp_caller
 
     This lemma is purely mechanical — it says "the post-state is the
     input with `toState` run through `sstore`." Characterising what
-    `sstore` actually does to `accountMap` is the job of the helper
-    lemmas below (`sstore_writes_slot`, etc.). -/
+    `sstore` actually does to `accountMap` is the job of
+    `sstore_accountMap` below. -/
 lemma runOp_sstore
     (s : EVM.State) (key val : UInt256) (rest : Stack UInt256) (pc : UInt256) :
     runOp .SSTORE { s with stack := key :: val :: rest, pc := pc }
