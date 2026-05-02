@@ -106,17 +106,21 @@ has mutated fields other than stack/pc. Some patterns worth knowing:
   some acc` as a hypothesis. The Foundry test harness satisfies this
   trivially by calling `vm.etch` on the code-owner address.
 
-- **Prefer account-level statements over slot-level.** For storage
-  programs, a theorem like
+- **Prefer account-level statements over slot-level when you can.**
+  For storage programs, a theorem like
   "`(postState s0 x).accountMap.find? codeOwner = some
-  (acc.updateStorage sender x)`" is **cleanly provable** with the
-  existing Batteries API (via `sstore_accountMap` from
-  `EvmSmith.Lemmas` + `find?_insert_of_eq`). A surface-level restatement
-  "`storageAt postState codeOwner (addressSlot sender) = x`" requires
-  `Std.LawfulOrd UInt256` (not registered anywhere) plus RBMap `erase`
-  lemmas (missing from Batteries). Stick to account-level claims unless
-  you're prepared to prove the infrastructure; see
-  `.claude/batteries-wishlist.md` for what's needed upstream.
+  (acc.updateStorage sender x)`" is the cleanest shape — provable
+  via `sstore_accountMap` from `EvmSmith.Lemmas` +
+  `find?_insert_of_eq`. Slot-level restatements
+  ("`storageAt postState codeOwner (addressSlot sender) = x`") need
+  `TransCmp UInt256` (registered in `EvmSmith/Lemmas/UInt256Order.lean`)
+  plus the local erase-lemma workarounds in
+  `EvmSmith/Lemmas/RBMapSum.lean` and
+  `EVMYulLean/EvmYul/Frame/StorageSum.lean`. Both are imported
+  transitively via `EvmSmith.Lemmas`; WETH's storage-sum invariant
+  (`Σ storage[sender] ≤ balance`) is the worked example. See
+  `.claude/batteries-wishlist.md` for the upstream gaps these
+  workarounds plug.
 
 - **`storageAt` helper** in `EvmSmith/Framework.lean` gives a safe
   `.find? a |>.elim ⟨0⟩ (·.storage.findD k ⟨0⟩)` lookup that matches
@@ -129,8 +133,13 @@ has mutated fields other than stack/pc. Some patterns worth knowing:
   that substate *does* change, so no one accidentally strengthens the
   theorem to `sf.toState = s0.toState`.
 
-- **See the worked example** at `EvmSmith/Demos/Register/Proofs.lean`
-  for the full pattern.
+- **See the worked examples** at `EvmSmith/Demos/Add3/Proofs.lean`
+  (single-block arithmetic correctness via `runSeq` fusion) and
+  `EvmSmith/Demos/DemoProofs.lean` (per-opcode safety theorems) for
+  the full pattern. For a `runSeq`-level *post-state* claim (rather
+  than a stack-only claim), the closest reference is the
+  per-PC bytecode walks in `EvmSmith/Demos/Register/BytecodeFrame.lean`
+  and `EvmSmith/Demos/Weth/BytecodeFrame.lean`.
 
 ## Minimum-hypotheses principle
 

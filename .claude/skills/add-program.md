@@ -70,7 +70,7 @@ The worked example is `EvmSmith/Demos/Add3/Program.lean`. Copy its shape.
    ```
 
 5. **Optional: add a `#guard` structural check** in
-   `EvmSmith/Tests/Guards.lean`:
+   `EvmSmith/Demos/Tests.lean`:
    ```lean
    #guard EvmSmith.<Name>.program.length == <expected>
    #guard EvmSmith.<Name>.bytecode.size == <expected>

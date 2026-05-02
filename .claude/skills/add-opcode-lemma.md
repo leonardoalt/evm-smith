@@ -22,8 +22,7 @@ single concrete opcode works by iota, but chaining many unfolds in a
 row hits `deterministic timeout at whnf`. The lemmas pre-compute each
 branch so downstream proofs use `rw` (cheap) instead of re-reducing
 (expensive). See the in-file header of `EvmSmith/Lemmas.lean` for the
-full rationale and `EVMYulLean/UPSTREAM_WISHLIST.md` for upstream fixes
-that would remove the need for these lemmas entirely.
+full rationale.
 
 ## Template
 

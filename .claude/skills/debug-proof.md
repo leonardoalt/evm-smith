@@ -110,17 +110,17 @@ structural wrapper with derived `Ord`.
 - **If the key type is `AccountAddress`** (`= Fin 2^160` via abbrev),
   you're fine — `LawfulOrd (Fin n)` from Batteries applies. Use
   `Std.ReflCmp.compare_self` and `Std.LawfulEqCmp.eq_of_compare` freely.
-- **If the key type is `UInt256`**, you're stuck until a `LawfulOrd
-  UInt256` instance exists. Short-term workaround: restate the
-  theorem at a level that doesn't need the typeclass — e.g.
-  reason about `accountMap.find? codeOwner = some (acc.updateStorage
-  ...)` rather than `storage.findD key d = val`. The first uses the
-  account-map-level RBMap (keyed on `AccountAddress`, which has
-  LawfulOrd); the second uses the storage-level RBMap (keyed on
-  `UInt256`, which doesn't). See
-  `EvmSmith/Demos/Register/Proofs.lean` for a program-proof that
-  avoids the issue by staying at the account-map level, and
-  `.claude/batteries-wishlist.md` for the upstream fix.
+- **If the key type is `UInt256`**, the local
+  `EvmSmith/Lemmas/UInt256Order.lean` registers
+  `OrientedCmp`/`TransCmp`/`ReflCmp` for
+  `compare : UInt256 → UInt256 → Ordering` (no `LawfulOrd` per se,
+  but `TransCmp` is what `RBMap` actually requires). Make sure that
+  module is imported (transitively via `EvmSmith.Lemmas`). For the
+  storage-sum case (used by WETH solvency), see
+  `EvmSmith/Lemmas/RBMapSum.lean` and
+  `EVMYulLean/EvmYul/Frame/StorageSum.lean`.
+  See `.claude/batteries-wishlist.md` for the upstream fix that
+  would let us delete these locals.
 
 ## Symptom: `sorry` on `RBMap.erase`-involving goals
 
@@ -131,11 +131,18 @@ routes through `storage.erase k` (the EVM convention that writing
 zero to a slot erases it), any theorem about `SSTORE` with `x = 0`
 needs these lemmas.
 
-**Fix.** Either:
+**Fix.** Use the local workarounds:
 
-- Restrict the theorem to `x ≠ 0` (drops the erase branch); or
-- Avoid slot-level reasoning and state the theorem at the
-  account-map level via `accountMap.find?` + `Account.updateStorage`.
+- For `AccountMap`-level erase reasoning (e.g. address-keyed),
+  `EvmSmith/Lemmas/BalanceOf.lean :: find?_erase_ne` is proven
+  directly through `RBNode.del`.
+- For storage-sum reasoning (`UInt256`-keyed), the list-level erase
+  characterisation lives in `EvmSmith/Lemmas/RBMapSum.lean ::
+  del_toList_filter` and the storage-side mirror in
+  `EVMYulLean/EvmYul/Frame/StorageSum.lean`. WETH's solvency proof
+  (`Σ storage[sender] ≤ balance`) depends on these.
+- If your theorem doesn't need the erase branch, the simplest fix
+  is to restrict to `x ≠ 0` and drop it.
 
 ## Symptom: can't prove a byte-level property (e.g. `H_return = (a+b+c).toByteArray`)
 
@@ -165,7 +172,9 @@ adjust the chain.
 
 If the problem is structural — the opcode's semantics are more
 complex than `unfold; rfl` can handle (e.g. `CALL`, `CREATE`,
-`KECCAK256`, anything involving account-map mutation or cryptography)
-— it may not be provable with the current machinery. Check
-`EVMYulLean/UPSTREAM_WISHLIST.md` for context on what's currently
-possible.
+`KECCAK256`, anything involving account-map mutation or
+cryptography) — switch to the Frame library: see
+`EVMYulLean/FRAME_LIBRARY.md` for the per-step shape lemmas and
+PC-walk wrappers, and the `/prove-balance-invariant` skill for the
+end-to-end pattern. Register's `BalanceMono.lean` and WETH's
+`Solvency.lean` are the worked examples.

@@ -24,26 +24,20 @@ skill instead — it covers the Foundry wiring as part of the scaffold.
 
 ## How
 
-For `add3` specifically:
-
 ```bash
-lake exe add3-dump-bytecode
+lake exe add3-dump-bytecode      # → EvmSmith/Demos/Add3/foundry/test/Add3.bytecode.hex
+lake exe register-dump-bytecode  # → EvmSmith/Demos/Register/foundry/test/Register.bytecode.hex
+lake exe weth-dump-bytecode      # → EvmSmith/Demos/Weth/foundry/test/Weth.bytecode.hex
 ```
 
-This writes `EvmSmith/Demos/Add3/foundry/test/Add3.bytecode.hex`.
-Commit the updated file alongside the `Program.lean` edit.
-
-For other programs (when we have them), the pattern will be:
-
-```bash
-lake exe <program>-dump-bytecode
-```
-
-Check `lakefile.lean` for the exact exe names.
+Run the one matching the program you edited. Commit the updated hex
+file alongside the `Program.lean` edit. When adding a *new* program,
+register a new exe target in `lakefile.lean` following the existing
+shape.
 
 ## What else to update
 
-- **`EvmSmith/Tests/Guards.lean`** — if the byte length changed, the
+- **`EvmSmith/Demos/Tests.lean`** — if the byte length changed, the
   `#guard EvmSmith.<Name>.bytecode.size == <n>` assertion will fire
   and needs its `<n>` updated to match.
 - **Foundry test file** — if the semantics of the program changed, the
