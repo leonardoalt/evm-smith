@@ -9,8 +9,7 @@ import EvmSmith.Demos.Weth.BytecodeFrame
 Weth contract at `C` remains solvent: the sum of user-balance storage
 slots is at most `C`'s ETH balance.
 
-This file mirrors `EvmSmith/Demos/Register/BalanceMono.lean`'s
-composition pattern. Like Register, Weth's top-level proof composes:
+The top-level proof composes:
 
 * `Υ_invariant_preserved` (§1.3, in `EVMYulLean/EvmYul/Frame/UpsilonFrame.lean`),
   the framework's transaction-level invariant-preservation theorem
@@ -21,37 +20,36 @@ composition pattern. Like Register, Weth's top-level proof composes:
 ## Hypotheses (`WethAssumptions`, 5 fields)
 
 The boundary hypotheses (`hWF`, `hS_T`, `hBen`, `hValid`, `hInv`)
-are the same shape as Register's `register_balance_mono`. The Weth
-analogues of Register's `RegSDExclusion` / `RegDeadAtσP`, plus the
-two Weth-specific structural facts, are bundled in `WethAssumptions`:
+are the standard transaction-level shape (state well-formedness,
+`C ≠ S_T`, `C ≠ H.beneficiary`, tx validity, the entry-state
+invariant). The contract-specific structural facts are bundled in
+`WethAssumptions`:
 
 1. **`deployed : DeployedAtC C`** — Weth's bytecode is installed at
    `C`. Real world: genesis-deployment + Weth bytecode contains no
    CREATE/CREATE2/SELFDESTRUCT, so `C`'s code is preserved across
-   any sub-frame (mirror of Register's `DeployedAtC`).
+   any sub-frame.
 
 2. **`sd_excl : WethSDExclusion …`** — no SELFDESTRUCT in the call
    tree adds `C` to the final substate's selfDestructSet. Holds
    because Weth's bytecode contains no SELFDESTRUCT and SELFDESTRUCT
    only inserts the executing-frame address `Iₐ` into the SD-set,
    which by `DeployedAtC` is `≠ C` whenever the code at that address
-   is not Weth's. Same shape as `RegSDExclusion`.
+   is not Weth's.
 
 3. **`dead_at_σP : WethDeadAtσP …`** — `C`'s account in σ_P (the
    post-Θ/Λ state) has non-empty code (Weth's bytecode), so
    `State.dead σ_P C = false`. Holds because `WethInv σ C` (which
    provides the bytecode identity) is preserved through the
    value-debit at `S_T ≠ C` and `lambda_derived_address_ne_C` rules
-   out CREATE-derivation of `C`. Same shape as `RegDeadAtσP`.
+   out CREATE-derivation of `C`.
 
 4. **`inv_at_σP : WethInvAtσP …`** — σ_P (Υ's post-Θ/Λ-dispatch
    state) preserves the relational solvency invariant
-   `storageSum σ_P C ≤ balanceOf σ_P C`. Mirror of Register's
-   `σ_to_σP_balance_mono_Θ`/`Λ` chain, but for the relational
-   invariant. Discharging from Lean requires exposed
-   `Θ_invariant_preserved` / `Λ_invariant_preserved` framework
-   theorems (currently private inside MutualFrame.lean); bundled
-   here as a structural hypothesis.
+   `storageSum σ_P C ≤ balanceOf σ_P C`. Discharging from Lean
+   requires exposed `Θ_invariant_preserved` /
+   `Λ_invariant_preserved` framework theorems (currently private
+   inside MutualFrame.lean); bundled here as a structural hypothesis.
 
 5. **`call_no_wrap : WethCallNoWrapAt72 C`** — at PC 72 (the
    withdraw block's outbound CALL), `recipient_balance + value` does
@@ -72,7 +70,7 @@ the live `WethAssumptions` structure below).
 The body decomposition existence (`σ' = Υ_tail_state σ_P g' A …`)
 is **NOT** a structural hypothesis — it is derived mechanically
 inline by `weth_Υ_body_factors` from inspecting Υ's `.ok` output
-shape, exactly as in Register's `register_Υ_body_factors`.
+shape.
 
 ## Top-level theorem composition
 
@@ -88,12 +86,11 @@ open EvmYul EvmYul.EVM EvmYul.Frame
 /-! ## §2.6 — Structural hypothesis bundle for Weth
 
 Each entry below is a `Prop` capturing a real-world structural fact
-about Weth's run. They mirror `EvmSmith/Demos/Register/BalanceMono`
-(Register's `RegSDExclusion`/`RegDeadAtσP`) in posture: stated on
-Υ's `.ok` output, vacuous on `.error`. -/
+about Weth's run. They are stated on Υ's `.ok` output and are vacuous
+on `.error`. -/
 
 /-- Hypothesis on Υ's run output: the resulting substate's
-self-destruct set excludes `C`. Mirror of Register's `RegSDExclusion`. -/
+self-destruct set excludes `C`. -/
 def WethSDExclusion (σ : AccountMap .EVM) (fuel H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
     (S_T C : AccountAddress) : Prop :=
@@ -103,7 +100,7 @@ def WethSDExclusion (σ : AccountMap .EVM) (fuel H_f : ℕ)
 
 /-- Hypothesis on Υ's body factorisation: every post-dispatch state
 σ_P that decomposes Υ's output via the tail-state form satisfies
-`State.dead σ_P C = false`. Mirror of Register's `RegDeadAtσP`. -/
+`State.dead σ_P C = false`. -/
 def WethDeadAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
     (S_T C : AccountAddress) : Prop :=
@@ -115,8 +112,7 @@ def WethDeadAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
   | _ => True
 
 /-- Hypothesis: σ_P (Υ's post-Θ/Λ-dispatch state) preserves Weth's
-solvency invariant. This is the σ-to-σ_P propagation step, analogous
-to Register's `σ_to_σP_balance_mono_Θ`/`Λ` chain but for the
+solvency invariant. This is the σ-to-σ_P propagation step for the
 relational `storageSum ≤ balanceOf` invariant.
 
 Discharging inside Lean requires exposed
@@ -134,11 +130,10 @@ def WethInvAtσP (σ : AccountMap .EVM) (fuel H_f : ℕ)
   | _ => True
 
 /-- **Weth assumptions bundle.** Packages the structural hypotheses
-for the top-level solvency theorem.
+for the top-level solvency theorem:
 
-Mirror of Register's `(hDeployed, hSDExcl, hDeadAtσP)` triple, with
-Weth-specific additions:
-
+* `deployed`, `sd_excl`, `dead_at_σP` — standard
+  deployment/SD-set/dead-account boundary facts.
 * `inv_at_σP` — σ_P preserves the invariant.
 * `pc40_cascade`, `pc60_cascade`, `pc72_cascade` — the per-PC
   cascade-fact predicates (in `BytecodeFrame.lean`) capturing the
@@ -234,17 +229,12 @@ structure WethAssumptions
 
 The framework's `Υ_invariant_preserved` consumes `ΥTailInvariant` and
 `ΥBodyFactorsInvariant`. We project the `WethAssumptions` bundle into
-those predicates.
-
-Mirror of Register's `register_Υ_tail_invariant` /
-`register_Υ_body_factors`. -/
+those predicates. -/
 
 /-- Project the `WethSDExclusion` structural hypothesis to the
 framework's `ΥTailInvariant`. The dead-filter clause is discharged
 trivially: `k ∈ filter (dead σ_F ·)` implies `dead σ_F k = true`,
-contradicting `dead σ_F C = false`.
-
-Mirror of Register's `register_Υ_tail_invariant`. -/
+contradicting `dead σ_F C = false`. -/
 private theorem weth_Υ_tail_invariant
     (σ : AccountMap .EVM) (fuel H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
@@ -267,10 +257,10 @@ private theorem weth_Υ_tail_invariant
 /-- Project the `WethDeadAtσP` + `WethInvAtσP` hypotheses to the
 framework's `ΥBodyFactorsInvariant`.
 
-Mirror of Register's `register_Υ_body_factors`. The body decomposition
-existence (`σ' = Υ_tail_state σ_P g' …`) is derived mechanically by
-inspecting Υ's `.ok` output structure — it's syntactically a `do
-(σ_P, g', A, z) ← Θ/Λ-dispatch σ₀; .ok (Υ_tail_state …, A, z, _)`. -/
+The body decomposition existence (`σ' = Υ_tail_state σ_P g' …`) is
+derived mechanically by inspecting Υ's `.ok` output structure — it's
+syntactically a `do (σ_P, g', A, z) ← Θ/Λ-dispatch σ₀; .ok
+(Υ_tail_state …, A, z, _)`. -/
 private theorem weth_Υ_body_factors
     (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
     (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
@@ -312,7 +302,7 @@ private theorem weth_Υ_body_factors
 
 /-! ## Top-level solvency theorem
 
-The headline result. Mirror of Register's `register_balance_mono`. -/
+The headline result. -/
 
 /-- **Weth solvency: the contract is always solvent across any
 transaction.**
@@ -322,10 +312,10 @@ Given:
 * `hInv`          — pre-state invariant (`storageSum σ C ≤
                     balanceOf σ C`).
 * `hS_T`          — `C` is not the transaction sender.
-* `hBen`          — `C` is not the block beneficiary (kept for
-                    parity with Register; the invariant chain doesn't
-                    actually require it for the storage-sum side, but
-                    `Υ_tail_balanceOf_ge`'s β-side does).
+* `hBen`          — `C` is not the block beneficiary. The invariant
+                    chain doesn't strictly require this for the
+                    storage-sum side, but `Υ_tail_balanceOf_ge`'s
+                    β-side does, so it's threaded through.
 * `hValid`        — strengthened transaction-validity (sender funds
                     cover gasLimit·p + value).
 * `hAssumptions`  — the `WethAssumptions` bundle (deployed code,

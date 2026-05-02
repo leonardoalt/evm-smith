@@ -5,10 +5,10 @@ import EvmSmith.Lemmas.RBMapSum
 /-!
 # Weth — bytecode-specific Ξ preservation (B2 / §2.x)
 
-This file is the Weth analogue of Register's `BytecodeFrame.lean`. It
-collects the Weth-specific lemmas needed to discharge the Ξ closure
-obligations consumed by `ΞPreservesInvariantAtC_of_Reachable_general`
-(§H.2's entry point) for Weth's bytecode.
+This file collects the Weth-specific lemmas needed to discharge the
+Ξ closure obligations consumed by
+`ΞPreservesInvariantAtC_of_Reachable_general` (§H.2's entry point)
+for Weth's bytecode.
 
 §2.3a: `weth_caller_ne_C` (state-local form).
 
@@ -2746,9 +2746,9 @@ private theorem WethTrace_step_at_83_len2
 
 /-! ## Closure obligation: initial state
 
-Mirrors Register's `RegisterTrace_initial`: the initial Weth-execution
-state (pc = 0, empty stack) lies in `WethTrace`, given the
-deployment-pinned code-identity witness `DeployedAtC`. -/
+The initial Weth-execution state (pc = 0, empty stack) lies in
+`WethTrace`, given the deployment-pinned code-identity witness
+`DeployedAtC`. -/
 
 /-- **Weth-context code-identity hypothesis.**
 
@@ -2762,9 +2762,7 @@ runs Weth's bytecode. Real-world tx contexts satisfy this when:
     excludes nested `CREATE`/`CREATE2` from any other contract producing
     address `C`.
   * Weth's bytecode contains no `SELFDESTRUCT`, so `C`'s account is
-    never erased (which would otherwise reset its code to empty).
-
-Mirror of Register's `DeployedAtC` predicate. -/
+    never erased (which would otherwise reset its code to empty). -/
 def DeployedAtC (C : AccountAddress) : Prop :=
   ∀ I : ExecutionEnv .EVM, I.codeOwner = C → I.code = bytecode
 
@@ -3942,13 +3940,10 @@ storage facts that PC 60's bytecode walk establishes:
 * the slot's pre-storage value is `oldVal`;
 * `newVal.toNat ≤ oldVal.toNat` (from PC 51 LT + PC 55 JUMPI not-taken).
 
-The §H.2 walk lands exactly on this shape; the missing piece for
-in-Lean discharge is exposing these per-state facts in `WethReachable`
-at PC 60 (see `SOLVENCY_PLAN.md`'s trace-extension roadmap).
-
-Until trace extension lands, this lemma is the closed-form template
-that the eventual discharger composes; it is ready-to-call once the
-trace exposes the prerequisite facts. -/
+The §H.2 walk lands exactly on this shape; the in-Lean discharge
+exposes the per-state facts in `WethReachable` at PC 60 via the
+`WethReachable_pc60_cascade` disjunct, which `weth_pc60_cascade`
+projects to feed this lemma. -/
 theorem WethSStorePreserves_PC60_decr
     (C : AccountAddress) (s s' : EVM.State) (f' cost : ℕ)
     (arg : Option (UInt256 × Nat))

@@ -316,10 +316,10 @@ structure WethAssumptions ... : Prop where
   call_no_wrap     : WethCallNoWrapAt72 C
 ```
 
-### Register-shape facts (4) — accepted posture
+### Standard boundary facts (4)
 
-These mirror the simpler Register contract's accepted posture; the
-user accepted them in that proof.
+These are the standard real-world / chain-state hypotheses any
+single-contract proof of this shape needs.
 
 #### `deployed : DeployedAtC C`
 
@@ -353,9 +353,9 @@ identity through value-debit and CREATE-derivation rules.
 In English: **the post-Θ/Λ-dispatch state σ_P satisfies WETH's
 invariant** — `storageSum σ_P C ≤ balanceOf σ_P C`.
 
-Real-world basis: this is the σ-to-σ_P propagation step (analogous to
-Register's). Discharging from Lean requires exposed
-`Θ_invariant_preserved` / `Λ_invariant_preserved` framework theorems.
+Real-world basis: this is the σ-to-σ_P propagation step.
+Discharging from Lean requires exposed `Θ_invariant_preserved` /
+`Λ_invariant_preserved` framework theorems.
 
 ### Genuinely irreducible chain bound (1)
 
@@ -371,9 +371,9 @@ WETH's bytecode or from EVM semantics alone. It's a fact about
 chain-state bounds.
 
 This is the only assumption in `WethAssumptions` that's specific to
-WETH (versus shared with Register): WETH's `withdraw` does an
-external CALL with non-zero value, while Register only does
-zero-value internal storage updates.
+the contract's behaviour: WETH's `withdraw` does an external CALL
+with non-zero value, so we need a chain-state bound on what
+arithmetic that CALL can perform.
 
 ## Trust boundary
 
@@ -385,7 +385,7 @@ To trust the WETH solvency theorem, you trust:
    T5) marking deferred parts of the spec; otherwise it's a
    first-principles formalization.
 3. **The 5 `WethAssumptions` fields** — 4 standard
-   transaction-boundary facts (Register-shape) + 1 chain-state bound.
+   transaction-boundary facts + 1 chain-state bound.
 
 That's it. There are zero opaque "the bytecode does what we think it
 does" predicates left.

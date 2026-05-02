@@ -10,12 +10,13 @@ import EvmSmith.Demos.Weth.Program
 
 i.e. the contract's ETH balance is at least as large as the sum of
 all users' token balances tracked in storage. We package it together
-with the deployment-pinned code-identity in `RegInv`, the Weth
-analogue of Register's invariant bundle.
+with the deployment-pinned code-identity in `RegInv` (an inductive
+bundle of "the contract's invariant currently holds" + "the contract
+still has the right code installed").
 
-Unlike Register's bundle, `RegInv` has no monotone balance lower
-bound — Weth's withdraw block can decrease `balanceOf σ C`, so the
-right shape is the *relative* invariant
+Weth's invariant is *relational*, not a monotone lower bound — the
+withdraw block can decrease `balanceOf σ C`, so a "balance never
+decreases" claim wouldn't apply here. The right shape is
 `storageSum σ C ≤ balanceOf σ C`. The full §H mutual closure tracks
 the slack `balanceOf σ C − storageSum σ C` through the call tree.
 
@@ -33,8 +34,8 @@ the slack `balanceOf σ C − storageSum σ C` through the call tree.
   hypotheses ensure `C` is not the sender / miner / SD'd / dead).
 
 These transit lemmas are landed alongside §2.6's body factor + tail.
-This file establishes only the predicate definition + the `RegInv`
-bundle structure.
+This file establishes only the predicate definition + the bundle
+structure.
 -/
 
 namespace EvmSmith.Weth
@@ -45,23 +46,22 @@ user-balance storage slots. -/
 def WethInv (σ : AccountMap .EVM) (C : AccountAddress) : Prop :=
   storageSum σ C ≤ balanceOf σ C
 
-/-- The runtime code at address `C` is Weth's bytecode. Mirrors
-Register's `codeAt` for the Weth analogue of the deployment-pinned
-hypothesis. -/
+/-- The runtime code at address `C` is Weth's bytecode. The
+deployment-pinned code-identity hypothesis. -/
 def codeAt (σ : AccountMap .EVM) (C : AccountAddress) : Prop :=
   (σ.find? C).map (·.code) = some bytecode
 
-/-- The Weth inductive-invariant bundle.
+/-- The Weth inductive-invariant bundle: the relational solvency
+invariant, plus the deployment-pinned code identity.
 
-Mirror of `EvmSmith.Register.RegInv`, but tracking the *relative*
-solvency invariant rather than a monotone balance lower bound. The
-deployment-pinned code identity (`code`) is inductive: no step in the
-transaction deposits new code at `C` (ruled out by Keccak T5 +
-Weth's no-SELFDESTRUCT-in-bytecode property).
+The deployment-pinned code identity (`code`) is inductive: no step
+in the transaction deposits new code at `C` (ruled out by Keccak T5
++ Weth's no-SELFDESTRUCT-in-bytecode property).
 
 The SELFDESTRUCT exclusion `C ∉ A.selfDestructSet` is kept as a
-separate hypothesis (`WethSDExclusion`, see ASSUMPTIONS.md F1)
-rather than a `RegInv` conjunct — same posture as Register. -/
+separate hypothesis (`WethSDExclusion`, one of the 5 fields of
+`WethAssumptions` in `Solvency.lean`) rather than a bundle
+conjunct. -/
 structure RegInv (σ : AccountMap .EVM) (C : AccountAddress) : Prop where
   inv  : WethInv σ C
   code : codeAt σ C

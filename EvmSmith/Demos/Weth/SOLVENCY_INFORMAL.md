@@ -12,11 +12,10 @@ A stronger property — `balance == Σ tokens` — is *not* true in
 general, because external sources (SELFDESTRUCT-funded transfers,
 coinbase rewards, and `CREATE`-with-value to a CREATE-derived address
 that happens to equal `C`, the last excluded by Keccak T5) can
-inflate balance without increasing storage. Our session on Register
-already established this: external paths can bump `balance(C)` up but
-never down. So the right shape for Weth is the **`≥` form**.
+inflate balance without increasing storage. So the right shape is
+the **`≥` form**.
 
-We adopt the same vocabulary as the Register proof:
+Vocabulary used throughout:
 - `C` is Weth's deployment address.
 - `S_T` is the transaction sender.
 - Greek `Υ` is the transaction-level driver, `Θ` the message call
@@ -63,8 +62,8 @@ State transitions break into:
 
 ### Tx-level transitions (outside Ξ)
 
-Same reasoning as Register, just for the invariant rather than a
-lower bound:
+For each tx-level transition, neither `β(C)` nor storage at `C` is
+touched:
 
 * **Sender debit** (`σ₀ := σ.insert S_T {balance: balance - upfrontCost}`).
   `S_T ≠ C` (Weth is not the tx sender — it has no private key). So
@@ -237,19 +236,22 @@ The proof relies on:
 5. **Weth has no SELFDESTRUCT** in its bytecode — `decide` over the
    86 bytes. (Provable.)
 6. **The deposit and withdraw blocks balance their `Δβ` and `ΔS`
-   pointwise** — bytecode walk, à la Register's `RegisterTrace_step_preserves`.
+   pointwise** — discharged by a per-PC bytecode walk
+   (`WethTrace_step_preserves`).
 7. **C is not the tx sender**, **not the miner**, **not the
    transaction recipient at the tx level when the recipient is a
    non-Weth address**, etc. (Real-world boundary hypotheses.)
 
-The genuinely **new** machinery vs Register is:
+Three pieces are specific to the relational solvency shape (not
+shared with monotone-balance proofs):
+
 - A *relative* invariant `I = (β ≥ S)` rather than a monotone
   lower bound.
 - Storage-sum reasoning: the `S(σ) = Σ_a storageOf σ C (addressSlot a)`
   predicate and its preservation under SSTORE/insert/erase.
-- A non-zero-value CALL chain at the at-C step (handled in the
-  framework's `_inv_aware` slack-dispatch variant, see
+- A non-zero-value CALL chain at the at-C step, handled by the
+  framework's `_inv_aware` slack-dispatch variant (see
   [`REPORT_FRAMEWORK.md`](./REPORT_FRAMEWORK.md)).
 
-All three have since been implemented; the proof shipped — see
-[`REPORT_WETH.md`](./REPORT_WETH.md).
+The proof has shipped — see [`REPORT_WETH.md`](./REPORT_WETH.md) for
+the live conditional hypotheses and theorem statement.
