@@ -49,13 +49,13 @@ Lean proof of its correctness → `lake build` verifies both.
   wrapped-ETH token contract in raw bytecode. Function dispatch via
   4-byte selectors, JUMP/JUMPI/JUMPDEST control flow, SSTORE
   state-update before CALL (checks-effects-interactions). 86 bytes
-  of runtime. Lean proofs deferred (see `Proofs.lean`); Foundry
-  covers full end-to-end safety: 13 concrete/fuzz tests plus two
-  invariant tests (256×50 = 12800 transitions each) and an explicit
-  reentrancy test. Main safety claim: `Σ storage[sender] ≤
-  contract.balance`. The invariant-side blockers are now mostly
-  about Weth's own bytecode walk (the framework is closed); see
-  [`weth-invariant-blockers.md`](./.claude/weth-invariant-blockers.md).
+  of runtime. **The cross-transaction solvency invariant is proved**
+  in `Solvency.lean :: weth_solvency_invariant` — `Σ storage[sender]
+  ≤ contract.balance` after any single Ethereum transaction, under
+  arbitrary reentrancy, conditional on a 5-field `WethAssumptions`
+  bundle of structural facts (see [`REPORT_WETH.md`](./EvmSmith/Demos/Weth/REPORT_WETH.md)).
+  Foundry suite (15 tests, including invariant runs and an explicit
+  reentrancy test) lives in `Weth/foundry/`.
 
 ## Frame library — for proving cross-transaction / reentrancy-resistant invariants
 
@@ -113,9 +113,7 @@ The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills
   framework — new step shapes, new closure-frame conjuncts, bytecode-walk
   machinery — modifications belong there. Use `git -C EVMYulLean ...`
   for git ops; commit incrementally; push to the `fork` remote
-  (already configured). Modifications that should return to upstream
-  Nethermind/EVMYulLean are tracked in `EVMYulLean/UPSTREAM_WISHLIST.md`
-  (also gitignored).
+  (already configured).
 - **Do not commit `.lake/`, `EthereumTests/`, or `EVMYulLean/`.**
   They're in `.gitignore` for good reasons (build artifacts, empty
   workaround dir, external dep).
@@ -161,5 +159,4 @@ If the task is more than a small, local change — e.g. refactoring
 adding a new subdirectory structure — pause and check in with the
 human first. The existing design has specific justifications that
 are documented in-file (read the header docstrings of
-`Framework.lean` and `Lemmas.lean`) and in
-`EVMYulLean/UPSTREAM_WISHLIST.md`. Don't silently rework them.
+`Framework.lean` and `Lemmas.lean`). Don't silently rework them.

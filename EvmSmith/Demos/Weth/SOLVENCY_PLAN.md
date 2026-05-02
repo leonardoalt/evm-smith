@@ -1,4 +1,13 @@
-# Weth solvency invariant — Lean formalization plan (v2)
+# Weth solvency invariant — Lean formalization plan (v2, historical)
+
+> **Status:** historical. This was the pre-implementation plan. The
+> proof has since shipped — see [`REPORT_WETH.md`](./REPORT_WETH.md)
+> for the current state (sorry-free `weth_solvency_invariant`, 5
+> structural assumptions on a `WethAssumptions` bundle) and
+> [`REPORT_FRAMEWORK.md`](./REPORT_FRAMEWORK.md) for the framework
+> infrastructure that landed in EVMYulLean. The LoC estimates,
+> sequencing, and "new work needed" lists below describe what was
+> *anticipated*, not what was ultimately built.
 
 Maps the informal proof in `SOLVENCY_INFORMAL.md` onto our existing
 framework, identifies reusable pieces, and lists new work needed.

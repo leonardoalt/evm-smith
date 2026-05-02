@@ -64,7 +64,9 @@ updated hex file.
 
 - `../Program.lean` — assembly listing with PCs, dispatch layout,
   basic-block definitions, and the 86-byte `bytecode` value.
-- `../Proofs.lean` — status of Lean-side proofs (currently deferred
-  in favor of Foundry end-to-end coverage).
-- `.claude/weth-plan.md` — full design document with scope and
-  rationale.
+- `../Solvency.lean` — sorry-free `weth_solvency_invariant` headline
+  theorem (`Σ storage[sender] ≤ balanceOf σ' C` after any single
+  Ethereum transaction, conditional on a 5-field `WethAssumptions`
+  bundle).
+- `../REPORT_WETH.md` — end-to-end report on what's proved and what
+  the structural assumptions are.

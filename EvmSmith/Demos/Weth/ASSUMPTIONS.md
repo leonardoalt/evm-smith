@@ -1,4 +1,14 @@
-# Weth solvency proof — assumption list (for approval)
+# Weth solvency proof — assumption list (historical, for approval)
+
+> **Status (post-proof):** this document is the original assumption
+> list circulated for approval before the proof was implemented. The
+> assumption list it proposed was accepted, the proof shipped, and the
+> live conditional hypotheses on `weth_solvency_invariant` are now
+> documented in [`REPORT_WETH.md`](./REPORT_WETH.md) (see "What's
+> still assumed (5 fields)"). Read this file for *why* each
+> assumption was originally taken; read `REPORT_WETH.md` for what's
+> *currently* true. Some items below (notably the Phase A.2 / `(F)`
+> framework-gap items) have since been discharged.
 
 These are the practical real-world assumptions we'd take as
 hypotheses on `weth_solvency_invariant`. Each one is something a
@@ -21,7 +31,7 @@ These are *axioms* in `EVMYulLean/EvmYul/Frame/MutualFrame.lean` and
 remain unchanged.
 
 ### P1. T2 — precompile purity ☐
-> The 9 precompiles (ECREC, SHA256, RIPEMD160, IDENTITY, EXPMOD,
+> The 10 precompiles (ECREC, SHA256, RIPEMD160, IDENTITY, EXPMOD,
 > BN_ADD, BN_MUL, SNARKV, BLAKE2_F, plus the EIP-4844 point-eval)
 > do not modify the account map.
 
@@ -158,8 +168,7 @@ real Lean theorem in the formalization.
 
 * **Storage-sum primitives** (`StorageSum.lean`): `storageSum`,
   `storageSum_unchanged_at_other_account`, `storageSum_sstore_delta`.
-  Pure RBMap.foldl reasoning. Possibly leverages
-  `.claude/batteries-wishlist.md` items.
+  Pure RBMap.foldl reasoning.
 
 ### In Weth's directory (`EvmSmith/Demos/Weth/`)
 

@@ -9,16 +9,15 @@ import "forge-std/Test.sol";
 ///         `lake exe register-dump-bytecode` from
 ///         `../Program.lean :: bytecode`.
 ///
-///         The Lean proofs in `../Proofs.lean` establish:
-///         - `program_result`: exact structural post-state.
-///         - `program_updates_caller_account`: after the call the
-///           contract's account has `acc.updateStorage sender x` for
-///           the code owner.
-///         - `program_preserves_other_accounts`: addresses other
-///           than the code owner are untouched.
+///         The Lean side establishes the headline cross-transaction
+///         theorem `register_balance_mono` in `../BalanceMono.lean`:
+///         Register's balance is non-decreasing across any single
+///         Ethereum transaction, under arbitrary reentrancy. See
+///         `../BALANCE_MONOTONICITY.md` for the proof structure.
 ///
-///         These Foundry tests exercise the same properties
-///         end-to-end against a real `forge` EVM.
+///         These Foundry tests exercise the storage-update behavior
+///         end-to-end against a real `forge` EVM (complementary to
+///         the Lean proofs, not a substitute).
 contract RegisterTest is Test {
     address constant REGISTER =
         address(0x0000000000000000000000000000000000001337);

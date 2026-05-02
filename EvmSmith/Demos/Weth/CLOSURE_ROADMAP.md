@@ -1,8 +1,8 @@
 # Weth solvency proof — closure roadmap
 
 **State**: `weth_solvency_invariant` is a typed Lean theorem, build green,
-0 sorries. Conditional on `WethAssumptions` (6 fields: 4 Register-shape,
-2 genuinely irreducible real-world facts).
+0 sorries. Conditional on `WethAssumptions` (5 fields: 4 Register-shape,
+1 genuinely irreducible real-world fact).
 
 ## All bytecode-derivable / framework-coupled assumptions discharged
 
@@ -21,7 +21,7 @@ assumption** in `WethAssumptions` as theorems or via framework simplification:
 * `inv_at_initial` — eliminated by framework's inv-aware `hReachInit` exposing `WethInvFr σ C` directly.
 * `account_at_initial` — eliminated by dropping the structurally-unused `ΞPreservesInvariantAtC C` parameter from `Υ_invariant_preserved` (it was passed through to `Υ_output_invariant_preserves` as `_hWitness`, never consumed in the proof body).
 
-## Current `WethAssumptions` (6 fields)
+## Current `WethAssumptions` (5 fields)
 
 ```lean
 structure WethAssumptions ... : Prop where
@@ -30,8 +30,7 @@ structure WethAssumptions ... : Prop where
   sd_excl          : WethSDExclusion ...
   dead_at_σP       : WethDeadAtσP ...
   inv_at_σP        : WethInvAtσP ...
-  -- Narrow structural / real-world (2).
-  deposit_slack    : WethDepositPreCredit C
+  -- Narrow structural / real-world (1).
   call_no_wrap     : WethCallNoWrapAt72 C
 ```
 
@@ -43,7 +42,6 @@ structure WethAssumptions ... : Prop where
 | `sd_excl` | Register-shape, accepted | — |
 | `dead_at_σP` | Register-shape, accepted | — |
 | `inv_at_σP` | Register-shape, accepted | — |
-| `deposit_slack` | **Genuinely irreducible** | Υ-side Θ-pre-credit lift. Not bytecode-derivable. |
 | `call_no_wrap` | **Genuinely irreducible** | Chain-state real-world bound on balance + value. |
 
 ## Framework infrastructure landed this session
@@ -65,6 +63,6 @@ From a starting point of 3 opaque `Weth*CascadeFacts` predicates plus implicit f
 
 - **9 cascade-style and step-preservation theorems** in the Weth-side proof (replacing all opaque cascade-fact assumptions).
 - **~5000 LoC of framework infrastructure** in EVMYulLean, including the universal `Ξ_preserves_account_at_a_universal` theorem.
-- **`WethAssumptions` reduced from 7 (originally) to 6 fields** where 4 are Register-shape (accepted) and 2 are genuinely irreducible real-world facts.
+- **`WethAssumptions` reduced from 7 (originally) to 5 fields** where 4 are Register-shape (accepted) and 1 is a genuinely irreducible real-world fact.
 
-The headline `weth_solvency_invariant` theorem is unchanged. Its conditional hypotheses are now strictly partitioned: 4 Register-shape (accepted posture) and 2 real-world irreducible (`deposit_slack`, `call_no_wrap`). **Every bytecode-derivable and framework-coupled assumption has been discharged.**
+The headline `weth_solvency_invariant` theorem is unchanged. Its conditional hypotheses are now strictly partitioned: 4 Register-shape (accepted posture) and 1 real-world irreducible (`call_no_wrap`). **Every bytecode-derivable and framework-coupled assumption has been discharged.** The previous `deposit_slack : WethDepositPreCredit C` field has been eliminated by simplifying `Υ_invariant_preserved` to drop a structurally-unused `ΞPreservesInvariantAtC C` parameter.

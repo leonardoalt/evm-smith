@@ -82,11 +82,12 @@ All three are real-world structural assumptions:
 * **T2** is the standard "precompiles are pure" assumption.
 * **T5** is Keccak collision-resistance, the same assumption every
   Ethereum security argument relies on.
-* The Register-specific axiom is the deployment claim: at C, the
-  installed code is Register's, and nothing in the call tree can
-  overwrite it. This holds because Register's bytecode contains no
-  CREATE/CREATE2/SELFDESTRUCT and T5 excludes external contracts from
-  deriving address C.
+* The Register-specific deployment claim (`DeployedAtC C`, supplied
+  as a hypothesis — not an axiom) says: at C, the installed code is
+  Register's, and nothing in the call tree can overwrite it. This
+  holds because Register's bytecode contains no
+  CREATE/CREATE2/SELFDESTRUCT and T5 excludes external contracts
+  from deriving address C.
 
 In particular, **no axiom about Register's balance behaviour or stack
 contents** appears anywhere — those facts are all theorems.

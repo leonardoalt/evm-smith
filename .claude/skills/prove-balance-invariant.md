@@ -238,10 +238,20 @@ Step 5).
   arbitrary state injections**: the closure obligations exclude
   arbitrary universes. Don't try to make `Reachable` true for every
   state — make it true exactly for the bytecode-trace states.
-* **For non-zero-value CALLs**: the framework's at-C / v=0 chain
-  (`step_CALL_arm_at_C_v0`) doesn't apply directly. You'll need a
-  different invariant shape (relative bound, not monotonicity) or
-  framework extensions — see `GENERALIZATION_PLAN.md` Step 4.
+* **For non-zero-value CALLs with a relative invariant** (e.g.
+  `Σ storage[sender] ≤ balanceOf σ C`): the framework's at-C / v=0
+  chain (`step_CALL_arm_at_C_v0`) doesn't apply directly. Use the
+  `_inv_aware` slack-dispatch variant
+  (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
+  `MutualFrame.lean`), which exposes a per-step
+  `<YourInv> s.accountMap C` precondition to your `hReach_step`
+  callback so the bytecode walk can use the *current* invariant to
+  bound CALL value. **Worked example**:
+  `EvmSmith/Demos/Weth/Solvency.lean :: weth_solvency_invariant`
+  (sorry-free) — copy its `WethInvFr` / `WethReachable` /
+  `WethAssumptions` shape. See `EvmSmith/Demos/Weth/REPORT_WETH.md`
+  and `EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md` for the end-to-end
+  walkthrough.
 
 ## Extending the framework
 

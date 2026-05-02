@@ -1,66 +1,55 @@
-## Foundry
+# Foundry tests for the `Register` runtime bytecode
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+The `Register` contract is a 20-byte EVM program that reads one
+`uint256` from calldata, stores it at `storage[msg.sender]` (`SSTORE`
++ `CALLER`), then issues a `CALL` to `msg.sender` with `value = 0` —
+exposing reentrancy as part of the safety question.
 
-Foundry consists of:
+This test suite covers the storage-update behavior end-to-end against
+a real `forge` EVM:
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- `test_Register_writes_slot` — the calldata word lands at
+  `storage[sender]`.
+- `test_Register_isolates_senders` — distinct senders write to
+  distinct slots; storage is keyed by `msg.sender`.
+- `test_Register_overwrites` — a second call from the same sender
+  overwrites the previous slot value.
+- `test_Register_empty_calldata_stores_zero` — `CALLDATALOAD` on
+  empty calldata pushes 0.
+- `test_Register_zero_value_clears_slot` — writing `0` zeros the
+  slot.
+- `test_Register_one_sender_does_not_touch_another` — overwriting
+  one sender's slot leaves another sender's slot intact.
 
-## Documentation
+## Running
 
-https://book.getfoundry.sh/
+From this directory:
 
-## Usage
-
-### Build
-
-```shell
-$ forge build
+```bash
+forge test
 ```
 
-### Test
+Requires Foundry ≥ 1.0 on `PATH` and the `lib/forge-std` submodule
+initialised.
 
-```shell
-$ forge test
+## Bytecode provenance
+
+`test/Register.bytecode.hex` is generated from the Lean side by:
+
+```bash
+# from the repo root:
+lake exe register-dump-bytecode
 ```
 
-### Format
+Re-run whenever `Program.lean :: bytecode` changes; commit the
+updated hex file.
 
-```shell
-$ forge fmt
-```
+## See also
 
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+- `../Program.lean` — assembly listing with PCs and the 20-byte
+  `bytecode` value.
+- `../BalanceMono.lean` — sorry-free `register_balance_mono` headline
+  theorem (Register's balance is non-decreasing across any single
+  Ethereum transaction, under arbitrary reentrancy).
+- `../BALANCE_MONOTONICITY.md` — end-to-end walkthrough of the proof
+  structure.

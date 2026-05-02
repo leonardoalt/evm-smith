@@ -6,8 +6,9 @@ solvency proof.
 
 ## Repository
 
-- Path: `/home/leo/devel/evm-smith/EVMYulLean` (submodule).
-- Branch: `main`, ahead of origin by ~140 commits.
+- Submodule: `EVMYulLean/` (the `EvmYul/Frame/` subtree is where the
+  framework additions live).
+- Pinned to `leonardoalt/EVMYulLean@main`.
 
 ## Headline addition: universal `Ξ`-preservation theorem
 

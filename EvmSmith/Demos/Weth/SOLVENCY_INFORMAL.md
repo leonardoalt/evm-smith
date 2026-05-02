@@ -247,8 +247,9 @@ The genuinely **new** machinery vs Register is:
   lower bound.
 - Storage-sum reasoning: the `S(σ) = Σ_a storageOf σ C (addressSlot a)`
   predicate and its preservation under SSTORE/insert/erase.
-- A non-zero-value CALL chain at the at-C step, which our framework
-  doesn't yet support (Register's CALL had value=0).
+- A non-zero-value CALL chain at the at-C step (handled in the
+  framework's `_inv_aware` slack-dispatch variant, see
+  [`REPORT_FRAMEWORK.md`](./REPORT_FRAMEWORK.md)).
 
-The first two are framework extensions; the third is the open
-"Step 4" item in `GENERALIZATION_PLAN.md`.
+All three have since been implemented; the proof shipped — see
+[`REPORT_WETH.md`](./REPORT_WETH.md).

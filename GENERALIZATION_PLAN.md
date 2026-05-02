@@ -238,9 +238,18 @@ If the goal is to make the next contract's proof cheap:
    to one tactic invocation. Register's `RegisterTrace_step_preserves`
    was reworked to use these; net -77 LoC in `BytecodeFrame.lean`.
 
-4. **OPEN** (open-ended): support contracts with non-zero CALL value.
-   This requires a different at-C invariant and a different
-   `step_CALL_arm` chain. Substantial; not yet started.
+4. **DONE (for the relative-invariant shape)** — support contracts
+   whose at-C step emits a CALL with non-zero value. The framework's
+   `_inv_aware` slack-dispatch variant
+   (`ΞPreservesInvariantAtC_of_Reachable_general_call_slack_dispatch_inv_aware`,
+   `MutualFrame.lean`) exposes a per-step `WethInvFr s.accountMap C`
+   precondition to the consumer's `hReach_step` callback, so the
+   bytecode walk can use the *current* invariant to bound CALL value.
+   This is the load-bearing pivot used by WETH's solvency proof —
+   `weth_solvency_invariant` in `EvmSmith/Demos/Weth/Solvency.lean` is
+   sorry-free and handles a relative `(β ≥ S)` invariant under a
+   non-zero outbound CALL. See `EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md`
+   for the framework infrastructure that landed.
 
 5. **PARTIAL** (paused): strengthen `Θ_balanceOf_ge` / `Λ_balanceOf_ge`
    to expose substate-tracking + code-frame outputs, so
@@ -272,6 +281,19 @@ If the goal is to make the next contract's proof cheap:
 
 The first three lifts (DONE) reduce a Register-style proof to "fill
 in a ~250 LoC bytecode walk + declare two structural hypotheses".
-Step 4 broadens the scope to other invariant shapes; Step 5
-(remaining work) tightens the framework's ground assumptions by
-deriving the boundary hypotheses inside Lean.
+Step 4 (DONE) broadened the scope to relative invariants under
+non-zero outbound CALLs and was exercised by the WETH solvency
+proof. Step 5 (remaining work) tightens the framework's ground
+assumptions by deriving the boundary hypotheses inside Lean.
+
+## Second worked example
+
+WETH (`EvmSmith/Demos/Weth/`) is the second contract proven against
+the framework. Its solvency invariant `Σ storage[sender] ≤
+balanceOf σ' C` differs structurally from Register's monotonicity
+(relative, not monotone), exercises a non-zero outbound CALL at
+PC 72, and uses the `_inv_aware` slack dispatcher mentioned in
+Step 4. The full structural-fact bundle is documented in
+[`EvmSmith/Demos/Weth/REPORT_WETH.md`](./EvmSmith/Demos/Weth/REPORT_WETH.md);
+the framework additions in
+[`EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md`](./EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md).

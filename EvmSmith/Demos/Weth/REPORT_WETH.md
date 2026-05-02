@@ -3,14 +3,14 @@
 This report documents the WETH solvency proof, its main theorems and
 lemmas, and the remaining structural assumptions.
 
-## Repository
+## Files of interest
 
-- Path: `/home/leo/devel/evm-smith` (main).
-- Files of interest:
-  - `EvmSmith/Demos/Weth/Program.lean` — WETH bytecode + decode lemmas.
-  - `EvmSmith/Demos/Weth/Invariant.lean` — `WethInv` predicate.
-  - `EvmSmith/Demos/Weth/BytecodeFrame.lean` — trace/walks/cascade machinery.
-  - `EvmSmith/Demos/Weth/Solvency.lean` — top-level theorem.
+All paths are relative to the `evm-smith` repository root.
+
+- `EvmSmith/Demos/Weth/Program.lean` — WETH bytecode + decode lemmas.
+- `EvmSmith/Demos/Weth/Invariant.lean` — `WethInv` predicate.
+- `EvmSmith/Demos/Weth/BytecodeFrame.lean` — trace/walks/cascade machinery.
+- `EvmSmith/Demos/Weth/Solvency.lean` — top-level theorem.
 
 ## What WETH does (in 86 bytes)
 
