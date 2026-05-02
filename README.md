@@ -96,40 +96,26 @@ in the demo's own report (e.g.
 
 ## Building
 
-Clone the **`leonardoalt/EVMYulLean` fork** as a sibling directory:
+Clone with submodules:
 
 ```bash
-git clone https://github.com/leonardoalt/EVMYulLean.git
-```
-
-The fork's `main` branch is what this repo expects on disk; the
-NethermindEth upstream alone won't satisfy the imports. The fork's
-extra commits implement the Frame library
-([`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)).
-
-Then:
-
-```bash
+git clone --recursive https://github.com/leonardoalt/evm-smith.git
+cd evm-smith
 lake build
 ```
+
+(If you forgot `--recursive`, run `git submodule update --init --recursive`
+inside the repo to fetch them.)
+
+Submodules pulled:
+- `EVMYulLean/` — the [`leonardoalt/EVMYulLean`](https://github.com/leonardoalt/EVMYulLean) fork carrying the Frame library
+  ([`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)).
+  The NethermindEth upstream alone won't satisfy the imports.
+- Each demo's `foundry/lib/forge-std/` — for the Foundry test suites.
 
 First build is cold: toolchain download (~200 MB), Mathlib build, C
 crypto compile. Budget 10–30 minutes depending on network and CPU.
 Incremental builds are seconds.
-
-### One-time workaround
-
-The upstream's `extern_lib` target runs `git submodule update --init`
-for its `EthereumTests` directory when linking the native library.
-Because this project sits outside the upstream git repo, that command
-fails. Create an empty directory at the workspace root once:
-
-```bash
-mkdir -p EthereumTests
-```
-
-This is only needed for `lake exe` (which links the native lib).
-`lake build` alone does not require it.
 
 ## Using the framework
 

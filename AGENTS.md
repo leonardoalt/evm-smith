@@ -102,18 +102,19 @@ The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills
 
 ## Constraints an agent should know
 
-- **`EVMYulLean/` is a working fork**, not a read-only upstream. It's
-  gitignored in this repo because it's a sibling clone with its own
-  git history. The fork is `leonardoalt/EVMYulLean`; clone its `main`
-  branch (which now carries the Frame library) — the NethermindEth
+- **`EVMYulLean/` is a git submodule pointing at
+  `leonardoalt/EVMYulLean`**, a working fork of the NethermindEth
+  upstream that carries the Frame library. The NethermindEth
   upstream alone won't satisfy the imports. When extending the
-  framework — new step shapes, new closure-frame conjuncts, bytecode-walk
-  machinery — modifications belong there. Use `git -C EVMYulLean ...`
-  for git ops; commit incrementally; push to the `fork` remote
-  (already configured).
-- **Do not commit `.lake/`, `EthereumTests/`, or `EVMYulLean/`.**
-  They're in `.gitignore` for good reasons (build artifacts, empty
-  workaround dir, external dep).
+  framework — new step shapes, new closure-frame conjuncts,
+  bytecode-walk machinery — modifications belong there. Use
+  `git -C EVMYulLean ...` for git ops; commit and push inside the
+  submodule, then bump the submodule pointer in this repo (one
+  parent commit per pinned-version change). The local checkout has
+  `origin = leonardoalt/EVMYulLean` and (by convention)
+  `upstream = NethermindEth/EVMYulLean` for fetching upstream
+  changes.
+- **Do not commit `.lake/`.** Build artifacts.
 - **Byte-level round-trips are not provable.** `ffi.ByteArray.zeroes`
   is `opaque`; any proof that depends on reading back bytes through
   `ByteArray.write` won't close. State properties at the stack /
@@ -132,9 +133,8 @@ The proof pattern is documented in [`/prove-balance-invariant`](./.claude/skills
 ## Build / verify / run
 
 ```bash
-# First-time setup:
-mkdir -p EthereumTests                         # upstream submodule-check workaround
-git submodule update --init --recursive        # pulls forge-std for the Foundry tests
+# First-time setup (skip if you cloned with --recursive):
+git submodule update --init --recursive        # pulls EVMYulLean + forge-std
 
 # Verify all proofs + tests (10-30min cold, seconds incremental):
 lake build

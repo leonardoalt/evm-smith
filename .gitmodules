@@ -7,3 +7,6 @@
 [submodule "EvmSmith/Demos/Weth/foundry/lib/forge-std"]
 	path = EvmSmith/Demos/Weth/foundry/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std.git
+[submodule "EVMYulLean"]
+	path = EVMYulLean
+	url = https://github.com/leonardoalt/EVMYulLean.git
