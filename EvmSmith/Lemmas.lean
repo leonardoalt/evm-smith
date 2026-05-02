@@ -19,7 +19,14 @@ reduces by iota and the proof closes by `rfl`.
   uses gets one `runOp_<opcode>` lemma, proved the same way.
 - `Demos/<Program>/Proofs.lean` — program-specific proofs that chain these.
 
-Currently covers `PUSH1`, `ADD`, `CALLDATALOAD`. Extend as needed.
+Covers a working subset of the EVM (pushes, arithmetic, comparisons,
+DUP/SWAP, JUMPI/JUMPDEST, POP/STOP, CALLER/CALLVALUE, SLOAD/SSTORE,
+CALLDATALOAD, REVERT). The Add3 / Register / Weth proofs use these
+directly; the Frame library
+(`EVMYulLean/EvmYul/Frame/StepShapes.lean`, `PcWalk.lean`) is the
+place to look for *frame-aware* per-opcode lemmas (post-state
+shape preservation under `EVM.step`). Extend this file when a new
+program needs a `runOp` equation for an opcode not listed below.
 
 ## Why these lemmas are needed
 
@@ -43,8 +50,9 @@ terminate.
 
 The downside is that as program proofs grow we accumulate ~one lemma per
 opcode used, which is effectively rewriting `step` one branch at a time.
-See `EVMYulLean/UPSTREAM_WISHLIST.md` for the upstream changes that
-would eliminate the need for this file entirely.
+The framework's `EvmYul.Frame.StepShapes.lean` is the equivalent layer
+on the `EVM.step` (frame-aware) side; together they give bytecode-walk
+proofs a stable substitution surface that doesn't fight the kernel.
 -/
 
 namespace EvmSmith
