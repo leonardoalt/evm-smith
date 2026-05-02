@@ -44,7 +44,7 @@ The result is [evm-smith](https://github.com/leonardoalt/evm-smith), a new
 framework that provides the machinery for AI to write combined EVM bytecode and
 Lean proofs.
 
-## A WETH solvency proof, end-to-end, in Lean
+## A WETH contract + solvency proof, end-to-end, in Lean
 
 The goal was to write a minimal Wrapped-ETH (WETH) clone with two functions:
 
@@ -58,11 +58,17 @@ Ethereum](https://etherscan.io/token/0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2#
 is of course more complicated (events, ERC-20 functions, allowances), but this
 minimal version captures the critical solvency property.
 
-The result: [86 bytes of
-bytecode](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Program.lean#L162),
-and a machine-checked proof that those 86 bytes satisfy the solvency property
-under explicit, narrow assumptions about chain state and standard EVM execution
-boundaries.
+The artifacts are:
+- [EVM
+  assembly](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Program.lean#L162).
+  If you are a smart contract dev, I invite you to read the bytecode to get an
+  idea that this _should_ be correct.
+- [Foundry
+  tests](https://github.com/leonardoalt/evm-smith/tree/main/EvmSmith/Demos/Weth/foundry)
+  for our contract. Useful for integration, fuzzing and deployment.
+- [Solvency
+  theorem/proof](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean#L338).
+  The final goal.
 
 This article explains what we (Claude and I) built, what's actually been
 proved, what's still assumed, and what I think the experiment means for how
