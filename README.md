@@ -7,12 +7,11 @@
 > a research artifact demonstrating the workflow; the deployments themselves
 > are demos.
 
-The goal is to experiment with AI-generated smart contracts: an AI
-writes a contract directly in EVM assembly and, in the same workflow,
-writes Lean 4 proofs about the contract's behavior against the
-official EVM semantics. This repo is the scaffolding — a thin Lean
-framework that makes the "write + prove" loop ergonomic enough to
-automate.
+The goal is to experiment with AI-generated smart contracts bypassing compilers
+entirely: an AI writes a contract directly in EVM assembly and, in the same
+workflow, writes Lean 4 proofs about the contract's behavior against the
+official EVM semantics. This repo is the scaffolding — a thin Lean framework
+that makes the "write + prove" loop ergonomic enough to automate.
 
 The EVM semantics come from
 [`NethermindEth/EVMYulLean`](https://github.com/NethermindEth/EVMYulLean),
@@ -45,8 +44,7 @@ library.
   the standard cryptographic ground assumption every Ethereum
   security argument relies on). Both are documented in
   [`AXIOMS.md`](./AXIOMS.md). Verify with `#print axioms <theorem>`.
-* Every claim about a contract's bytecode behaviour is a **theorem**,
-  not an assumption.
+* Every claim about a contract's bytecode behaviour is a **proved theorem**.
 
 The proofs are conditional on a small, explicit set of structural
 hypotheses spelled out per demo (e.g. WETH's 5-field
@@ -210,6 +208,11 @@ Except _ EVM.State`.
 
 ## License
 
-The `EvmSmith/` code in this repository is MIT-licensed (see `LICENSE`
-if present; otherwise consider it MIT). The upstream `EVMYulLean` has
-its own license — see `EVMYulLean/license.txt`.
+This project is licensed under either of
+
+<!-- markdown-link-check-disable -->
+- [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0) ([`LICENSE-APACHE`](LICENSE-APACHE))
+- [MIT license](https://opensource.org/licenses/MIT) ([`LICENSE-MIT`](LICENSE-MIT))
+<!-- markdown-link-check-enable -->
+
+at your option.
