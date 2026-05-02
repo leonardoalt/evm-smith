@@ -18,71 +18,66 @@ composition pattern. Like Register, Weth's top-level proof composes:
 * A bundle of **structural hypotheses** packaging the call-tree-level
   facts that aren't derivable from the closed framework outputs.
 
-## Hypotheses (from `SOLVENCY_PLAN.md` and `ASSUMPTIONS.md`)
+## Hypotheses (`WethAssumptions`, 5 fields)
 
 The boundary hypotheses (`hWF`, `hS_T`, `hBen`, `hValid`, `hInv`)
 are the same shape as Register's `register_balance_mono`. The Weth
-analogues of Register's `RegSDExclusion` / `RegDeadAtσP` are bundled
-in `WethAssumptions`:
+analogues of Register's `RegSDExclusion` / `RegDeadAtσP`, plus the
+two Weth-specific structural facts, are bundled in `WethAssumptions`:
 
-1. **`DeployedAtC C`** — Weth's bytecode is installed at `C`. Real
-   world: genesis-deployment + Weth bytecode contains no
+1. **`deployed : DeployedAtC C`** — Weth's bytecode is installed at
+   `C`. Real world: genesis-deployment + Weth bytecode contains no
    CREATE/CREATE2/SELFDESTRUCT, so `C`'s code is preserved across
    any sub-frame (mirror of Register's `DeployedAtC`).
 
-2. **`WethSDExclusion`** — no SELFDESTRUCT in the call tree adds `C`
-   to the final substate's selfDestructSet. Holds because Weth's
-   bytecode contains no SELFDESTRUCT and SELFDESTRUCT only inserts
-   the executing-frame address `Iₐ` into the SD-set, which by
-   `DeployedAtC` is `≠ C` whenever the code at that address is not
-   Weth's. Same shape as `RegSDExclusion`.
+2. **`sd_excl : WethSDExclusion …`** — no SELFDESTRUCT in the call
+   tree adds `C` to the final substate's selfDestructSet. Holds
+   because Weth's bytecode contains no SELFDESTRUCT and SELFDESTRUCT
+   only inserts the executing-frame address `Iₐ` into the SD-set,
+   which by `DeployedAtC` is `≠ C` whenever the code at that address
+   is not Weth's. Same shape as `RegSDExclusion`.
 
-3. **`WethDeadAtσP`** — `C`'s account in σ_P (the post-Θ/Λ state)
-   has non-empty code (Weth's bytecode), so `State.dead σ_P C =
-   false`. Holds because `WethInv σ C` (which provides the bytecode
-   identity) is preserved through the value-debit at `S_T ≠ C` and
-   `lambda_derived_address_ne_C` rules out CREATE-derivation of `C`.
-   Same shape as `RegDeadAtσP`.
+3. **`dead_at_σP : WethDeadAtσP …`** — `C`'s account in σ_P (the
+   post-Θ/Λ state) has non-empty code (Weth's bytecode), so
+   `State.dead σ_P C = false`. Holds because `WethInv σ C` (which
+   provides the bytecode identity) is preserved through the
+   value-debit at `S_T ≠ C` and `lambda_derived_address_ne_C` rules
+   out CREATE-derivation of `C`. Same shape as `RegDeadAtσP`.
 
-4. **Bytecode-level cascade-fact hypotheses** (`pc40_cascade`,
-   `pc60_cascade`, `pc72_cascade`) — the `ΞPreservesInvariantAtC C`
-   witness is derived inline by `bytecodePreservesInvariant` (in
-   `BytecodeFrame.lean`) from these structural facts via the
-   `weth_sstore_preserves_from_cascades` and
-   `weth_call_slack_from_cascade` glue lemmas. The non-halt step
-   closure (formerly the `step_closure` field) is derived in-Lean by
-   `weth_step_closure` (aggregating the 61 per-PC walks); the
-   op-classification (formerly `op_reach`) is also in-Lean
-   (`WethReachable_op_in_allowed`). The cascade-fact predicates
-   `WethPC{40,60,72}CascadeFacts` capture exactly the per-PC
-   trace-cascade data needed for the SSTORE / CALL discharge — this
-   refines the previous opaque `WethSStorePreserves` / `WethCallSlack`
-   fields to the precise narrower predicates the trace cascade
-   extension would establish (PC 48 SLOAD → PC 60 SSTORE → PC 72 CALL
-   propagation; see `BytecodeFrame.lean`'s `WethPC60CascadeFacts`
-   docstring for the cascade roadmap).
+4. **`inv_at_σP : WethInvAtσP …`** — σ_P (Υ's post-Θ/Λ-dispatch
+   state) preserves the relational solvency invariant
+   `storageSum σ_P C ≤ balanceOf σ_P C`. Mirror of Register's
+   `σ_to_σP_balance_mono_Θ`/`Λ` chain, but for the relational
+   invariant. Discharging from Lean requires exposed
+   `Θ_invariant_preserved` / `Λ_invariant_preserved` framework
+   theorems (currently private inside MutualFrame.lean); bundled
+   here as a structural hypothesis.
 
-5. **`WethInvAtσP`** — σ_P (Υ's post-Θ/Λ-dispatch state) preserves
-   the relational solvency invariant `storageSum σ_P C ≤ balanceOf
-   σ_P C`. Mirror of Register's `σ_to_σP_balance_mono_Θ`/`Λ` chain
-   for the relational invariant. Discharging from Lean requires
-   exposed `Θ_invariant_preserved` / `Λ_invariant_preserved`
-   framework theorems (currently private inside MutualFrame.lean);
-   bundled here as a structural hypothesis.
+5. **`call_no_wrap : WethCallNoWrapAt72 C`** — at PC 72 (the
+   withdraw block's outbound CALL), `recipient_balance + value` does
+   not wrap modulo `2^256`. Real-world chain-state bound that's not
+   bytecode-derivable.
+
+The bytecode-level cascade-fact predicates (`WethPC{40,60,72}CascadeFacts`)
+that were originally hypotheses on `WethAssumptions` have been
+**discharged as in-Lean theorems** in `BytecodeFrame.lean`
+(`weth_pc60_cascade`, `weth_pc40_cascade`, `weth_pc72_cascade`).
+The non-halt step closure and op-classification are likewise in-Lean
+(`weth_step_closure`, `WethReachable_op_in_allowed`). The previous
+fields `deposit_slack` / `account_at_C` / `inv_step_pres` /
+`xi_preserves_C` / `account_at_initial` / `inv_at_initial` have all
+been eliminated by framework simplifications (see inline notes on
+the live `WethAssumptions` structure below).
 
 The body decomposition existence (`σ' = Υ_tail_state σ_P g' A …`)
 is **NOT** a structural hypothesis — it is derived mechanically
 inline by `weth_Υ_body_factors` from inspecting Υ's `.ok` output
 shape, exactly as in Register's `register_Υ_body_factors`.
 
-The remaining decomposition into structural hypotheses follows
-Register's posture: real-world facts captured precisely, with
-discharge deferred to the relevant framework strengthening pass.
-
 ## Top-level theorem composition
 
   WethInv σ C  ∧ DeployedAtC C  ∧ WethSDExclusion ∧ WethDeadAtσP
-              ∧ WethInvAtσP    ∧ ΞPreservesInvariantAtC C
+              ∧ WethInvAtσP    ∧ WethCallNoWrapAt72 C
   ───────────────────────────────────────────────────────  Υ_invariant_preserved
                     WethInv (Υ σ).σ' C
 -/

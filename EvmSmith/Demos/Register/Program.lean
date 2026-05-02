@@ -41,8 +41,9 @@ puts values on top. So the last-pushed `GAS` is popped first as
 `gas`, and the first-pushed `retSize` is popped last — matches the
 EVM spec `gas, to, value, inOff, inSize, outOff, outSize`.
 
-Total runtime: 20 bytes. Raw hex: `0x600035335560006000600060006000335af1500` — wait, counted 20 bytes as
-`0x6000353355600060006000600060003 35af15000` split below.
+Total runtime: 20 bytes. The raw `bytecode : ByteArray` value is
+defined below; `lake exe register-dump-bytecode` writes the hex
+form to `foundry/test/Register.bytecode.hex` for the Foundry suite.
 -/
 
 namespace EvmSmith.Register
