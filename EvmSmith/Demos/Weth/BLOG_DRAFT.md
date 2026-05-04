@@ -126,10 +126,10 @@ they didn't get paid (checks-effects-interactions, captured by the proof).
 
 The Yellow Paper's layered execution functions, kept in EVMYulLean:
 
-- **Υ** — transaction processor (outermost layer).
-- **Θ** — call frame: CALL / CALLCODE / DELEGATECALL / STATICCALL.
-- **Λ** — creation frame: CREATE / CREATE2.
-- **Ξ** — bytecode execution.
+- **Υ**: transaction processor (outermost layer).
+- **Θ**: call frame, CALL / CALLCODE / DELEGATECALL / STATICCALL.
+- **Λ**: creation frame, CREATE / CREATE2.
+- **Ξ**: bytecode execution.
 
 ## How is this proved?
 
