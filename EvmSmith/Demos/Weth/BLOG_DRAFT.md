@@ -273,7 +273,7 @@ sub-agents, single hyperfocused sub-agent, pep talks). Claude
 bailed many times calling steps "multi-day sessions". I still don't
 know how to handle that besides telling it to keep grinding.
 
-## Conclusion: this is harder than it looks
+## Conclusion
 
 Proving inductive invariants for smart contracts is not an easy
 feat. A one-line property like `storageSum σ C ≤ balanceOf σ C` has
@@ -285,14 +285,11 @@ accounting. The proof crosses every layer of the spec from individual
 opcodes up to the transaction processor, with no exceptions allowed
 at any layer.
 
-For a human team, this is weeks of expert proof engineering. Claude
-landed it across a few weeks of guided sessions, with the human (me)
-doing only spec review and direction. That's the part I find
-genuinely impressive: not the framework, not the WETH bytecode, but
-the fact that the model can carry an inductive proof of this shape
-at all.
+For a human team, this is serious expert proof engineering. Claude
+landed it through guided iteration, with the human (me) doing only
+spec review and direction.
 
-What this means going forward:
+What this can mean going forward:
 
 - Smart contracts are deployed as bytecode + Lean proof of safety
   properties.
