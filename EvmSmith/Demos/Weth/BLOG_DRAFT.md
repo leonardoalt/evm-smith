@@ -1,4 +1,4 @@
-# evm-smith: formally verified Ethereum smart contracts, without a compiler
+# evm-smith: smart contracts in EVM bytecode + Lean proofs, without a compiler
 
 > _tl;dr_: Can AI write EVM bytecode + Lean proofs of inductive
 > invariants under reentrancy, bypassing the compiler entirely?
@@ -12,15 +12,12 @@ together with [Lean](https://lean-lang.org/) proofs of correctness.  I find the
 idea of completely bypassing the compiler fascinating, a paradigm shift that
 removes massive dependencies and costs (HLL compilers), and where humans only
 need to read/audit the formal specification, here in the form of Lean theorems.
-This is of course not a feasible practice for humans, shown by our move from
-assembly to HLLs decades ago. However, we are not the ones writing code
-anymore.
 
-My first thought then was: can we do the same for Ethereum smart contracts? I
-was immediately convinced AIs can write EVM assembly quite well, but can they
-write the proofs too? Can they prove inductive invariants in the presence of
-potential reentrancy, over any callstack length, considering every possible
-malicious external contract?
+My first thought was: can we do the same for Ethereum smart contracts? I was
+convinced AIs can write EVM assembly quite well, but can they write the proofs
+too? Can they prove inductive invariants in the presence of potential
+reentrancy, over any callstack length, considering every possible malicious
+external contract?
 
 To test this, I asked Claude to write EVM assembly and Lean proofs for
 increasingly harder problems, such as contracts that "read 3 numbers and add
@@ -29,20 +26,20 @@ with different properties being proved for each contract. I used
 [EVMYulLean](https://github.com/NethermindEth/EVMYulLean) to get formal and
 executable semantics for EVM bytecode.
 
+All the contracts, tests and proofs landed in
+[evm-smith](https://github.com/leonardoalt/evm-smith), a new framework that
+provides the machinery for AI to write combined EVM bytecode and Lean proofs.
+
 My requirements were:
 
-- I will describe what the smart contract should do, but I shouldn't write bytecode.
-- I will read the bytecode.
+- I will describe what the smart contract should do, but I shouldn't write it.
+- I will read the EVM assembly.
 - I will describe the properties that should be proven, but I shouldn't write theorems nor proofs.
 - I will read the main theorems and check for sorries and new axioms.
 
 Claude was quite efficient at proving properties for the simpler contracts, and
 we quickly got to the final boss of this experiment, a WETH-clone solvency
 proof.
-
-The result is [evm-smith](https://github.com/leonardoalt/evm-smith), a new
-framework that provides the machinery for AI to write combined EVM bytecode and
-Lean proofs.
 
 ## A WETH contract + solvency proof, end-to-end, in Lean
 
@@ -61,177 +58,89 @@ minimal version captures the critical solvency property.
 The artifacts are:
 - [EVM
   assembly](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Program.lean#L162).
-  If you are a smart contract dev, I invite you to read the bytecode to get an
-  idea that this _should_ be correct.
+  If you are a smart contract dev, I encourage you to read the assembly to get
+  an idea that this _should_ be correct.
 - [Foundry
   tests](https://github.com/leonardoalt/evm-smith/tree/main/EvmSmith/Demos/Weth/foundry)
   for our contract. Useful for integration, fuzzing and deployment.
 - [Solvency
   theorem/proof](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean#L338).
-  The final goal.
+  The final proof.
 
 This article explains what we (Claude and I) built, what's actually been
 proved, what's still assumed, and what I think the experiment means for how
-smart-contract development might evolve.
+smart-contract development might evolve. The Lean snippets and proof realated
+content is kept high level for the purose of this article, but a full technical
+report is available at [WETH proof technical
+report](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/REPORT_WETH.md).
 
 ## What's the property?
 
 **Solvency**: at every moment in the contract's life, the sum of all
 users' stored token balances is at most the contract's actual ETH
+balance. If this holds, every user can always withdraw their full
 balance.
 
-[In Lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Invariant.lean) (using the types from `EVMYulLean`):
+[In Lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Invariant.lean):
 
 ```lean
 def WethInv (σ : AccountMap .EVM) (C : AccountAddress) : Prop :=
   storageSum σ C ≤ balanceOf σ C
 ```
 
-Reading this:
-
-- `σ` is the **EVM state** — a snapshot of all accounts on the chain
-  (their balances, code, and storage).
-- `C` is **WETH's contract address** — a specific account in σ.
-- `storageSum σ C` is the **sum over every storage slot at C's account
-  in σ**. For our WETH layout, each slot holds a single user's token
-  balance, so this sum equals the total of all users' tokens.
-- `balanceOf σ C` is **C's actual ETH balance in σ** — the wei held by
-  the contract.
-- `≤` is the standard ≤ on natural numbers.
-
-So `WethInv σ C` says: in state σ, the total of users' token balances
-at WETH (C) is at most the actual ETH balance of WETH (C).
-
-If solvency holds, every user can always withdraw their full balance, i.e., the
-contract never owes more tokens than it has ETH to back them.
+`σ` is the EVM state, `C` is WETH's address; `storageSum σ C` sums
+every storage slot at `C` (each slot holds one user's token balance,
+so this sum is total user tokens), `balanceOf σ C` is `C`'s actual
+ETH balance. The whole expression: tokens owed ≤ ETH held.
 
 ## What's a "proof" here?
 
-A Lean theorem. Lean is a dependently-typed proof assistant: every proof is a
-program that the type checker mechanically verifies.  If the file compiles, the
-theorem holds.
+A Lean theorem. Lean is a dependently-typed proof assistant: if the
+file compiles, the theorem holds.
 
-Our [headline theorem](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean) says, roughly:
-
-> **For any well-formed EVM state σ where solvency holds, after
-> running any single Ethereum transaction through `EVM.Υ` (the EVM's
-> transaction processor, formalized in EVMYulLean), solvency still
-> holds in the post-state σ'.**
-
-In Lean syntax (the actual signature, lightly reflowed):
+Our [headline theorem](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean#L338),
+in pseudotype form:
 
 ```lean
-theorem weth_solvency_invariant
-    (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
-    (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
-    (tx : Transaction) (S_T C : AccountAddress)
-    (hWF      : StateWF σ)                            -- total ETH < 2^255
-    (hInv     : WethInv σ C)                          -- pre-state solvency
-    (hS_T     : C ≠ S_T)                              -- WETH is not the tx sender
-    (hBen     : C ≠ H.beneficiary)                    -- WETH is not the miner
-    (_hValid  : TxValid σ S_T tx H H_f)               -- standard tx-validity
-    (hAssumptions : WethAssumptions σ fuel H_f H H_gen blocks tx S_T C) :
-    match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
-    | .ok (σ', _, _, _) => WethInv σ' C               -- post-state solvency
-    | .error _          => True                       -- vacuous on failure
+theorem weth_solvency_invariant :
+    -- standard tx-boundary hypotheses + 5 chain-level assumptions
+    WethInv σ C →                          -- pre-state solvency
+    match EVM.Υ ... σ ... with
+    | .ok (σ', _) => WethInv σ' C          -- post-state solvency
+    | .error _    => True                  -- vacuous on failure
 ```
 
-The first batch of arguments are the parameters Υ itself takes (the
-fuel bound, the pre-state σ, the gas counter, two block headers, the
-processed-blocks list, the transaction, and the sender + WETH
-addresses). `hWF` / `hS_T` / `hBen` / `_hValid` are the standard
-transaction-boundary hypotheses any single-contract proof of this
-shape needs. `hAssumptions` packages the five WETH-specific
-structural facts, discussed in the next section.
+`EVM.Υ` is the EVM's transaction processor, formalized in EVMYulLean from the
+Yellow Paper. The headline claim is: **any execution path through any opcode
+sequence reachable from any caller, including malicious reentrant ones, can't
+violate solvency.**
 
-So the theorem says: **starting from a state that satisfies WETH's
-solvency invariant, after the EVM does whatever it does for a
-transaction, the state still satisfies solvency**.
-
-### Partial correctness: what about failures?
-
-The conclusion has two branches: on `.ok` (success) the post-state
-satisfies solvency; on `.error` (out-of-gas, REVERT, invalid opcode,
-stack underflow, etc.) the conclusion is vacuous. This is **partial
-correctness**: we can prove safety on successful runs, not that the
-contract always succeeds. The EVM's error semantics (gas tracked per
-Yellow Paper Appendix G; failures roll back state) are fully modeled
-in EVMYulLean, so failure paths are handled by the model, not by my
-theorem.
-
-The headline claim, plainly: **any execution path through any opcode
-sequence reachable from any caller, including malicious reentrant
-ones, can't violate solvency**. That's the whole point.
-
-Notice the proof captures checks-effects-interactions correctly even
-on the failure path: WETH decrements the user's balance *before* the
-outbound CALL, so if the CALL reverts, the user's balance went down
-and they didn't get paid, so the accounting still adds up.
+The `.error` branch is partial correctness: we prove safety on successful runs,
+not that the contract always succeeds. EVMYulLean fully models the failure
+semantics (gas, REVERT, rollback) so failure paths are handled by the model.
+And because WETH decrements the user's balance *before* the outbound CALL, even
+on a failed CALL the accounting still adds up: the user's balance went down,
+they didn't get paid (checks-effects-interactions, captured by the proof).
 
 ## What are Θ, Λ, Ξ, Υ?
 
-Before we go further, a quick glossary. The EVM's Yellow Paper uses
-Greek letters for the layered execution functions, and the Lean
-formalization keeps the same names:
+The Yellow Paper's layered execution functions, kept in EVMYulLean:
 
-- **Υ** (Upsilon) — *transaction processor*. Takes an EVM state and a
-  transaction, returns the post-transaction state. The outermost
-  layer.
-- **Θ** (Theta) — *call frame*. Handles a CALL/CALLCODE/DELEGATECALL/
-  STATICCALL. Transfers value, sets up an execution environment, and
-  invokes Ξ.
-- **Λ** (Lambda) — *contract-creation frame*. Handles CREATE/CREATE2.
-  Computes the new address, transfers value, runs the init code via
-  Ξ, and writes the resulting code to the new account.
-- **Ξ** (Xi) — *code execution*. Runs a sequence of EVM opcodes
-  starting from a given program counter and stack. Internally drives
-  the X loop (the per-instruction iteration).
-
-WETH's `withdraw` does an outbound CALL which goes through Θ. WETH
-itself is invoked by some outer transaction processed by Υ, which
-calls Θ to invoke Ξ on WETH's bytecode.
-
-Whenever we say "WETH's invariant is preserved by Θ" or "the CALL
-goes through Λ", these are the layers we mean.
+- **Υ** — transaction processor (outermost layer).
+- **Θ** — call frame: CALL / CALLCODE / DELEGATECALL / STATICCALL.
+- **Λ** — creation frame: CREATE / CREATE2.
+- **Ξ** — bytecode execution.
 
 ## How is this proved?
 
-The proof has to walk through WETH's bytecode instruction-by-instruction and
-track what happens to the EVM state at the proposition level. Concretely, the
-proof:
-
-1. **Models the bytecode as a control-flow graph**. WETH has 86 bytes
-   spanning **58 distinct program counter (PC) positions**. The proof
-   builds a predicate `WethTrace` enumerating every reachable
-   `(PC, stack-length)` combination.
-
-2. **Threads structural data through the trace**. At each PC, the proof carries
-   witnesses about what's on the stack and what storage facts hold. For
-   instance: at PC 60 (the SSTORE in `withdraw`), the trace carries
-   `(slot=sender, oldVal=balance, newVal=balance−x, bound x ≤ balance)`. The
-   bound comes from the JUMPI gate at PC 55, and the proof formally verifies
-   that path.
-
-3. **Per-PC walks**. For each PC, a Lean theorem walks one instruction
-   forward, showing the post-state still satisfies the trace
-   predicate. 61 such walks across the 58 PCs — the revert block
-   (PCs 80, 81, 83) is reached from two different paths
-   (insufficient-balance and failed-CALL) with different stack shapes,
-   so those PCs need a walk per disjunct. All aggregated into a
-   single `weth_step_closure` theorem.
-
-4. **Bridges to the EVM's transaction processor**. A
-   relational-invariant top-level theorem `Υ_invariant_preserved`
-   says: if your contract's invariant is preserved by every internal
-   step, then it's preserved by the transaction. We feed it the
-   per-step preservation, and it gives us the headline theorem.
-   This bridge is itself a worked-example pattern (in
-   `EvmSmith/Demos/Weth/InvariantClosure.lean`, alongside the WETH
-   proof) built on top of generic frame primitives carried by the
-   underlying EVMYulLean framework: the framework supplies the
-   contract-agnostic Ξ/Θ/Λ/X preservation closures and Υ-tail
-   helpers, and this WETH-style relational-invariant bridge sits on
-   top.
+On a high level: walk through WETH's bytecode instruction by instruction, prove
+that every reachable state preserves the invariant, then bridge that per-step
+preservation up to the transaction level via a generic frame library
+(`EvmYul/Frame/`) that takes care of arbitrary reentrancy, nested CALLs, and
+CREATE.  The framework is the heavy lifting; the contract-specific part is the
+per-PC walk plus a small bundle of structural facts feeding the bridge. Details
+and a theorem call-graph are in the
+[REPORT](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/REPORT_WETH.md).
 
 ## What's still assumed?
 
@@ -247,193 +156,122 @@ structure WethAssumptions ... : Prop where
   call_no_wrap     : WethCallNoWrapAt72 C
 ```
 
-Four are about how the contract is set up at the chain level, and one
-is a chain-state bound:
+1. **`deployed`**: WETH's 86-byte bytecode is actually installed at C.
+2. **`sd_excl`**: no `SELFDESTRUCT` in the call tree targets C.
+   (Moot on post-Cancun mainnet per EIP-6780; the proof handles the
+   stricter pre-Cancun semantics.)
+3. **`dead_at_σP`**: after the EVM dispatches value transfer + the
+   contract call, C still has non-empty code.
+4. **`inv_at_σP`**: after that same dispatch step (still before WETH's
+   code runs), solvency still holds, i.e. the value transfer's
+   bookkeeping moves don't break solvency.
+5. **`call_no_wrap`**: when WETH transfers ETH back on withdraw, the
+   recipient's balance plus the transfer doesn't overflow `UInt256`.
 
-1. **`deployed`**: WETH's specific 86-byte bytecode is installed at
-   address C. (Real-world: someone deployed it.)
+Items 1-4 describe the chain state at the moment WETH's code begins
+executing; item 5 is a real-world balance bound.
 
-2. **`sd_excl`**: across the entire transaction's call tree (which
-   may include arbitrary other contracts called by WETH or calling
-   WETH), no `SELFDESTRUCT` instruction targets C, i.e., C is not
-   added to the transaction's self-destruct set.
-
-   Note that this is a claim about *every* contract in the call tree,
-   not just WETH. SELFDESTRUCT only inserts the *executing-frame*
-   address into the self-destruct set, so for some other contract D ≠
-   C to add C, D would have to be running *as* C, which can't happen
-   unless C's deployed code is D, which `deployed` rules out.
-
-   **An aside on real Ethereum**: post-Cancun (EIP-6780, activated
-   March 2024), `SELFDESTRUCT` no longer deletes contracts that
-   weren't created in the same transaction. So on current mainnet,
-   `sd_excl` is essentially moot: a pre-existing WETH deployment
-   simply cannot be SELFDESTRUCT-ed by anyone. The EVM model in
-   EVMYulLean (which our proof uses) is the older, more conservative
-   pre-Cancun semantics where SELFDESTRUCT could remove an arbitrary
-   contract. Our proof handles that stricter case; on real
-   post-Cancun chains the assumption is automatically satisfied.
-
-3. **`dead_at_σP`**: after the EVM dispatches the transaction's
-   value transfer and contract call (the Θ/Λ step that happens before
-   actual code execution), C still has non-empty code at the
-   dispatched state. In other words: WETH's deployment isn't undone
-   mid-transaction.
-
-4. **`inv_at_σP`**: after that same dispatch step (still before
-   actual code execution begins), the solvency invariant
-   `storageSum σ C ≤ balanceOf σ C` still holds. The dispatch step
-   transfers value to C (deposit) or from C (withdraw return), and
-   this assumption says those bookkeeping moves don't break solvency
-   in the way they update balances.
-
-5. **`call_no_wrap`**: when WETH transfers ETH back to a withdrawing
-   user, the user's balance plus the transfer amount is < 2^256.
-   (Real-world: total ETH supply is bounded; UInt256 arithmetic doesn't
-   overflow on real chain state.)
-
-Items 1–4 are standard transaction-boundary facts: they describe the state of
-the chain at the moment WETH's code begins executing, and how value transfers
-get bookkept before the code runs. Item 5 is an irreducible fact about the
-chain's balance state.
-
-**Crucially, there are no assumptions _about WETH's bytecode behavior_**.  The
-"interesting" parts of the proof, what the SSTOREs do, what the CALL does, how
-the LT/JUMPI gate enforces solvency, are all Lean theorems, mechanically
-checked.
+**Crucially, no assumption is about WETH's bytecode behavior**. What the
+SSTOREs do, what the CALL does, how the LT/JUMPI gate enforces solvency are all
+mechanically checked Lean theorems.
 
 ## What's the trust boundary?
 
 To trust the WETH solvency theorem, we trust:
 
-1. **Lean's type checker**: that the proof compiles.
-
-2. **EVMYulLean's modeling choices**. EVMYulLean is a Lean
-   formalization of the EVM. Most of its content is *theorems*
-   (mechanically proved in Lean).
-   But two facts are stated (by us) as **explicit axioms**:
-
-   - `precompile_preserves_accountMap` (paper section T2): every EVM precompile
-     (SHA256, ECRECOVER, etc.) returns a state whose `accountMap` is either
-     unchanged or empty. Provable by case inspection of the ten precompile
-     bodies if they were actual EVM precompiles.
-   - `lambda_derived_address_ne_C` (paper section T5): the address
-     derived by CREATE/CREATE2 (computed via Keccak) never collides
-     with C. Equivalent to Keccak's collision-resistance, a
-     cryptographic assumption.
-
-   Beyond these two axioms, you also trust the **definitions** in
-   EVMYulLean: that `EVM.Υ`, `EVM.step`, etc. accurately model the
-   actual EVM behavior. Bugs in those definitions would invalidate
-   the proof.
-
+1. **Lean's type checker** (the proof compiles).
+2. **EVMYulLean's modeling choices**: its definitions of `EVM.Υ`,
+   `EVM.step`, etc. accurately model the EVM. Plus two explicit
+   axioms: `precompile_preserves_accountMap` (precompile purity,
+   provable by case inspection) and `lambda_derived_address_ne_C`
+   (CREATE-derived addresses never collide with C, equivalent to
+   Keccak collision-resistance).
 3. **The 5 `WethAssumptions` fields** above.
 
 ## Do we still need compilers?
 
-Smart contracts today are written in a high-level language (Solidity,
-Vyper, ...), compiled to bytecode, and deployed. The compiler sits in
-the trusted base: a bug in the compiler can introduce a vulnerability
-invisible to high-level source review, potentially leading to loss of
-funds.
+Today's smart contracts go HLL (Solidity, Vyper) → compiler → bytecode →
+deploy. The compiler sits in the trusted base: a compiler bug can introduce a
+vulnerability invisible to source review. Besides, developing the compilers
+takes time and money.
 
-This experiment skips the compiler entirely. The AI:
+This experiment skips the compiler entirely: the AI writes the assembly and a
+Lean proof that the bytecode satisfies the safety property. Both live at the
+same level of abstraction (machine code + machine-checked proof about machine
+code), eliminating the translation gap where bugs can hide.
 
-- Writes the bytecode directly.
-- Writes a Lean proof that the bytecode satisfies the safety property.
+Formal verification of EVM bytecode isn't novel. What's new here is the
+workflow: a one-time framework investment + AI-generated contract code and
+proof, with the human doing none of the writing and reading only the spec,
+axioms, and theorem statements. The development process in this future is
+actually faster, cheaper, and safer.
 
-Both artifacts live at the same level of abstraction (machine code +
-machine-checked proof about machine code), minimizing the translation gap where
-bugs often hide.
+## What do humans still need to do?
 
-Of course this isn't theoretically novel, as formal verification of EVM bytecode has
-existed for years. What I personally find groundbreaking in this approach is:
+If the AI writes the bytecode and the proof, what's left?
 
-- Compilers are large pieces of software and cost a lot of money. We can potentially bypass them entirely.
-- Minimal effort required from the human:
-    - I supervised the AI and tried to guide it.
-    - I read the bytecode which makes sense to me.
-    - I verified the trust boundaries, axioms, and theorems.
-    - I didn't write any code.
-    - I didn't need to read the proofs — the type checker did.
+**Read the spec, axioms, and assumptions.** Lean theorem statements
+are the specification, `WethInv σ C := storageSum σ C ≤ balanceOf σ C`
+is the property; the assumption bundle and the framework axioms are
+the trust surface. If you can read those, you can audit the claim.
+You need to be able to read Lean to verify the proof.
 
-## What does the human still need to do?
+One potential way to lower this requirement: thin eDSLs built in Lean itself
+acting as human-readable IRs with verified compilers down to bytecode, keeping
+the proof at the bytecode level but the specification readable to
+non-Lean-fluent reviewers. This may even be somewhat required in the
+near-future, although it feels like developers converging to being able to read
+Lean is inevitable and a great outcome.
 
-This is the question that decides whether any of this matters. If
-the AI writes the bytecode and writes the proof, what's left for
-humans?
-
-**Reading the spec.** Lean theorem statements are the specification.
-
-```lean
-def WethInv (σ : AccountMap .EVM) (C : AccountAddress) : Prop :=
-  storageSum σ C ≤ balanceOf σ C
-```
-
-A human auditor can read the property above and confirm that this is what
-"solvency" means. The token balances shouldn't exceed the ETH balance. If you
-can read this Lean definition, you understand the property being proved.
-
-```lean
-call_no_wrap : WethCallNoWrapAt72 C
-```
-
-**Reading the assumptions.** The same auditor reads the assumption above and
-confirms that this is a chain-state bound on UInt256 wrapping, which is true in
-practice on Ethereum and acceptable to assume.
-
-If they don't understand a Lean expression, they can't verify the claim. The
-thing humans **must** be able to read is Lean theorem statements.
-
-It is possible or likely that this will take a while to become common.  An
-alternative to that are thin higher level eDSLs built in Lean itself that serve
-as a "human readable IR" and have a verified compiler to EVM bytecode.
-
-## What's the scale?
+## What's the scale of the code?
 
 The cost splits in three tiers, in decreasing order of reusability:
 
-- **Generic framework infrastructure** — ~12500 lines of new Lean
-  in EVMYulLean's `EvmYul/Frame/` library: mutual-induction
-  preservation results for Ξ/Θ/Λ/X, account-presence preservation,
-  the universal Ξ-preservation theorem, generic Υ-tail helpers.
+- **Generic framework infrastructure**: ~12500 lines of new Lean
+  in EVMYulLean's [`EvmYul/Frame/`](https://github.com/leonardoalt/EVMYulLean/tree/main/EvmYul/Frame)
+  library: mutual-induction preservation results for Ξ/Θ/Λ/X
+  (in [`MutualFrame.lean`](https://github.com/leonardoalt/EVMYulLean/blob/main/EvmYul/Frame/MutualFrame.lean)),
+  account-presence preservation, the universal Ξ-preservation theorem,
+  generic Υ-tail helpers (in [`UpsilonFrame.lean`](https://github.com/leonardoalt/EVMYulLean/blob/main/EvmYul/Frame/UpsilonFrame.lean)).
   None of it is WETH-specific; any future EVM bytecode proof
-  inherits it for free.
-- **Relational-invariant closure** — ~5400 lines in
-  `EvmSmith/Demos/Weth/InvariantClosure.lean`: the
-  `storageSum ≤ balanceOf` predicate plus the mutual closure that
+  inherits it for free. See
+  [`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)
+  for the full surface.
+- **Relational-invariant closure**: ~5400 lines in
+  [`EvmSmith/Demos/Weth/InvariantClosure.lean`](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/InvariantClosure.lean):
+  the `storageSum ≤ balanceOf` predicate plus the mutual closure that
   preserves it across Υ. Generic in shape (no WETH-bytecode refs);
   lives consumer-side only because we have one consumer. The
   natural next step once a second consumer demonstrates the same
   shape is lifting it back into the framework as a parametric
   module over the invariant.
-- **WETH-specific** — ~6800 lines, dominated by `BytecodeFrame.lean`
+- **WETH-specific**: ~6800 lines, dominated by
+  [`BytecodeFrame.lean`](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/BytecodeFrame.lean)
   (~6000 lines of per-PC walks through the bytecode trace), plus
-  the headline theorem composition (`Solvency.lean`), the `WethInv`
-  abbreviation (`Invariant.lean`), and the bytecode definition
-  (`Program.lean`).
+  the headline theorem composition
+  ([`Solvency.lean`](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean)),
+  the `WethInv` abbreviation
+  ([`Invariant.lean`](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Invariant.lean)),
+  and the bytecode definition
+  ([`Program.lean`](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Program.lean)).
 
-For this 86-byte contract that's ~80 lines of WETH-specific Lean
-per byte of bytecode. Framework cost is one-time and amortizes
-across every future contract; per-contract cost is large today but
-impressive for a first attempt and clearly improvable.
+For this 86-byte contract that's ~80 lines of WETH-specific Lean per byte of
+bytecode. Framework cost is one-time and amortizes across every future
+contract. The per-contract cost is large today but impressive for a first
+attempt and clearly improvable.
 
 ## How did Claude do?
 
-I used Claude as the proof engineer. I provided:
+I provided high-level goals ("prove WETH is solvent"), the
+framework (EVMYulLean), and iterative review when stuck. Claude
+wrote everything: bytecode, executable tests, Foundry tests, and
+the Lean proofs.
 
-- The high-level goals (e.g. "prove WETH is solvent").
-- The framework (EVMYulLean): an existing formalization.
-- Iterative review and direction when the AI got stuck.
-
-Claude wrote all code: EVM bytecode, executable tests, compile-time tests,
-Foundry integration for fuzzing and Solidity tests, and the Lean proofs.  All
-the code and testing parts were one-shot. The proofs took several (probably >=
-20 and <= 100) sessions and different prompt styles, including Claude code
-directly trying, parallel sub-agents, "hyperfocused" single sub-agent, and pep
-talks. Claude bailed many times saying some steps were "multi-day sessions",
-which I still don't know how to get out of besides by repeatedly telling it to
-keep grinding.
+Code and testing were one-shot. The proofs took 30-50 sessions
+across different prompting styles (Claude Code directly, parallel
+sub-agents, single hyperfocused sub-agent, pep talks). Claude
+bailed many times calling steps "multi-day sessions". I still don't
+know how to handle that besides telling it to keep grinding.
 
 ## The Potential Future
 
@@ -442,20 +280,51 @@ keep grinding.
 - The "audit" is reading the Lean theorem statements and confirming
   they capture the right invariants.
 - Compilers are debugging tools, not part of the trusted base: you
-  can compile from Solidity to check your bytecode matches your
+  can compile from Solidity/Vyper to check your bytecode matches your
   intent, but the deployed artifact is the bytecode + proof.
+- Compilers may still be needed for gas performance, but autoopt could solve
+  that for AI generate code.
 - The proof is generated by AI, supervised by humans who read the
   spec.
+- All of the above may be true not only for smart contracts, but for all
+  software?
 
 The bottleneck moves from building a safe and performant compiler to humans
 reading formal specs in Lean.
 
 ## Artifacts
 
-The full proof lives at [evm-smith](https://github.com/leonardoalt/evm-smith),
-and depends on [the framework fork of EVMYulLean](https://github.com/leonardoalt/EVMYulLean).
+The framework: [evm-smith](https://github.com/leonardoalt/evm-smith),
+which depends on
+[the EVMYulLean fork](https://github.com/leonardoalt/EVMYulLean)
+carrying the Frame library
+([`FRAME_LIBRARY.md`](https://github.com/leonardoalt/EVMYulLean/blob/main/FRAME_LIBRARY.md)).
 
-The headline theorem is in [EvmSmith/Demos/Weth/Solvency.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean).
-The framework infrastructure landed in this experiment is documented in the [framework report](EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md).
+For WETH specifically:
+
+- [Program.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Program.lean):
+  the EVM assembly + the 86-byte
+  [bytecode hex](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/foundry/test/Weth.bytecode.hex).
+- [Invariant.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Invariant.lean):
+  the solvency predicate.
+- [BytecodeFrame.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/BytecodeFrame.lean):
+  the per-PC bytecode walk.
+- [InvariantClosure.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/InvariantClosure.lean):
+  the relational-invariant closure chain.
+- [Solvency.lean](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/Solvency.lean):
+  the headline theorem + assumptions bundle.
+- [Foundry tests](https://github.com/leonardoalt/evm-smith/tree/main/EvmSmith/Demos/Weth/foundry):
+  fuzz + integration tests against the deployed bytecode.
+
+Reports for deeper reading:
+
+- [REPORT_WETH.md](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/REPORT_WETH.md):
+  what's proved, what's assumed, theorem call graphs.
+- [REPORT_FRAMEWORK.md](https://github.com/leonardoalt/evm-smith/blob/main/EvmSmith/Demos/Weth/REPORT_FRAMEWORK.md):
+  framework infrastructure landed for this experiment.
+- [AXIOMS.md](https://github.com/leonardoalt/evm-smith/blob/main/AXIOMS.md)
+  and
+  [TRUST_ASSUMPTIONS.md](https://github.com/leonardoalt/evm-smith/blob/main/TRUST_ASSUMPTIONS.md):
+  the trust base in detail.
 
 Contributions welcome!
