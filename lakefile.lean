@@ -25,6 +25,9 @@ lean_exe «weth-dump-bytecode» where
 lean_exe «weth-opt-dump-bytecode» where
   root := `EvmSmith.Demos.Weth.DumpOptimizedBytecode
 
+lean_exe «weth-opt-v2-dump-bytecode» where
+  root := `EvmSmith.Demos.Weth.DumpOptimizedV2Bytecode
+
 lean_exe «weth-call-graph» where
   root := `EvmSmith.Demos.Weth.CallGraph
   supportInterpreter := true
