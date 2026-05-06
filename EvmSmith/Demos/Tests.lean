@@ -169,18 +169,47 @@ to match the new layout. -/
 #guard EvmSmith.Weth.bytecode.get! 80 == 0x5b   -- JUMPDEST (revert entry)
 #guard EvmSmith.Weth.bytecode.get! 85 == 0xfd   -- REVERT
 
-/-! ### Optimized Weth bytecode (1-byte saved on the revert tail)
+/-! ### PUSH0-optimized Weth bytecode (9 bytes saved)
 
-`PUSH1 0; PUSH1 0; REVERT` (5 bytes after JUMPDEST, original) replaced
-by `PUSH1 0; DUP1; REVERT` (4 bytes after JUMPDEST, optimized). -/
+All nine `PUSH1 0` (`60 00`, 2 bytes) occurrences replaced by `PUSH0`
+(`5f`, 1 byte). The three `PUSH2 <label>` immediates shift:
+`depositLbl` 32→29, `withdrawLbl` 42→39, `revertLbl` 80→73. Total
+86 → 77 bytes. -/
 
-#guard EvmSmith.Weth.bytecodeOpt.size == 85
-#guard EvmSmith.Weth.bytecodeOpt.get! 80 == 0x5b   -- JUMPDEST (unchanged)
-#guard EvmSmith.Weth.bytecodeOpt.get! 81 == 0x60   -- PUSH1 (unchanged)
-#guard EvmSmith.Weth.bytecodeOpt.get! 83 == 0x80   -- DUP1 (was: PUSH1 0)
-#guard EvmSmith.Weth.bytecodeOpt.get! 84 == 0xfd   -- REVERT (shifted from 85)
-#guard EvmSmith.Weth.revertBlock.length == 4
-#guard EvmSmith.Weth.revertBlockOpt.length == 4
+#guard EvmSmith.Weth.bytecodeOpt.size == 77
+-- The nine PUSH0 sites:
+#guard EvmSmith.Weth.bytecodeOpt.get! 0  == 0x5f   -- PUSH0 (selector offset)
+#guard EvmSmith.Weth.bytecodeOpt.get! 26 == 0x5f   -- PUSH0 (no-selector REVERT arg 1)
+#guard EvmSmith.Weth.bytecodeOpt.get! 27 == 0x5f   -- PUSH0 (no-selector REVERT arg 2)
+#guard EvmSmith.Weth.bytecodeOpt.get! 58 == 0x5f   -- PUSH0 (CALL retSize)
+#guard EvmSmith.Weth.bytecodeOpt.get! 59 == 0x5f   -- PUSH0 (CALL retOff)
+#guard EvmSmith.Weth.bytecodeOpt.get! 60 == 0x5f   -- PUSH0 (CALL argsSize)
+#guard EvmSmith.Weth.bytecodeOpt.get! 61 == 0x5f   -- PUSH0 (CALL argsOff)
+#guard EvmSmith.Weth.bytecodeOpt.get! 74 == 0x5f   -- PUSH0 (final REVERT arg 1)
+#guard EvmSmith.Weth.bytecodeOpt.get! 75 == 0x5f   -- PUSH0 (final REVERT arg 2)
+-- Updated PUSH2 label immediates:
+#guard EvmSmith.Weth.bytecodeOpt.get! 14 == 0x1d   -- depositLblOpt = 29
+#guard EvmSmith.Weth.bytecodeOpt.get! 24 == 0x27   -- withdrawLblOpt = 39
+#guard EvmSmith.Weth.bytecodeOpt.get! 51 == 0x49   -- revertLblOpt = 73 (in withdraw LT-gate)
+#guard EvmSmith.Weth.bytecodeOpt.get! 69 == 0x49   -- revertLblOpt = 73 (in withdraw post-CALL)
+-- Shifted JUMPDESTs:
+#guard EvmSmith.Weth.bytecodeOpt.get! 29 == 0x5b   -- deposit JUMPDEST (was at 32)
+#guard EvmSmith.Weth.bytecodeOpt.get! 39 == 0x5b   -- withdraw JUMPDEST (was at 42)
+#guard EvmSmith.Weth.bytecodeOpt.get! 73 == 0x5b   -- revert JUMPDEST (was at 80)
+#guard EvmSmith.Weth.bytecodeOpt.get! 76 == 0xfd   -- final REVERT (was at 85)
+-- Optimized labels match the new bytecode layout:
+#guard EvmSmith.Weth.depositLblOpt  == UInt256.ofNat 29
+#guard EvmSmith.Weth.withdrawLblOpt == UInt256.ofNat 39
+#guard EvmSmith.Weth.revertLblOpt   == UInt256.ofNat 73
+-- Block-level program lists:
+#guard EvmSmith.Weth.selectorLoad.length       == 2
+#guard EvmSmith.Weth.selectorLoadOpt.length    == 2
+#guard EvmSmith.Weth.noSelectorRevert.length   == 3
+#guard EvmSmith.Weth.noSelectorRevertOpt.length == 3
+#guard EvmSmith.Weth.callPushes.length         == 4
+#guard EvmSmith.Weth.callPushesOpt.length      == 4
+#guard EvmSmith.Weth.revertBlock.length        == 4
+#guard EvmSmith.Weth.revertBlockOpt.length     == 4
 
 
 /-! ### Weth selector-byte invariants
