@@ -3,7 +3,6 @@ import EvmSmith.Demos.Add3.Program
 import EvmSmith.Demos.Register.Program
 import EvmSmith.Demos.Weth.Program
 import EvmSmith.Demos.Weth.OptimizedProgram
-import EvmSmith.Demos.Weth.OptimizedProgramV2
 
 /-!
 # Tests for the EvmSmith framework
@@ -170,97 +169,79 @@ to match the new layout. -/
 #guard EvmSmith.Weth.bytecode.get! 80 == 0x5b   -- JUMPDEST (revert entry)
 #guard EvmSmith.Weth.bytecode.get! 85 == 0xfd   -- REVERT
 
-/-! ### PUSH0-optimized Weth bytecode (9 bytes saved)
+/-! ### Optimized Weth bytecode (12 bytes saved: 86 → 74)
 
-All nine `PUSH1 0` (`60 00`, 2 bytes) occurrences replaced by `PUSH0`
-(`5f`, 1 byte). The three `PUSH2 <label>` immediates shift:
-`depositLbl` 32→29, `withdrawLbl` 42→39, `revertLbl` 80→73. Total
-86 → 77 bytes. -/
+Two layered classes of peephole optimizations on the original:
 
-#guard EvmSmith.Weth.bytecodeOpt.size == 77
+* **PUSH0 swaps** (EIP-3855): nine `PUSH1 0` (`60 00`) occurrences
+  become `PUSH0` (`5f`) — saves 9 bytes.
+* **CALLER-twice + drop POP**: deposit and withdraw drop a `DUP1`
+  each and replace `SWAP1` before `SSTORE` with a second `CALLER`
+  (BASE 2 gas vs VERYLOW 3 gas), and the post-CALL `POP` before
+  `STOP` is dropped — saves 3 more bytes plus runtime gas.
+
+Label shifts: `depositLbl` 32→29, `withdrawLbl` 42→38, `revertLbl`
+80→70. -/
+
+#guard EvmSmith.Weth.bytecodeOpt.size == 74
 -- The nine PUSH0 sites:
-#guard EvmSmith.Weth.bytecodeOpt.get! 0  == 0x5f   -- PUSH0 (selector offset)
+#guard EvmSmith.Weth.bytecodeOpt.get!  0 == 0x5f   -- PUSH0 (selector offset)
 #guard EvmSmith.Weth.bytecodeOpt.get! 26 == 0x5f   -- PUSH0 (no-selector REVERT arg 1)
 #guard EvmSmith.Weth.bytecodeOpt.get! 27 == 0x5f   -- PUSH0 (no-selector REVERT arg 2)
-#guard EvmSmith.Weth.bytecodeOpt.get! 58 == 0x5f   -- PUSH0 (CALL retSize)
-#guard EvmSmith.Weth.bytecodeOpt.get! 59 == 0x5f   -- PUSH0 (CALL retOff)
-#guard EvmSmith.Weth.bytecodeOpt.get! 60 == 0x5f   -- PUSH0 (CALL argsSize)
-#guard EvmSmith.Weth.bytecodeOpt.get! 61 == 0x5f   -- PUSH0 (CALL argsOff)
-#guard EvmSmith.Weth.bytecodeOpt.get! 74 == 0x5f   -- PUSH0 (final REVERT arg 1)
-#guard EvmSmith.Weth.bytecodeOpt.get! 75 == 0x5f   -- PUSH0 (final REVERT arg 2)
--- Updated PUSH2 label immediates:
+#guard EvmSmith.Weth.bytecodeOpt.get! 28 == 0xfd   -- no-selector REVERT
+#guard EvmSmith.Weth.bytecodeOpt.get! 56 == 0x5f   -- PUSH0 (CALL retSize)
+#guard EvmSmith.Weth.bytecodeOpt.get! 57 == 0x5f   -- PUSH0 (CALL retOff)
+#guard EvmSmith.Weth.bytecodeOpt.get! 58 == 0x5f   -- PUSH0 (CALL argsSize)
+#guard EvmSmith.Weth.bytecodeOpt.get! 59 == 0x5f   -- PUSH0 (CALL argsOff)
+#guard EvmSmith.Weth.bytecodeOpt.get! 71 == 0x5f   -- PUSH0 (final REVERT arg 1)
+#guard EvmSmith.Weth.bytecodeOpt.get! 72 == 0x5f   -- PUSH0 (final REVERT arg 2)
+-- Deposit body: CALLER twice, no DUP1, no SWAP1 before SSTORE.
+#guard EvmSmith.Weth.bytecodeOpt.get! 29 == 0x5b   -- deposit JUMPDEST
+#guard EvmSmith.Weth.bytecodeOpt.get! 30 == 0x50   -- POP (still pops stale selector)
+#guard EvmSmith.Weth.bytecodeOpt.get! 31 == 0x33   -- CALLER (1st)
+#guard EvmSmith.Weth.bytecodeOpt.get! 32 == 0x54   -- SLOAD
+#guard EvmSmith.Weth.bytecodeOpt.get! 33 == 0x34   -- CALLVALUE
+#guard EvmSmith.Weth.bytecodeOpt.get! 34 == 0x01   -- ADD
+#guard EvmSmith.Weth.bytecodeOpt.get! 35 == 0x33   -- CALLER (2nd, replaces orig SWAP1)
+#guard EvmSmith.Weth.bytecodeOpt.get! 36 == 0x55   -- SSTORE
+#guard EvmSmith.Weth.bytecodeOpt.get! 37 == 0x00   -- STOP
+-- Withdraw body: CALLER twice, DUP2 instead of DUP3.
+#guard EvmSmith.Weth.bytecodeOpt.get! 38 == 0x5b   -- withdraw JUMPDEST
+#guard EvmSmith.Weth.bytecodeOpt.get! 42 == 0x33   -- CALLER (1st)
+#guard EvmSmith.Weth.bytecodeOpt.get! 43 == 0x54   -- SLOAD (no DUP1!)
+#guard EvmSmith.Weth.bytecodeOpt.get! 44 == 0x81   -- DUP2 (was DUP3)
+#guard EvmSmith.Weth.bytecodeOpt.get! 45 == 0x81   -- DUP2 (unchanged)
+#guard EvmSmith.Weth.bytecodeOpt.get! 46 == 0x10   -- LT
+#guard EvmSmith.Weth.bytecodeOpt.get! 51 == 0x81   -- DUP2 (was DUP3)
+#guard EvmSmith.Weth.bytecodeOpt.get! 54 == 0x33   -- CALLER (2nd, replaces orig SWAP1)
+#guard EvmSmith.Weth.bytecodeOpt.get! 55 == 0x55   -- SSTORE
+-- Post-CALL success: dropped the POP, just STOP.
+#guard EvmSmith.Weth.bytecodeOpt.get! 69 == 0x00   -- STOP (POP removed!)
+-- Revert tail: PUSH0 PUSH0 REVERT, relocated.
+#guard EvmSmith.Weth.bytecodeOpt.get! 70 == 0x5b   -- revert JUMPDEST (was at 80)
+#guard EvmSmith.Weth.bytecodeOpt.get! 73 == 0xfd   -- final REVERT (was at 85)
+-- Updated PUSH2 label immediates (low byte; high byte stays 0x00):
 #guard EvmSmith.Weth.bytecodeOpt.get! 14 == 0x1d   -- depositLblOpt = 29
-#guard EvmSmith.Weth.bytecodeOpt.get! 24 == 0x27   -- withdrawLblOpt = 39
-#guard EvmSmith.Weth.bytecodeOpt.get! 51 == 0x49   -- revertLblOpt = 73 (in withdraw LT-gate)
-#guard EvmSmith.Weth.bytecodeOpt.get! 69 == 0x49   -- revertLblOpt = 73 (in withdraw post-CALL)
--- Shifted JUMPDESTs:
-#guard EvmSmith.Weth.bytecodeOpt.get! 29 == 0x5b   -- deposit JUMPDEST (was at 32)
-#guard EvmSmith.Weth.bytecodeOpt.get! 39 == 0x5b   -- withdraw JUMPDEST (was at 42)
-#guard EvmSmith.Weth.bytecodeOpt.get! 73 == 0x5b   -- revert JUMPDEST (was at 80)
-#guard EvmSmith.Weth.bytecodeOpt.get! 76 == 0xfd   -- final REVERT (was at 85)
+#guard EvmSmith.Weth.bytecodeOpt.get! 24 == 0x26   -- withdrawLblOpt = 38
+#guard EvmSmith.Weth.bytecodeOpt.get! 49 == 0x46   -- revertLblOpt = 70 (LT-gate)
+#guard EvmSmith.Weth.bytecodeOpt.get! 67 == 0x46   -- revertLblOpt = 70 (CALL-failed gate)
 -- Optimized labels match the new bytecode layout:
 #guard EvmSmith.Weth.depositLblOpt  == UInt256.ofNat 29
-#guard EvmSmith.Weth.withdrawLblOpt == UInt256.ofNat 39
-#guard EvmSmith.Weth.revertLblOpt   == UInt256.ofNat 73
+#guard EvmSmith.Weth.withdrawLblOpt == UInt256.ofNat 38
+#guard EvmSmith.Weth.revertLblOpt   == UInt256.ofNat 70
 -- Block-level program lists:
-#guard EvmSmith.Weth.selectorLoad.length       == 2
-#guard EvmSmith.Weth.selectorLoadOpt.length    == 2
-#guard EvmSmith.Weth.noSelectorRevert.length   == 3
-#guard EvmSmith.Weth.noSelectorRevertOpt.length == 3
-#guard EvmSmith.Weth.callPushes.length         == 4
-#guard EvmSmith.Weth.callPushesOpt.length      == 4
-#guard EvmSmith.Weth.revertBlock.length        == 4
-#guard EvmSmith.Weth.revertBlockOpt.length     == 4
-
-/-! ### V2 optimization (CALLER-twice + drop POP) — 74-byte runtime -/
-
--- Total size: 3 fewer bytes than V1 (1 in deposit, 1 in withdraw, 1 from POP).
-#guard EvmSmith.Weth.bytecodeV2.size == 74
--- V2 keeps every PUSH0 site from V1.
-#guard EvmSmith.Weth.bytecodeV2.get!  0 == 0x5f
-#guard EvmSmith.Weth.bytecodeV2.get! 26 == 0x5f
-#guard EvmSmith.Weth.bytecodeV2.get! 27 == 0x5f
-#guard EvmSmith.Weth.bytecodeV2.get! 28 == 0xfd  -- no-selector REVERT
--- Deposit body: CALLER twice, no DUP1, no SWAP1 before SSTORE.
-#guard EvmSmith.Weth.bytecodeV2.get! 29 == 0x5b  -- deposit JUMPDEST
-#guard EvmSmith.Weth.bytecodeV2.get! 30 == 0x50  -- POP (still pops stale selector)
-#guard EvmSmith.Weth.bytecodeV2.get! 31 == 0x33  -- CALLER (1st)
-#guard EvmSmith.Weth.bytecodeV2.get! 32 == 0x54  -- SLOAD
-#guard EvmSmith.Weth.bytecodeV2.get! 33 == 0x34  -- CALLVALUE
-#guard EvmSmith.Weth.bytecodeV2.get! 34 == 0x01  -- ADD
-#guard EvmSmith.Weth.bytecodeV2.get! 35 == 0x33  -- CALLER (2nd, replaces V1 SWAP1)
-#guard EvmSmith.Weth.bytecodeV2.get! 36 == 0x55  -- SSTORE
-#guard EvmSmith.Weth.bytecodeV2.get! 37 == 0x00  -- STOP
--- Withdraw body: CALLER twice, DUP2 instead of DUP3 (sender no longer on stack
--- between bal and x).
-#guard EvmSmith.Weth.bytecodeV2.get! 38 == 0x5b  -- withdraw JUMPDEST
-#guard EvmSmith.Weth.bytecodeV2.get! 42 == 0x33  -- CALLER (1st)
-#guard EvmSmith.Weth.bytecodeV2.get! 43 == 0x54  -- SLOAD (no DUP1!)
-#guard EvmSmith.Weth.bytecodeV2.get! 44 == 0x81  -- DUP2 (was DUP3)
-#guard EvmSmith.Weth.bytecodeV2.get! 45 == 0x81  -- DUP2 (unchanged)
-#guard EvmSmith.Weth.bytecodeV2.get! 46 == 0x10  -- LT
-#guard EvmSmith.Weth.bytecodeV2.get! 51 == 0x81  -- DUP2 (was DUP3)
-#guard EvmSmith.Weth.bytecodeV2.get! 54 == 0x33  -- CALLER (2nd, replaces V1 SWAP1)
-#guard EvmSmith.Weth.bytecodeV2.get! 55 == 0x55  -- SSTORE
--- Post-CALL success: dropped the POP, just STOP.
-#guard EvmSmith.Weth.bytecodeV2.get! 69 == 0x00  -- STOP (POP removed!)
--- Revert tail: still PUSH0 PUSH0 REVERT, just relocated 3 bytes earlier.
-#guard EvmSmith.Weth.bytecodeV2.get! 70 == 0x5b  -- revert JUMPDEST (was at 73)
-#guard EvmSmith.Weth.bytecodeV2.get! 73 == 0xfd  -- final REVERT (was at 76)
--- Updated PUSH2 immediates (low byte; high byte stays 0x00).
-#guard EvmSmith.Weth.bytecodeV2.get! 14 == 0x1d  -- depositLblV2 = 29 (unchanged)
-#guard EvmSmith.Weth.bytecodeV2.get! 24 == 0x26  -- withdrawLblV2 = 38 (was 39)
-#guard EvmSmith.Weth.bytecodeV2.get! 49 == 0x46  -- revertLblV2 = 70 (was 73, in LT-gate)
-#guard EvmSmith.Weth.bytecodeV2.get! 67 == 0x46  -- revertLblV2 = 70 (in CALL-failed gate)
--- V2 labels:
-#guard EvmSmith.Weth.depositLblV2  == UInt256.ofNat 29
-#guard EvmSmith.Weth.withdrawLblV2 == UInt256.ofNat 38
-#guard EvmSmith.Weth.revertLblV2   == UInt256.ofNat 70
--- V2 block lists:
-#guard EvmSmith.Weth.depositBlockV2.length         == 9
-#guard EvmSmith.Weth.withdrawPreCallBlockV2.length == 15
-#guard EvmSmith.Weth.postCallSuccessTail.length    == 2
-#guard EvmSmith.Weth.postCallSuccessTailV2.length  == 1
+#guard EvmSmith.Weth.selectorLoad.length            == 2
+#guard EvmSmith.Weth.selectorLoadOpt.length         == 2
+#guard EvmSmith.Weth.noSelectorRevert.length        == 3
+#guard EvmSmith.Weth.noSelectorRevertOpt.length     == 3
+#guard EvmSmith.Weth.callPushes.length              == 4
+#guard EvmSmith.Weth.callPushesOpt.length           == 4
+#guard EvmSmith.Weth.revertBlock.length             == 4
+#guard EvmSmith.Weth.revertBlockOpt.length          == 4
+#guard EvmSmith.Weth.depositBlockOpt.length         == 9
+#guard EvmSmith.Weth.withdrawPreCallBlockOpt.length == 15
+#guard EvmSmith.Weth.postCallSuccessTail.length     == 2
+#guard EvmSmith.Weth.postCallSuccessTailOpt.length  == 1
 
 
 /-! ### Weth selector-byte invariants

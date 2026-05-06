@@ -95,32 +95,32 @@ your own program + proof — all live in
 ## Optimization workflow
 
 A natural use of the framework: AI-driven peephole optimization with
-equivalence proofs against the original bytecode. The WETH demo
-carries two layered optimization passes on the 86-byte hand-rolled
-runtime, each shipped with sorry-free Lean equivalence theorems. The
-original `weth_solvency_invariant` proof (against `Weth.bytecode`) is
-unchanged: the optimized bytecodes inherit the same solvency
-guarantee through the per-block equivalence theorems plus the
+an equivalence proof against the original bytecode. The WETH demo
+ships an optimized 74-byte runtime
+([`Demos/Weth/OptimizedProgram.lean`](./EvmSmith/Demos/Weth/OptimizedProgram.lean))
+alongside the 86-byte hand-rolled baseline
+([`Demos/Weth/Program.lean`](./EvmSmith/Demos/Weth/Program.lean)),
+with sorry-free Lean equivalence theorems linking the two. The
+original `weth_solvency_invariant` proof (against `Weth.bytecode`)
+is unchanged: the optimized bytecode inherits the same solvency
+guarantee through the per-block equivalence theorems plus
 byte-identical behaviour at non-swap sites.
 
-| pass     | runtime | program                                     | equivalence proofs                         |
-|----------|--------:|---------------------------------------------|--------------------------------------------|
-| baseline |    86 B | [`Demos/Weth/Program.lean`](./EvmSmith/Demos/Weth/Program.lean) | — |
-| V1: PUSH0 (EIP-3855)                | 77 B | [`OptimizedProgram.lean`](./EvmSmith/Demos/Weth/OptimizedProgram.lean) | `selectorLoad_equiv`, `noSelectorRevert_equiv`, `callPushes_equiv`, `revertBlock_equiv` (+ observable corollaries) |
-| V2: V1 + CALLER-twice + drop POP    | 74 B | [`OptimizedProgramV2.lean`](./EvmSmith/Demos/Weth/OptimizedProgramV2.lean) | `depositBlock_v2_equiv`, `withdrawPreCallBlockV2_run`, `postCallSuccessTail_v2_equiv` (+ observable corollaries) |
+The optimization layers two classes of peephole transformations:
 
-**V1 — PUSH0 swap.** Every `PUSH1 0` (`60 00`, 2 bytes) in the
-runtime becomes `PUSH0` (`5f`, 1 byte) — nine sites, three
-`PUSH2 <label>` immediates shift accordingly. Per-block
-observable-equivalence theorems cover the four blocks where
-`PUSH1 0` appears (`selectorLoad`, `noSelectorRevert`, the four
-CALL-arg pushes, the final revert tail). At each block both
-`runSeq` invocations land in `.ok` of an explicit shared post-state
-helper parameterised over the differing `pcEnd`; the observable
-corollary derives `r_orig.{stack,toState,toMachineState} =
-r_opt.{...}` by `rfl`.
+**Class 1 — PUSH0 swap (EIP-3855, Shanghai).** Every `PUSH1 0`
+(`60 00`, 2 bytes) becomes `PUSH0` (`5f`, 1 byte) — nine sites,
+three `PUSH2 <label>` immediates shift accordingly. Block-level
+proofs `selectorLoad_equiv`, `noSelectorRevert_equiv`,
+`callPushes_equiv`, and `revertBlock_equiv` cover the four sites
+where `PUSH1 0` appears (selector-load prefix, no-selector revert,
+the four CALL-arg pushes, the final revert tail). Both `runSeq`
+invocations land in `.ok` of an explicit shared post-state helper
+parameterised over the differing `pcEnd`; observable corollaries
+derive `r_orig.{stack,toState,toMachineState} = r_opt.{...}` by
+`rfl`.
 
-**V2 — three runtime-gas wins layered on V1.**
+**Class 2 — CALLER-twice + drop POP (runtime gas).**
 
 * **Deposit body:** drop `DUP1` after the first `CALLER`; replace the
   `SWAP1` before `SSTORE` with a second `CALLER`. `CALLER` is BASE
@@ -132,33 +132,37 @@ r_opt.{...}` by `rfl`.
   leftover `x` is discarded with the call frame on halt anyway. −2
   gas, −1 byte.
 
-V2's intermediate stacks differ from V1 (V1 holds `sender` on stack
-longer; V2 reloads via `CALLER`), so the proofs are end-of-block
-state agreement: full state mod PC for deposit
-(`depositBlock_v2_equiv`), both pre-CALL success paths landing at
-the same SSTORE post-state under `UInt256.lt bal x = 0`
-(`withdrawPreCallBlockV2_run`), and halt-state agreement after the
-post-CALL `POP` drop where stacks differ but are unobservable
-post-frame (`postCallSuccessTail_v2_equiv`).
+Intermediate stacks differ here (the original holds `sender` on
+stack longer; the optimized reloads via `CALLER`), so the proofs
+are end-of-block state agreement: full state mod PC for deposit
+(`depositBlock_equiv`), both pre-CALL success paths landing at the
+same SSTORE post-state under `UInt256.lt bal x = 0`
+(`withdrawPreCallBlock_run` + `withdrawPreCallBlockOpt_run`), and
+halt-state agreement after the post-CALL `POP` drop where stacks
+differ but are unobservable post-frame
+(`postCallSuccessTail_equiv`).
+
+**Layout: 86 → 74 bytes.** Label shifts: `depositLbl` 32→29,
+`withdrawLbl` 42→38, `revertLbl` 80→70.
 
 **Foundry-measured gas** — 3-way comparison vs an idiomatic Solidity
 port (`mapping(address => uint256)`, CEI-ordered `deposit()` /
 `withdraw(uint256)`), in
 [`Demos/Weth/foundry/test/WethGasCompare.t.sol`](./EvmSmith/Demos/Weth/foundry/test/WethGasCompare.t.sol):
 
-| path                | baseline (86 B) | V1 / PUSH0 (77 B) | V2 (74 B) | Solidity (517 B) |
-|---------------------|----------------:|------------------:|----------:|-----------------:|
-| `deposit()`         |          31,789 |            31,788 |    31,784 |           32,052 |
-| `withdraw()` ok     |          32,642 |            32,637 |    32,631 |           33,093 |
-| `withdraw()` insuf. |           5,200 |             5,197 |     5,194 |            5,419 |
-| bad selector        |           2,998 |             2,995 |     2,995 |            3,061 |
+| path                | baseline (86 B) | optimized (74 B) | Solidity (517 B) |
+|---------------------|----------------:|-----------------:|-----------------:|
+| `deposit()`         |          31,789 |           31,784 |           32,052 |
+| `withdraw()` ok     |          32,642 |           32,631 |           33,093 |
+| `withdraw()` insuf. |           5,200 |            5,194 |            5,419 |
+| bad selector        |           2,998 |            2,995 |            3,061 |
 
 The test also checks behavioral parity: storage matches across all
 three implementations after a `deposit()` + partial `withdraw()`
 round (using the right slot derivation per impl — raw-address slot
-for the hand-rolled bytecode, keccak-derived for Solidity). Bytecode
-artifacts are regenerated via `lake exe weth-opt-dump-bytecode` and
-`lake exe weth-opt-v2-dump-bytecode`.
+for the hand-rolled bytecode, keccak-derived for Solidity). The
+optimized bytecode artifact is regenerated via
+`lake exe weth-opt-dump-bytecode`.
 
 ## Assumptions
 

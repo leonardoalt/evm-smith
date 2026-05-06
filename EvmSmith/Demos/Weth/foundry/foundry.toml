@@ -7,7 +7,6 @@ optimizer_runs = 200
 fs_permissions = [
   { access = "read", path = "./test/Weth.bytecode.hex" },
   { access = "read", path = "./test/Weth.optimized.bytecode.hex" },
-  { access = "read", path = "./test/Weth.optimizedV2.bytecode.hex" },
 ]
 
 [invariant]
