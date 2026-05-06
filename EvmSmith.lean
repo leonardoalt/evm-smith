@@ -14,4 +14,5 @@ import EvmSmith.Demos.Weth.InvariantClosure
 import EvmSmith.Demos.Weth.Invariant
 import EvmSmith.Demos.Weth.BytecodeFrame
 import EvmSmith.Demos.Weth.Solvency
+import EvmSmith.Demos.Weth.OptimizedProgram
 import EvmSmith.Demos.Tests

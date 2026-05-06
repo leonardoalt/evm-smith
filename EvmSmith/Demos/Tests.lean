@@ -2,6 +2,7 @@ import EvmSmith.Framework
 import EvmSmith.Demos.Add3.Program
 import EvmSmith.Demos.Register.Program
 import EvmSmith.Demos.Weth.Program
+import EvmSmith.Demos.Weth.OptimizedProgram
 
 /-!
 # Tests for the EvmSmith framework
@@ -167,6 +168,20 @@ to match the new layout. -/
 #guard EvmSmith.Weth.bytecode.get! 79 == 0x00   -- STOP (withdraw success)
 #guard EvmSmith.Weth.bytecode.get! 80 == 0x5b   -- JUMPDEST (revert entry)
 #guard EvmSmith.Weth.bytecode.get! 85 == 0xfd   -- REVERT
+
+/-! ### Optimized Weth bytecode (1-byte saved on the revert tail)
+
+`PUSH1 0; PUSH1 0; REVERT` (5 bytes after JUMPDEST, original) replaced
+by `PUSH1 0; DUP1; REVERT` (4 bytes after JUMPDEST, optimized). -/
+
+#guard EvmSmith.Weth.bytecodeOpt.size == 85
+#guard EvmSmith.Weth.bytecodeOpt.get! 80 == 0x5b   -- JUMPDEST (unchanged)
+#guard EvmSmith.Weth.bytecodeOpt.get! 81 == 0x60   -- PUSH1 (unchanged)
+#guard EvmSmith.Weth.bytecodeOpt.get! 83 == 0x80   -- DUP1 (was: PUSH1 0)
+#guard EvmSmith.Weth.bytecodeOpt.get! 84 == 0xfd   -- REVERT (shifted from 85)
+#guard EvmSmith.Weth.revertBlock.length == 4
+#guard EvmSmith.Weth.revertBlockOpt.length == 4
+
 
 /-! ### Weth selector-byte invariants
 
