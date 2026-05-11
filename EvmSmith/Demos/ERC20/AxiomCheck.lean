@@ -1,4 +1,5 @@
 import EvmSmith.Demos.ERC20.Equivalence
+import EvmSmith.Demos.ERC20.EquivalenceVyper
 
 /-!
 # Axiom checks for the ERC-20 equivalence proofs
@@ -18,5 +19,9 @@ namespace EvmSmith.ERC20.AxiomCheck
 #print axioms balanceStoreOrig_value
 #print axioms balanceStoreOpt_value
 #print axioms balanceStore_observable_equiv
+
+#print axioms EvmSmith.ERC20Vyper.vyperOptPrefix_value
+#print axioms EvmSmith.ERC20Vyper.vyperBalanceLoadOpt_value
+#print axioms EvmSmith.ERC20Vyper.vyperBalanceLoad_relational_equiv
 
 end EvmSmith.ERC20.AxiomCheck

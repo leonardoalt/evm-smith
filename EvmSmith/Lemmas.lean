@@ -290,6 +290,35 @@ These are the new opcodes needed by the ERC-20 keccak-balance demo
 (`EvmSmith/Demos/ERC20/`). Same template as the others: chase the
 dispatch and let iota close `rfl`. -/
 
+/-- `PUSH0` pushes `⟨0⟩` and advances PC by 1. EIP-3855 (Shanghai). -/
+lemma runOp_push0
+    (s : EVM.State) (stk : Stack UInt256) (pc : UInt256) :
+    runOp (.Push .PUSH0) { s with stack := stk, pc := pc } none
+      = .ok { s with stack := UInt256.ofNat 0 :: stk, pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `NOT` on stack `[a, rest]`: pops `a`, pushes its bitwise complement
+    (256-bit), advances PC by 1. -/
+lemma runOp_not
+    (s : EVM.State) (a : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .NOT { s with stack := a :: rest, pc := pc }
+      = .ok { s with
+          stack := UInt256.lnot a :: rest
+          pc := pc + UInt256.ofNat 1 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `MLOAD` on stack `[offset, rest]`: pops offset, pushes the 32-byte
+    word at memory `offset` (zero-padded if past the end), advances PC
+    by 1. Also bumps `activeWords` to cover the read. -/
+lemma runOp_mload
+    (s : EVM.State) (offset : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .MLOAD { s with stack := offset :: rest, pc := pc }
+      = .ok { s with
+          stack := (EvmYul.MachineState.mload s.toMachineState offset).1 :: rest
+          pc := pc + UInt256.ofNat 1
+          toMachineState := (EvmYul.MachineState.mload s.toMachineState offset).2 } := by
+  unfold runOp EvmYul.step; rfl
+
 /-- `MSTORE` on stack `[offset, value, rest]`: pops both, writes
     `value` (32 bytes, big-endian) into memory at `offset` via
     `MachineState.mstore`, advances PC by 1, stack now `rest`. -/
