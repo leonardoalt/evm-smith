@@ -3,3 +3,8 @@
 
 # Local Claude Code scheduler state
 .claude/scheduled_tasks.lock
+
+# Foundry build artifacts
+EvmSmith/Demos/*/foundry/out/
+EvmSmith/Demos/*/foundry/cache/
+EvmSmith/Demos/*/foundry/broadcast/

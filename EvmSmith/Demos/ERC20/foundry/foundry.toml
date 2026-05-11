@@ -1,0 +1,15 @@
+[profile.default]
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.20"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "solady/=lib/solady/src/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = false
