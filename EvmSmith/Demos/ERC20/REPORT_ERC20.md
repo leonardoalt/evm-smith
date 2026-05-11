@@ -179,6 +179,123 @@ The structural form `balanceStore_observable_equiv` exposes the
 post-store state precisely enough that any consumer wanting the
 round-trip can derive it from the standard EVM property.
 
+## Vyper / Snekmate variant
+
+After completing the Solidity variant, we ran the same exercise
+against Vyper's [Snekmate](https://github.com/pcaversaccio/snekmate)
+ERC-20. Two notable differences in approach:
+
+1. **Bytecode-level optimization** instead of source-level. Vyper has
+   no inline assembly, so the optimization is applied as a *patcher*
+   over compiled runtime bytecode. The patcher is length-preserving
+   (so PC-absolute jumpdests stay valid) and fail-closed on site-count
+   mismatch.
+
+2. **A different slot derivation**. Vyper emits a different keccak
+   prefix from Solidity — `keccak256(slot ++ key)` over a 64-byte
+   preimage (`mem[0x00..0x40]`) rather than Solady's seed-packed 32-
+   byte preimage. Slot id `0x02` is the actual emission (`vyper -f
+   layout` reports `1` due to a known +1 offset in Vyper's layout-JSON
+   format vs the runtime encoding).
+
+3. **A different slot replacement**. Naively using `addr` directly as
+   the slot collides with Vyper's named state variables (`owner` at
+   slot 1, `totalSupply` at 4, etc.). The patcher uses `NOT(addr)` as
+   the replacement slot: bitwise NOT maps every 160-bit address to a
+   slot in `[2^160, 2^256)`, well above every named slot and (by
+   Keccak preimage resistance) every keccak-derived slot. A single-
+   byte instruction.
+
+### Layout: original
+
+```
+PUSH1 0x02          ; slot id
+PUSH1 <P>           ; memory offset where addr argument lives
+MLOAD               ; addr from mem[P]
+PUSH1 0x20  MSTORE  ; mem[0x20] = addr
+PUSH0       MSTORE  ; mem[0x00] = 0x02
+PUSH1 0x40  PUSH0
+KECCAK256           ; keccak(slot ++ addr)
+SLOAD or SSTORE
+```
+
+### Layout: patched
+
+```
+JUMPDEST × 10       ; no-op padding (length-preserving)
+PUSH1 <P>
+MLOAD
+NOT                 ; addr → ~addr
+SLOAD or SSTORE
+```
+
+### Vyper test results
+
+`forge test` from
+[`foundry-vyper/`](./EvmSmith/Demos/ERC20-Vyper/foundry/) (loading the
+venv'd Vyper compiler via `PATH=.venv/bin:$PATH`):
+
+```
+Ran 42 tests across 2 backends (OriginalVyperERC20Test,
+OptimizedVyperERC20Test). All 42 passed (21 cases × 2 backends).
+```
+
+Coverage: same shape as the Solidity behaviour test — mint, burn,
+burn_from, approve, transfer, transferFrom (success + revert paths),
+infinite-allowance, fuzz on the public surface.
+
+### Vyper gas comparison
+
+| Operation              | Vyper-orig (gas) | Vyper-patched (gas) | Delta  |
+|------------------------|------------------|---------------------|--------|
+| `balanceOf` (warm)     |              920 |                 872 |  -48   |
+| `mint` (fresh)         |           51,810 |              51,714 |  -96   |
+| `mint` (warm)          |            3,510 |               3,414 |  -96   |
+| `burn`                 |            3,216 |               3,114 | -102   |
+| `transfer` (fresh)     |           25,506 |              25,314 | -192   |
+| `transfer` (warm)      |            3,606 |               3,414 | -192   |
+| `transferFrom`         |           28,137 |              27,945 | -192   |
+
+Runtime size: 6,602 bytes, **unchanged** (length-preserving patch).
+
+The Vyper deltas are roughly double the Solidity-Solady deltas at the
+transfer level because Vyper recomputes the balance-slot keccak at
+every access (no compiler-side reuse across read/write of the same
+`balanceOf[addr]`), so each balance access pays the full ~48-gas
+overhead. Solady-via-`solc` keeps the slot value on the stack between
+the read and write, paying keccak only once per address per function
+call.
+
+### Vyper proofs
+
+Three theorems in
+[`EquivalenceVyper.lean`](./EquivalenceVyper.lean), sorry-free, only
+Lean's standard foundation axioms:
+
+| Theorem | What it says |
+|---|---|
+| `vyperOptPrefix_value` | The 13-op patched prefix (10 JUMPDESTs, PUSH1 P, MLOAD, NOT) on entry stack `rest` exits with `[~addr, rest]` where `addr` is what MLOAD reads from `mem[P]`. |
+| `vyperBalanceLoadOpt_value` | Extends with the trailing SLOAD: end stack-top is `(sload σ.toState (~addr)).snd`. |
+| `vyperBalanceLoad_relational_equiv` | Under the per-address storage relation (`(sload σ_orig slot).snd = (sload σ_opt (~addr)).snd`), both load blocks land at the same stack-top. The orig-side characterization is taken as a hypothesis — the 10-step `unfold; rfl` chain for the keccak prefix WHNF-times out in EVMYulLean's current shape, same root cause as the Solidity variant's storage round-trip gap. |
+
+The "Keccak vanishes" framing carries over identically: the orig
+keccak prefix's value never has to be reduced, only carried
+symbolically through the storage relation.
+
+### Vyper files
+
+| File | Role |
+|---|---|
+| [`STORAGE_LAYOUT_VYPER.md`](./STORAGE_LAYOUT_VYPER.md) | Vyper-side investigation (slot derivation, +1 offset, NOT trick rationale). |
+| [`ProgramVyper.lean`](./ProgramVyper.lean) | Hand-rolled Vyper keccak prefix definition. |
+| [`OptimizedProgramVyper.lean`](./OptimizedProgramVyper.lean) | Hand-rolled NOT-prefix definition. |
+| [`EquivalenceVyper.lean`](./EquivalenceVyper.lean) | Three equivalence theorems. |
+| [`../ERC20-Vyper/foundry/src/mock.vy`](../ERC20-Vyper/foundry/src/mock.vy) | The Vyper Snekmate-based mock. |
+| [`../ERC20-Vyper/foundry/script/patch.py`](../ERC20-Vyper/foundry/script/patch.py) | Offline Python patcher (used to dump the optimized runtime hex for inspection). |
+| [`../ERC20-Vyper/foundry/test/BytecodePatcher.sol`](../ERC20-Vyper/foundry/test/BytecodePatcher.sol) | Solidity in-place patcher (used by tests via `vm.etch`). |
+| [`../ERC20-Vyper/foundry/test/ERC20VyperCompare.t.sol`](../ERC20-Vyper/foundry/test/ERC20VyperCompare.t.sol) | Behaviour parity test (21 cases × 2 backends). |
+| [`../ERC20-Vyper/foundry/test/ERC20VyperGasCompare.t.sol`](../ERC20-Vyper/foundry/test/ERC20VyperGasCompare.t.sol) | Per-op gas measurement. |
+
 ## Files
 
 | File | Role |
