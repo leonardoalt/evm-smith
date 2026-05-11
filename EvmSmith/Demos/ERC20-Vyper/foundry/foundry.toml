@@ -1,0 +1,30 @@
+[profile.default]
+out = "out"
+libs = ["lib"]
+# Skip every Vyper file under the symlinked snekmate tree — we only
+# want to compile `src/mock.vy`; the library modules get pulled in via
+# Vyper's import resolution.
+skip = ["src/snekmate/**/*.vy", "src/snekmate/**/*.vyi"]
+solc_version = "0.8.20"
+optimizer = true
+optimizer_runs = 200
+ffi = true
+# Vyper sources in src/ get compiled with the venv'd `vyper`.
+# Caller is expected to invoke forge with the venv on PATH (see Makefile).
+vyper = { optimize = "gas" }
+# Allow imports across the snekmate tree.
+allow_paths = ["lib/snekmate/src"]
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "snekmate/=lib/snekmate/src/snekmate/",
+]
+fs_permissions = [
+  { access = "read", path = "./build/" },
+  { access = "read", path = "./lib/" },
+  { access = "read", path = "./src/" },
+]
+
+[invariant]
+runs = 64
+depth = 32
+fail_on_revert = false

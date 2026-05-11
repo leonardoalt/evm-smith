@@ -16,3 +16,9 @@
 [submodule "EvmSmith/Demos/ERC20/foundry/lib/solady"]
 	path = EvmSmith/Demos/ERC20/foundry/lib/solady
 	url = https://github.com/Vectorized/solady.git
+[submodule "EvmSmith/Demos/ERC20-Vyper/foundry/lib/forge-std"]
+	path = EvmSmith/Demos/ERC20-Vyper/foundry/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std.git
+[submodule "EvmSmith/Demos/ERC20-Vyper/foundry/lib/snekmate"]
+	path = EvmSmith/Demos/ERC20-Vyper/foundry/lib/snekmate
+	url = https://github.com/pcaversaccio/snekmate.git
