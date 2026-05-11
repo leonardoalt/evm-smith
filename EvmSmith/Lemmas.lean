@@ -276,6 +276,50 @@ lemma runOp_stop (s : EVM.State) :
           s.toMachineState.setReturnData .empty } := by
   unfold runOp EvmYul.step; rfl
 
+/-- `PUSH4 v` on a state with stack `stk`: pushes `v`, advances PC by 5
+    (one byte for the opcode + four bytes for the immediate). -/
+lemma runOp_push4
+    (s : EVM.State) (v : UInt256) (stk : Stack UInt256) (pc : UInt256) :
+    runOp (.Push .PUSH4) { s with stack := stk, pc := pc } (some (v, 4))
+      = .ok { s with stack := v :: stk, pc := pc + UInt256.ofNat 5 } := by
+  unfold runOp EvmYul.step; rfl
+
+/-! ### Memory-touching opcodes (MSTORE, KECCAK256)
+
+These are the new opcodes needed by the ERC-20 keccak-balance demo
+(`EvmSmith/Demos/ERC20/`). Same template as the others: chase the
+dispatch and let iota close `rfl`. -/
+
+/-- `MSTORE` on stack `[offset, value, rest]`: pops both, writes
+    `value` (32 bytes, big-endian) into memory at `offset` via
+    `MachineState.mstore`, advances PC by 1, stack now `rest`. -/
+lemma runOp_mstore
+    (s : EVM.State) (offset val : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .MSTORE { s with stack := offset :: val :: rest, pc := pc }
+      = .ok { s with
+          stack := rest
+          pc := pc + UInt256.ofNat 1
+          toMachineState :=
+            EvmYul.MachineState.mstore s.toMachineState offset val } := by
+  unfold runOp EvmYul.step; rfl
+
+/-- `KECCAK256` on stack `[offset, size, rest]`: pops both, reads `size`
+    bytes of memory starting at `offset`, hashes them via `ffi.KEC`
+    (opaque), and pushes the 32-byte digest reinterpreted as a
+    `UInt256`. Also bumps `activeWords` to cover the read range. Note
+    the result on stack is structurally
+    `UInt256.ofNat (fromByteArrayBigEndian (ffi.KEC <memory bytes>))`,
+    which is irreducible because `ffi.KEC` is `opaque`. -/
+lemma runOp_keccak256
+    (s : EVM.State) (offset size : UInt256) (rest : Stack UInt256) (pc : UInt256) :
+    runOp .KECCAK256 { s with stack := offset :: size :: rest, pc := pc }
+      = .ok { s with
+          stack := (EvmYul.MachineState.keccak256 s.toMachineState offset size).1 :: rest
+          pc := pc + UInt256.ofNat 1
+          toMachineState :=
+            (EvmYul.MachineState.keccak256 s.toMachineState offset size).2 } := by
+  unfold runOp EvmYul.step; rfl
+
 /-! ## Structural lemmas about `EVM.State` and `runSeq` -/
 
 /-- Updating only the `stack` and `pc` fields of an `EVM.State` leaves its
