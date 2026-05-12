@@ -282,6 +282,49 @@ the balance map.
   injective per address (different addresses map to different
   slots). No two users alias.
 
+### The no-aliasing Foundry invariants
+
+Beyond the targeted regression tests below, both backends now ship a
+generic *fuzz invariant* that catches any storage aliasing — not
+just collisions with the specific named slots we know about. See
+[`foundry/test/NoAliasingInvariant.t.sol`](./foundry/test/NoAliasingInvariant.t.sol)
+(Solidity) and
+[`../ERC20-Vyper/foundry/test/NoAliasingInvariant.t.sol`](../ERC20-Vyper/foundry/test/NoAliasingInvariant.t.sol)
+(Vyper).
+
+A handler drives the contract through fuzzed `mint` / `transfer`
+sequences over a small actor dictionary that **always seeds the
+low-collision addresses** (0x00..0x03 for Solidity, 0x00..0x06 for
+Vyper). Two invariants per backend:
+
+- `invariant_metadata_preserved`: `name()` / `symbol()` /
+  `decimals()` (and `owner()` on Vyper) must return their
+  constructor-initialised values across any fuzz sequence.
+- `invariant_no_phantom_balance`: `Σ balanceOf(actor) ≤
+  totalSupply`. Aliasing inflates the sum (two actors share one
+  storage slot, both read its value), or corrupts `totalSupply`
+  itself (if a balance write lands on its slot) — either trips the
+  invariant.
+
+Sanity check: temporarily reverting the `NOT(addr)` fix to the
+broken `sload(addr)` version and re-running, the
+phantom-balance invariant fires immediately:
+
+```
+[FAIL: invariant_no_phantom_balance]
+  phantom balance: aliased addresses inflate the visible sum:
+  76318471673650654452077537475063650456547488489235383969275586155053664174114 > 0
+```
+
+(That huge number is the corrupted `_name` string's packed bytes
+read as if it were a uint256 balance.) After restoring the fix,
+all four invariants × 2 backends pass at 2,048 fuzzed calls each.
+
+This is the **lowest-effort defence** against the bug class: it
+requires no knowledge of which slots will collide, just a fuzz
+dictionary biased toward the low-address neighbourhood. Add it to
+*every* storage-layout optimization, not just this one.
+
 ### Regression test that would have caught the Solidity bug
 
 Added to [`ERC20Compare.t.sol`](./foundry/test/ERC20Compare.t.sol):
@@ -433,6 +476,180 @@ cancellation, all kernel-checkable.
 A non-injective slot function (say, `addr mod 2^32`) would fail
 this theorem and immediately rule the optimization unsafe at the
 type-check level. With `~addr`, the proof goes through.
+
+## Refinement framework + abstract ERC-20 spec
+
+The peephole theorems (`balanceLoad_observable_equiv`,
+`balanceStore_observable_equiv`) prove that the orig and opt
+*bytecode* agree on stack tops and post-state structure **under a
+per-address storage relation**. The relation is taken as a
+precondition; the peephole proof doesn't check whether the slot
+function can actually maintain it across a sequence of operations.
+A non-injective or named-slot-colliding slot function would
+silently make the relation degenerate, and the peephole proof would
+still go through.
+
+This is the **soundness gap** the user flagged after the
+collision bug surfaced. The refinement framework in
+[`Spec.lean`](./Spec.lean) closes it at the *structure* level. The
+relevant pieces:
+
+### The abstract spec
+
+A minimal ERC-20 modelled at the Lean level:
+
+```lean
+-- Storage layout, abstracted: balances + named non-balance state.
+def AbsStorage := UInt256 → UInt256  -- balance map
+-- Operations:
+def absMint     (bal : AbsStorage) (dst amt : UInt256) : AbsStorage
+def absBurn     (bal : AbsStorage) (src amt : UInt256) : AbsStorage
+def absTransfer (bal : AbsStorage) (src dst amt : UInt256) : AbsStorage
+```
+
+Concrete storage is also `UInt256 → UInt256` but with
+`Function.update` semantics. Operations write storage at the slot
+derived from the address via the abstraction.
+
+### The `SlotAbstraction` structure — both obligations type-level
+
+```lean
+structure SlotAbstraction where
+  ValidAddr : UInt256 → Prop           -- which inputs are "addresses"
+  NamedSlot : UInt256 → Prop           -- non-balance state slots
+  slotFn    : UInt256 → UInt256        -- slot derivation
+  inj       : ∀ a b, ValidAddr a → ValidAddr b →
+              slotFn a = slotFn b → a = b
+  disjoint  : ∀ a, ValidAddr a → ¬ NamedSlot (slotFn a)
+```
+
+**You cannot instantiate `SlotAbstraction` without supplying proofs
+for both `inj` and `disjoint`.** That's the type-system enforcing
+the obligations.
+
+### The preservation theorems
+
+```lean
+theorem mint_refines     ... -- requires sa.ValidAddr dst
+theorem burn_refines     ... -- requires sa.ValidAddr src
+theorem transfer_refines ... -- requires sa.ValidAddr src + ValidAddr dst
+```
+
+Each:
+- Per-valid-address branch uses `sa.inj` to argue distinct
+  addresses don't share slots — required for the "the write at
+  another user's slot didn't touch mine" step.
+- Per-named-slot branch uses `sa.disjoint` to argue the write
+  doesn't corrupt metadata — required for the "named slot is
+  untouched" preservation step.
+
+A non-injective slot function fails to construct `inj`. A slot
+function that collides with named state fails to construct
+`disjoint`. Either failure prevents the structure from being
+instantiated, which prevents the preservation theorems from being
+applied, which means **the optimization cannot claim soundness**
+under this framework.
+
+### Concrete instances
+
+```lean
+def lnotSlotAbstraction : SlotAbstraction where
+  ValidAddr := IsValidAddress         -- a.toNat < 2^160
+  NamedSlot := IsSoladyNamedSlot      -- s ∈ {0, 1, 2, _TOTAL_SUPPLY_SLOT}
+  slotFn    := UInt256.lnot
+  inj       := lnot_injective_on_valid
+  disjoint  := lnot_disjoint_from_named
+```
+
+The `disjoint` proof is the high-bit argument: for any 160-bit `a`,
+`lnot a ≥ 2^256 - 2^160`, which is well above every named slot
+(max = `_TOTAL_SUPPLY_SLOT ≈ 2^46`).
+
+The pre-fix `idSlotAbstraction` is **not constructible** under
+this framework: `id 0 = 0 ∈ {0, 1, 2}`, so `disjoint` cannot be
+proved. The buggy design is rejected at type-check.
+
+### What to do to make your bytecode pass the proofs
+
+If you (or an AI) propose a new storage-layout optimization, here
+is the **recipe** to make it sound under this framework:
+
+1. **Pick a slot function `f : UInt256 → UInt256`** that you
+   believe satisfies the two safety conditions.
+2. **Define your `ValidAddr` predicate** — typically `a.toNat <
+   2^160` for real Ethereum addresses, but any decidable predicate
+   works.
+3. **Define your `NamedSlot` predicate** — the slots your contract
+   uses for non-balance state. This depends on the compiler / source
+   layout (Solidity assigns 0, 1, 2, … to declared state vars;
+   constants like Solady's `_TOTAL_SUPPLY_SLOT` are baked in).
+4. **Prove `inj`** — `∀ a b, ValidAddr a → ValidAddr b → f a = f b
+   → a = b`. For `lnot`, this comes from `lnot_injective`.
+   Hashing functions reduce to a cryptographic axiom (Keccak
+   collision-resistance is evm-smith's T5). For ad-hoc choices,
+   you'll need to prove it from first principles — if you can't,
+   your optimization is unsafe.
+5. **Prove `disjoint`** — `∀ a, ValidAddr a → ¬ NamedSlot (f a)`.
+   This is the test that catches the named-slot collision class
+   of bugs. The proof is contract-specific: enumerate the named
+   slots, show each one is outside the image of `f` restricted to
+   valid addresses.
+6. **Instantiate `SlotAbstraction`** with the four fields.
+7. **Apply `mint_refines`, `burn_refines`, `transfer_refines`** to
+   your operations. The theorems hand you a refinement-preserving
+   post-state — which is exactly the user-visible guarantee
+   "balances are correctly updated, metadata is untouched."
+
+If any of steps 4–6 fail, **don't ship the optimization**. The
+proof obligation is the safety obligation.
+
+### Where the framework currently stops: the EvmYul.State bridge
+
+The refinement preservation theorems live at the *abstract*
+storage level (`UInt256 → UInt256` with `Function.update`). To lift
+them to actual `EvmYul.State.sstore` / `sload` — the layer the
+deployed bytecode operates on — needs one more bridge theorem:
+
+```lean
+theorem storageAt_sstore
+    (σ : EvmYul.State .EVM) (k v : UInt256) (acc : Account .EVM)
+    (h : σ.accountMap.find? σ.executionEnv.codeOwner = some acc) :
+    ∀ slot, storageAt (EvmYul.State.sstore σ k v) slot
+            = Function.update (storageAt σ) k v slot
+```
+
+where `storageAt σ slot` is the abstract projection from `σ`'s
+account storage at `slot`. With this in hand, every theorem in
+`Spec.lean` lifts mechanically to the running EVM.
+
+The proof requires two RBMap-storage-key-level lemmas not currently
+in Batteries:
+
+```lean
+-- Round-trip on the v = 0 (erase) branch:
+storage_find?_erase_self : (t.erase k).find? k = none
+
+-- Nonalias on the v = 0 (erase) branch:
+storage_find?_erase_of_ne : k ≠ k' → (t.erase k).find? k' = t.find? k'
+```
+
+The `find?_insert_of_eq` / `find?_insert_of_ne` counterparts ship
+in `Batteries.RBMap.Lemmas`. The erase versions are provable via
+the existing `EvmSmith.Layer1.rbmap_erase_toList_filter` (now made
+public for this purpose) in ~50 lines of Lean — same proof
+structure as the AccountAddress-keyed `EvmYul.Frame.find?_erase_ne`.
+The instance-typeclass setup (`Std.LawfulEqCmp` for UInt256) is
+already done in
+[`EvmSmith/Lemmas/UInt256Order.lean`](../../Lemmas/UInt256Order.lean).
+
+Estimated effort to close: ~one focused afternoon. The infra is in
+place; what's missing is the proof labor on the storage-key-level
+erase lemmas. Documented here as the next step rather than
+attempted in this pass because the proofs hit several layered
+Batteries-API edge cases (decide-equality on `(v == default)`, Fin
+sub modular arithmetic, RBMap toList-filter unification) that
+warrant a dedicated session rather than being entangled with the
+peephole story.
 
 ### What's not formalized here (and why)
 
