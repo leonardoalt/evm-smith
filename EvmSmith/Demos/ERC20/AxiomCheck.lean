@@ -1,5 +1,6 @@
 import EvmSmith.Demos.ERC20.Equivalence
 import EvmSmith.Demos.ERC20.EquivalenceVyper
+import EvmSmith.Demos.ERC20.Spec
 
 /-!
 # Axiom checks for the ERC-20 equivalence proofs
@@ -28,5 +29,10 @@ namespace EvmSmith.ERC20.AxiomCheck
 #print axioms EvmYul.UInt256.lnot_toNat
 #print axioms EvmSmith.ERC20.distinct_addresses_distinct_opt_slots
 #print axioms EvmSmith.ERC20Vyper.distinct_addresses_distinct_opt_slots
+
+#print axioms EvmSmith.ERC20.Spec.mint_refines
+#print axioms EvmSmith.ERC20.Spec.burn_refines
+#print axioms EvmSmith.ERC20.Spec.transfer_refines
+#print axioms EvmSmith.ERC20.Spec.lnotSlotAbstraction
 
 end EvmSmith.ERC20.AxiomCheck
