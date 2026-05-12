@@ -1,4 +1,4 @@
-# ERC-20 Storage Layout — Investigation
+# ERC-20 Storage Layout: Investigation
 
 A walk-through of where Solady's ERC-20 puts its data, why that costs
 gas every transfer, and what we change to make balances cheaper.
@@ -37,7 +37,7 @@ keccak256                    ; -> top = keccak256(memory[0x0c..0x2c])
 ```
 
 After two `mstore`s, memory `0x0c..0x2c` contains
-`[20 bytes of address][8 zero bytes][4 bytes of seed 0x87a211a2]` —
+`[20 bytes of address][8 zero bytes][4 bytes of seed 0x87a211a2]` -
 exactly the 32-byte preimage hashed.
 
 Then `SLOAD` is called on the resulting hash, producing the user's
@@ -62,7 +62,7 @@ Each balance access pays for:
   `PUSH/DUP/SWAP` housekeeping needed to stage operands.
 
 A successful `transfer(to, amount)` in Solady touches the balance of
-`from` (load + store) and the balance of `to` (load + store) — 4
+`from` (load + store) and the balance of `to` (load + store). 4
 balance accesses, so ~4 × 42 = ~168 gas paid just for the keccak slot
 computation, plus the bytecode cost.
 
@@ -75,7 +75,7 @@ same storage**. The keccak hash of `(key, slot)` is what prevents
 
 But that's only a constraint if all those maps live in the same contract.
 An ERC-20 contract has *one* contract storage, and we can lay it out
-however we like — as long as the layout is **injective** for each
+however we like, as long as the layout is **injective** for each
 quantity we care about.
 
 The optimization stores `balances[addr]` at slot `uint256(uint160(addr))`
@@ -84,7 +84,7 @@ collide:
 
 - A balance slot is at most `2^160 - 1` (any address).
 - An allowance slot is the keccak of a 52-byte preimage. The chance of
-  this colliding with any 160-bit-or-less value is `2^-96` per slot —
+  this colliding with any 160-bit-or-less value is `2^-96` per slot -
   this is the same collision-resistance the original layout relies on
   for *all* its slots, so we're not making the trust assumption worse.
 
@@ -106,11 +106,11 @@ Per-access savings on warm slots:
 
 - `KECCAK256` removed: **-36 gas**
 - Two `MSTORE`s removed (modulo memory expansion): **-6 gas** if memory
-  was already paid for (and it might not be — see below).
+  was already paid for (and it might not be, see below).
 - `PUSH 0x20; PUSH 0x0c` removed: **-6 gas**.
 
 That's ~48 gas per balance access. A `transfer` has 4 balance accesses,
-~192 gas of savings — but in practice the savings are less than that
+~192 gas of savings. But in practice the savings are less than that
 because the optimizer reuses the keccak'd slot value across the
 matched load/store, and because some of the mstores get amortized
 across access sites that share the scratch memory.
@@ -146,7 +146,7 @@ one corrupts the other.
 The orig layout's collision-resistance comes from keccak; the opt
 layout's collision-resistance for balances vs allowances/nonces/total
 supply also comes from keccak (since the other slots are still
-keccak-derived). We're not relaxing any cryptographic assumption — we
+keccak-derived). We're not relaxing any cryptographic assumption. We
 just shorten the path for the balance bucket because it only needs to
 be injective in the address.
 
@@ -158,13 +158,13 @@ functions in both layouts produce identical observable behavior.
 
 Allowances are keyed by *two* addresses `(owner, spender)`. Their
 combined preimage is 52 bytes, so we can't fit the joint key in a
-single 256-bit slot without further packing — and the moment we pack,
+single 256-bit slot without further packing. And the moment we pack,
 we lose the strong injectivity property the proof relies on. Keccak
 is the right tool for the two-key case.
 
 `nonces` is per-owner, so in principle could use the same address-as-
 slot trick. We don't change it because (a) nonces collide trivially
-with balances when both use raw addresses — and balances and nonces
+with balances when both use raw addresses. And balances and nonces
 would then live at *the same* slot, a real bug. To keep nonces direct
 we'd need a different injective embedding (e.g., `(uint256(addr) | tag)`
 with a high-bit tag), but the gain is small relative to the proof

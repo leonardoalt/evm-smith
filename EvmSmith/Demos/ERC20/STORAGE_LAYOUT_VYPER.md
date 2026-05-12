@@ -1,8 +1,8 @@
-# Vyper / Snekmate ERC-20 — Storage Layout & Optimization
+# Vyper / Snekmate ERC-20: Storage Layout & Optimization
 
 Companion to [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md) (Solidity /
-Solady variant). Same optimization idea — balance slot from the
-address directly — but applied at the **bytecode level** to Vyper's
+Solady variant). Same optimization idea, balance slot from the
+address directly. But applied at the **bytecode level** to Vyper's
 compiled output, with one extra twist.
 
 ## How Vyper lays out storage
@@ -37,7 +37,7 @@ slot id directly out of the `balanceOf` public getter's bytecode.
 
 ## What Vyper emits for `self.balanceOf[addr]`
 
-Across every balance access — read or write — Vyper emits the
+Across every balance access, read or write. Vyper emits the
 identical 14-byte prefix (variable: `<P>`, the memory offset where the
 caller has parked the address argument):
 
@@ -72,7 +72,7 @@ This differs from Solady's prefix in two ways:
    `mstore(0x00, owner)` directly.
 
 The keccak hash itself uses the same `KECCAK256` opcode, with the
-same opaque `ffi.KEC` in EVMYulLean — so the proof story (Keccak
+same opaque `ffi.KEC` in EVMYulLean. So the proof story (Keccak
 vanishes from the equivalence argument) carries over identically.
 
 ## The optimization
@@ -183,7 +183,7 @@ From `forge test --match-contract ERC20VyperGasCompareTest -vv`:
 The per-keccak-saved overhead is roughly 50 gas (KECCAK256 36 +
 2×MSTORE 6 + 3×PUSH 9 - 10×JUMPDEST 10 - PUSH 3 - MLOAD 3 - NOT 3 ≈
 48). Vyper does 1 keccak per balanceOf access, 2 per mint/burn, 4 per
-transfer/transferFrom — hence the proportional deltas.
+transfer/transferFrom, hence the proportional deltas.
 
 Solady-via-`solc` saves fewer keccaks per function because the
 compiler reuses the slot value across the read/write of the same
@@ -195,7 +195,7 @@ why Vyper-side deltas are bigger.
 Without the `NOT` substitution, the optimization is unsafe in Vyper:
 any user with an address in `[0x01, max-named-slot]` collides with
 named state. With `NOT`, we get the bijectivity (`NOT` is bijective on
-`UInt256`) and the high-bit guarantee — every balance lives strictly
+`UInt256`) and the high-bit guarantee, every balance lives strictly
 above `2^160`, in a region neither named slots nor keccak slots can
 practically reach.
 
