@@ -53,6 +53,14 @@ instance : Std.ReflCmp (compare : UInt256 → UInt256 → Ordering) where
     rw [compare_eq]
     exact Std.ReflCmp.compare_self
 
+instance : Std.LawfulEqCmp (compare : UInt256 → UInt256 → Ordering) where
+  eq_of_compare {x y} h := by
+    rw [compare_eq] at h
+    -- Fin's compare returns .eq iff the underlying Nat-values are equal.
+    obtain ⟨xv⟩ := x; obtain ⟨yv⟩ := y
+    have : xv = yv := Std.LawfulEqCmp.eq_of_compare h
+    exact congrArg UInt256.mk this
+
 /-! ## Subtraction bridges (L0-S1..S3) -/
 
 /-- L0-S1: `UInt256.sub` commutes with `Nat.sub` under `b ≤ a`. -/

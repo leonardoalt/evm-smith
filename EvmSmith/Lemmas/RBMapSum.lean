@@ -412,7 +412,7 @@ theorem erase_toList_filter
 /-! ### L1-C: erase lemmas via the filter characterization -/
 
 /-- RBMap-level version of `erase_toList_filter`. -/
-private theorem rbmap_erase_toList_filter
+theorem rbmap_erase_toList_filter
     (t : RBMap UInt256 UInt256 compare) (k : UInt256) :
     (t.erase k).toList
       = t.toList.filter (fun p => decide (compare k p.1 ≠ .eq)) := by
