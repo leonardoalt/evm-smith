@@ -1,4 +1,5 @@
 import EvmSmith.Lemmas
+import EvmSmith.Lemmas.UInt256Order
 import EvmSmith.Demos.ERC20.ProgramVyper
 import EvmSmith.Demos.ERC20.OptimizedProgramVyper
 
@@ -50,6 +51,22 @@ named slot and (with overwhelming probability) every keccak slot too.
 
 namespace EvmSmith.ERC20Vyper
 open EvmYul EvmYul.EVM EvmSmith
+
+/-! ## Safety condition on the opt slot function
+
+The Vyper peephole replaces `keccak256(slot ++ addr)` with
+`UInt256.lnot addr`. For the optimization to be sound, distinct
+addresses must map to distinct opt slots — otherwise two users
+alias. We re-export the injectivity corollary from the Solidity
+side, since both demos share the same opt-side slot function. -/
+
+/-- Distinct addresses produce distinct opt-side slots (re-export of
+the lemma in `Equivalence.lean`). -/
+theorem distinct_addresses_distinct_opt_slots
+    {a b : UInt256} (hne : a ≠ b) :
+    UInt256.lnot a ≠ UInt256.lnot b := by
+  intro habs
+  exact hne (EvmYul.UInt256.lnot_injective habs)
 
 /-! ## Storage relation -/
 

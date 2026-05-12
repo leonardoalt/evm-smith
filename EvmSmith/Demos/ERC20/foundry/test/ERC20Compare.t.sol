@@ -254,6 +254,52 @@ abstract contract ERC20BehaviourTest is Test {
         assertTrue(token.approve(to, amount));
         assertEq(token.allowance(address(this), to), amount);
     }
+
+    // -------- metadata-preservation regression tests --------
+    //
+    // The optimized backend at one point used `addr` directly as a
+    // storage slot. Solidity assigns `_name`, `_symbol`, `_decimals` to
+    // slots 0, 1, 2 — so `mint(address(0), v)` corrupted `_name`, etc.
+    // The fuzz suite missed it because it never reads the metadata
+    // getters after a fuzzed mint. These tests pin the contract's
+    // metadata before *and* after a sequence of operations that target
+    // low addresses, so any future regression on the storage layout
+    // surfaces immediately.
+
+    function testMetadataSurvivesMintToZeroAddress() public {
+        _mint(address(0x00), 100 ether);
+        assertEq(token.name(), "Token");
+        assertEq(token.symbol(), "TKN");
+        assertEq(token.decimals(), 18);
+    }
+
+    function testMetadataSurvivesMintToLowAddresses() public {
+        _mint(address(0x00), 1 ether);
+        _mint(address(0x01), 2 ether);
+        _mint(address(0x02), 3 ether);
+        _mint(address(0x03), 4 ether);
+        assertEq(token.name(), "Token");
+        assertEq(token.symbol(), "TKN");
+        assertEq(token.decimals(), 18);
+    }
+
+    /// @dev Reproduces the exact bug pattern that broke an earlier
+    ///      version of `MockERC20Optimized`: mint a value whose low
+    ///      byte is `0x80` to `address(0)`. With the broken layout,
+    ///      this flipped Solidity's long-string flag on slot 0 and
+    ///      `name()` panicked with "storage byte array incorrectly
+    ///      encoded". Fixed by using `not(addr)` as the balance slot.
+    function testMetadataSurvivesLongStringFlagAttack() public {
+        _mint(address(0x00), 0x80);
+        assertEq(token.name(), "Token");
+    }
+
+    function testFuzzMetadataSurvivesMintToLowAddr(uint8 low, uint96 amount) public {
+        _mint(address(uint160(low)), amount);
+        assertEq(token.name(), "Token");
+        assertEq(token.symbol(), "TKN");
+        assertEq(token.decimals(), 18);
+    }
 }
 
 contract OriginalERC20Test is ERC20BehaviourTest {

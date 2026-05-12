@@ -24,4 +24,9 @@ namespace EvmSmith.ERC20.AxiomCheck
 #print axioms EvmSmith.ERC20Vyper.vyperBalanceLoadOpt_value
 #print axioms EvmSmith.ERC20Vyper.vyperBalanceLoad_relational_equiv
 
+#print axioms EvmYul.UInt256.lnot_injective
+#print axioms EvmYul.UInt256.lnot_toNat
+#print axioms EvmSmith.ERC20.distinct_addresses_distinct_opt_slots
+#print axioms EvmSmith.ERC20Vyper.distinct_addresses_distinct_opt_slots
+
 end EvmSmith.ERC20.AxiomCheck

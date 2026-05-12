@@ -22,7 +22,7 @@ The proof is structured as a single peephole transformation:
 ```
 [MSTORE 0x0c seed; MSTORE 0x00 addr; KECCAK256 → SLOAD]    -- keccak layout
         ≡
-[SLOAD addr]                                                -- address-as-slot
+[NOT addr; SLOAD]                                           -- ~addr-as-slot
 ```
 
 — and the structural counterpart for stores. Because Solady's
@@ -31,53 +31,306 @@ at these peephole sites, the local equivalence at each peephole lifts
 to whole-function equivalence under a per-address storage-translation
 relation.
 
+(The `NOT` step on the right-hand side is *not* a typo — see the
+"Collision-avoidance" section below for why we don't use the raw
+address as a slot.)
+
+## Repository setup
+
+How the two test harnesses are wired up. Both keep external
+dependencies as git submodules, pin compiler versions, and put the
+build artefacts and the proof artefacts under the same demo
+directory so the engineering and the proof stay co-located.
+
+### Solidity / Solady setup
+
+Layout — `EvmSmith/Demos/ERC20/foundry/`:
+
+```
+foundry.toml                 solc 0.8.20, optimizer on (200 runs)
+lib/
+├── forge-std/               submodule, foundry-rs/forge-std
+└── solady/                  submodule, pinned to commit 90db92c
+src/
+├── MockERC20Original.sol    inherits Solady's ERC20 verbatim
+└── MockERC20Optimized.sol   inherits Solady's ERC20; overrides 6
+                             virtual functions with inline-asm
+                             versions that use ~addr as the balance slot
+test/
+├── ERC20Compare.t.sol       parameterised behaviour test; same suite
+                             runs against both contracts
+└── ERC20GasCompare.t.sol    per-op gas comparison
+```
+
+Foundry config (`foundry.toml`):
+
+| Option | Value | Why |
+|---|---|---|
+| `solc_version` | `"0.8.20"` | Matches Solady's CI; the inline-assembly idioms (`shr`, `shl`, `keccak256` from yul) are stable on this version. |
+| `optimizer` | `true` | Without it, the compiled bytecode is bloated with stack-cleanup boilerplate that swamps the keccak-prefix delta we're measuring. |
+| `optimizer_runs` | `200` | Standard Solidity-ecosystem default (Solady itself uses 200). Higher runs would over-inline at the cost of deploy size and don't affect the keccak-prefix savings. |
+
+We deliberately don't use `via_ir = true` because (a) Solady's
+assembly idioms are designed for the legacy pipeline and (b) the
+IR pipeline can hoist the keccak'd slot across read/write pairs,
+muddying the gas comparison.
+
+Building:
+
+```bash
+cd EvmSmith/Demos/ERC20/foundry
+forge build               # uses solc 0.8.20 via foundry's resolver
+forge test                # runs both behaviour and gas tests
+```
+
+### Vyper / Snekmate setup
+
+Layout — `EvmSmith/Demos/ERC20-Vyper/`:
+
+```
+.venv/                       Python venv (gitignored)
+foundry/
+  foundry.toml               solc 0.8.20 + vyper = { optimize = "gas" }
+  lib/
+  ├── forge-std/             submodule
+  └── snekmate/              submodule, pinned to commit ba43b69
+  src/
+  ├── mock.vy                Snekmate-based mock contract
+  └── snekmate/              symlink → ../lib/snekmate/src/snekmate
+                             (so Vyper's import resolver finds the package)
+  script/
+  └── patch.py               offline bytecode patcher (AST-cross-checked)
+  test/
+  ├── BytecodePatcher.sol    Solidity in-place patcher used by tests
+  ├── ERC20VyperCompare.t.sol
+  └── ERC20VyperGasCompare.t.sol
+```
+
+The venv is pinned to Vyper 0.5.0a1 (`pip install vyper==0.5.0a1`),
+the version that satisfies Snekmate's `# pragma version ~=0.5.0a1`
+directive. Foundry's Vyper integration finds the compiler by looking
+up `vyper` on `PATH`, so the test commands all run as
+`PATH=$(pwd)/../.venv/bin:$PATH forge test`.
+
+Foundry config differences from the Solidity setup:
+
+| Option | Value | Why |
+|---|---|---|
+| `vyper` | `{ optimize = "gas" }` | Matches Snekmate's own CI. Doesn't help with our optimization — Vyper recomputes the balance keccak at every access regardless of optimizer level. (We verified this against `none`, `codesize`, and `gas`.) |
+| `skip` | `["src/snekmate/**/*.vy", "src/snekmate/**/*.vyi"]` | Otherwise `forge build` tries to compile every Snekmate `.vy` file as a standalone contract and trips on uninitialised `uses:` clauses. |
+| `ffi` | `true` | Matches Snekmate's own setting; lets us invoke external commands from tests if needed. |
+| `allow_paths` | `["lib/snekmate/src"]` | Permits Vyper imports to escape `src/` into the vendored Snekmate tree. |
+
+The `src/snekmate -> ../lib/snekmate/src/snekmate` symlink is the
+trick that lets `from snekmate.tokens import erc20` work without
+patching Vyper's path resolver. Snekmate's own foundry project
+does effectively the same thing by putting the library under
+`src/snekmate/` directly.
+
+Building & running:
+
+```bash
+cd EvmSmith/Demos/ERC20-Vyper
+python3 -m venv .venv
+.venv/bin/pip install vyper==0.5.0a1
+cd foundry
+PATH=$(pwd)/../.venv/bin:$PATH forge build
+PATH=$(pwd)/../.venv/bin:$PATH forge test
+```
+
+### Lean / EVMYulLean setup
+
+The proofs live at the *repo root* (one level up from the demo
+directories) and use the framework's pinned EVMYulLean submodule.
+`lake build` from the repo root verifies everything. No additional
+toolchain on top of the existing evm-smith setup — Vyper isn't
+needed for the proof side because the patcher's output is checked
+by tests, not by Lean.
+
 ## What was changed in the contracts
 
 Two Solidity contracts under [`foundry/src/`](./foundry/src/):
 
 - `MockERC20Original.sol` — inherits Solady's `ERC20` unchanged.
 - `MockERC20Optimized.sol` — overrides the six `virtual` balance-
-  touching functions to use `sload(uint256(uint160(addr)))` / `sstore`
-  directly. Allowances and nonces stay keccak-mapped. Log emission
-  uses `caller()` and the parameter address directly instead of
-  reading them back from memory.
+  touching functions to use `sload(not(addr))` / `sstore(not(addr), v)`.
+  Allowances and nonces stay keccak-mapped. Log emission uses
+  `caller()` and the cleaned parameter address as topics directly
+  instead of reading them back from memory.
 
 ## Test results
 
-`forge test` from [`foundry/`](./foundry/):
+`forge test` from [`foundry/`](./foundry/), after the NOT(addr) fix
+and the added metadata-regression tests:
 
 ```
-Ran 46 tests across 2 backends (OriginalERC20Test, OptimizedERC20Test).
-All 46 passed (23 cases × 2 backends).
+Ran 54 tests across 2 backends (OriginalERC20Test, OptimizedERC20Test).
+All 54 passed (27 cases × 2 backends).
+Plus 8 gas-comparison tests.
 ```
 
 Coverage: mint / burn / approve / transfer / transferFrom (success +
 revert paths), Permit2 infinite-allowance escape hatch, transfer-to-
-self, zero-amount transfers, fuzz cases. The behaviour test is
-parameterized over an abstract `IERC20Like` interface and exercises
-both contracts through their public API only — no `vm.load` slot
-probes.
+self, zero-amount transfers, fuzz cases, **plus four metadata-
+preservation regression tests** that mint to low addresses (0x00,
+0x01, 0x02, 0x03) and assert the contract's `name()` / `symbol()` /
+`decimals()` stay intact. The behaviour test is parameterized over
+an abstract `IERC20Like` interface and exercises both contracts
+through their public API only — no `vm.load` slot probes.
+
+## Collision-avoidance — why `~addr` instead of `addr`
+
+A naive read of the optimization says "use the address as the balance
+slot directly." The first version did exactly that: `sload(addr)`,
+one byte saved. Pretty soon it broke a fuzz test on the Vyper side
+(see the next subsection); we then realised the **Solidity side has
+the same latent bug** even though the fuzz tests missed it. The fix
+is the same in both: `sload(not(addr))` — replace the address with
+its bitwise complement.
+
+### Why the raw address collides
+
+A storage slot is a `UInt256`. Both the contract's *named* state
+variables and our *balance map* live in the same flat slot space.
+Two storage uses with the same slot id alias — writing one
+corrupts the other.
+
+In **Vyper / Snekmate**, named state lives at low slots:
+
+| Slot | Variable             |
+|------|----------------------|
+| 0x01 | `ownable.owner`      |
+| 0x02 | `erc20.balanceOf` (keccak base, never directly addressed) |
+| 0x03 | `erc20.allowance` (keccak base) |
+| 0x04 | `erc20.totalSupply`  |
+| 0x05 | `erc20.is_minter` (keccak base) |
+| 0x06 | `erc20.nonces` (keccak base) |
+
+With `sload(addr)`, `mint(address(0x04), v)` would *overwrite
+totalSupply*. The fuzz suite caught it on a different collision
+(`address(0x01)`, the owner).
+
+In **Solidity / Solady**, named state in our mock contract lives at
+slots 0, 1, 2:
+
+| Slot | Variable           |
+|------|--------------------|
+| 0x00 | `_name`            |
+| 0x01 | `_symbol`          |
+| 0x02 | `_decimals`        |
+
+Solady's own constants (`_TOTAL_SUPPLY_SLOT = 0x05345cdf77eb68f44c`,
+the `_BALANCE_SLOT_SEED`, the keccak'd allowance / nonce slots) all
+live at high values and don't collide. But `_name`, `_symbol`,
+`_decimals` are *Solidity-assigned* state variables on our
+`MockERC20Optimized` subclass, so they get slots 0, 1, 2.
+
+### How the bug surfaced
+
+**Vyper side, naturally:** the foundry fuzzer biases toward "magic"
+addresses (`address(0)`, `address(0x01)`, `address(this)`, the
+precompiles). On the first run of `testFuzzMint(address, uint96)`
+against the patched Vyper backend, the fuzzer tried
+`mint(address(0x01), 34493224748316818407380903281)` and got
+balance back as `(owner_address + 34493...281)` — a giveaway
+that slot 1 (the owner) was being written instead of the balance
+mapping.
+
+**Solidity side, by retroactive testing.** Our original 256-run
+fuzz suite on the Solidity side passed because the fuzz cases
+only assert `balanceOf` and `totalSupply` after the mint, never
+`name()` / `symbol()` / `decimals()`. The collision was silent —
+slot 0/1/2 got overwritten, but the asserted properties
+(`balanceOf(addr) == v` and `totalSupply == v`) still held
+trivially (the rewritten slot at `addr` is now `v`, and
+`totalSupply` lives at its high constant slot, unaffected). The
+metadata was corrupted but not observed.
+
+A targeted test confirmed the bug after the fact:
+
+```solidity
+function test_long_string_flag_attack() public {
+    token.mint(address(0x00), 0x80);
+    token.name();  // ⇒ panic: storage byte array incorrectly encoded
+}
+```
+
+The `0x80` low byte flips Solidity's "long string" flag on slot 0
+(`_name`'s slot), and the next call to `name()` dereferences
+`keccak256(0x00)` thinking it's a long-string data pointer — which
+points to uninitialised storage and Solidity panics.
+
+### The fix
+
+The optimized contracts (Solidity and Vyper, after the fix) use
+`sload(not(addr))` / `sstore(not(addr), v)` everywhere they touched
+the balance map.
+
+- `NOT` is one byte (`0x19`) in EVM, costing 3 gas. The keccak
+  prefix we eliminate costs ~48 gas, so the saving is still net
+  positive after paying for the NOT.
+- `not(addr)` for any 160-bit address has its high 96 bits all
+  one, so the slot lies in `[2^256 - 2^160, 2^256)`. Every named
+  slot in either contract is `< 2^160`, so no collision is possible
+  there. Keccak-derived slots (Solady's totalSupply constant, the
+  allowance / nonce buckets) could *in principle* collide if Keccak
+  happened to produce a hash value in `[2^256 - 2^160, 2^256)`,
+  but that's the same preimage-resistance assumption every
+  Solidity mapping already rests on — we're not weakening the
+  trust model.
+- `NOT` is bijective on `UInt256`, so the slot function remains
+  injective per address (different addresses map to different
+  slots). No two users alias.
+
+### Regression test that would have caught the Solidity bug
+
+Added to [`ERC20Compare.t.sol`](./foundry/test/ERC20Compare.t.sol):
+
+```solidity
+function testMetadataSurvivesMintToLowAddresses() public {
+    _mint(address(0x00), 1 ether);
+    _mint(address(0x01), 2 ether);
+    _mint(address(0x02), 3 ether);
+    _mint(address(0x03), 4 ether);
+    assertEq(token.name(), "Token");
+    assertEq(token.symbol(), "TKN");
+    assertEq(token.decimals(), 18);
+}
+
+function testMetadataSurvivesLongStringFlagAttack() public {
+    _mint(address(0x00), 0x80);
+    assertEq(token.name(), "Token");
+}
+```
+
+Plus an explicit fuzz variant that targets low-byte addresses and
+asserts on the metadata getters. With the broken (`sload(addr)`)
+optimization, all three of these failed.
 
 ## Gas comparison
 
-From [`foundry/test/ERC20GasCompare.t.sol`](./foundry/test/ERC20GasCompare.t.sol):
+From [`foundry/test/ERC20GasCompare.t.sol`](./foundry/test/ERC20GasCompare.t.sol),
+after the `NOT(addr)` fix:
 
-| Operation              | Keccak layout (gas) | Address-as-slot (gas) | Delta  |
+| Operation              | Keccak layout (gas) | `~addr`-as-slot (gas) | Delta  |
 |------------------------|---------------------|-----------------------|--------|
-| `balanceOf` (warm)     |              1,117  |                1,064  |  -53   |
-| `mint` (fresh recipient)|            49,665  |               49,616  |  -49   |
-| `mint` (warm recipient)|             3,365  |                3,316  |  -49   |
-| `burn`                 |             3,304  |                3,244  |  -60   |
-| `transfer` (fresh-to)  |            25,377  |               25,285  |  -92   |
-| `transfer` (warm-to)   |             3,477  |                3,385  |  -92   |
-| `transferFrom`         |            25,906  |               25,826  |  -80   |
+| `balanceOf` (warm)     |              1,117  |                1,067  |  -50   |
+| `mint` (fresh recipient)|            49,665  |               49,622  |  -43   |
+| `mint` (warm recipient)|             3,365  |                3,322  |  -43   |
+| `burn`                 |             3,304  |                3,252  |  -52   |
+| `transfer` (fresh-to)  |            25,377  |               25,302  |  -75   |
+| `transfer` (warm-to)   |             3,477  |                3,402  |  -75   |
+| `transferFrom`         |            25,906  |               25,833  |  -73   |
 
-Plus a constant **-60 bytes** of runtime (2,510 → 2,450 bytes deployed).
+Plus a constant **-42 bytes** of runtime (2,510 → 2,468 bytes
+deployed) — slightly less than the pre-NOT version (which saved 60
+bytes) because each access site now spends one extra byte on
+`NOT`.
 
-Origin of the savings: each balance access costs ~36 gas for
+Origin of the savings: each balance access used to cost ~36 gas for
 `KECCAK256` (base 30 + 6 per 32-byte word), plus the `MSTORE` × 2,
-plus the two scratch `PUSH`s, plus a couple of bytes of bytecode. The
-optimized layout pays none of that.
+plus the two scratch `PUSH`s, plus a couple of bytes of bytecode.
+The optimized layout pays one `NOT` (3 gas, 1 byte) instead.
 
 ## Proofs (Lean)
 
@@ -89,10 +342,10 @@ Sorry-free; built via `lake build EvmSmith.Demos.ERC20.Equivalence`.
 |---|---|
 | `keccakPrefix_value` | Running the 8-op keccak balance-slot prefix on `[addr, rest]` leaves `[balanceSlotOf m addr, rest]` on the stack. `balanceSlotOf` is **defined** as exactly the Lean expression the prefix produces — so `unfold runOp EvmYul.step; rfl` closes the goal *without computing Keccak*. The keccak result is carried symbolically through `ffi.KEC` (opaque). |
 | `balanceLoadOrig_value` | Full post-state of `keccakPrefix ++ [SLOAD]`: top of stack is `(sload (balanceSlotOf m addr)).snd`. |
-| `balanceLoadOpt_value` | Full post-state of `[SLOAD]`: top of stack is `(sload addr).snd`. |
+| `balanceLoadOpt_value` | Full post-state of `[NOT; SLOAD]`: top of stack is `(sload (~addr)).snd`. |
 | `balanceLoad_observable_equiv` | Under `StorageBalEquivAt σ_orig σ_opt m addr` (the per-address storage relation), both load blocks produce the **same top of stack**. The user-visible "balance" returned by `balanceOf(addr)` is identical between layouts. |
 | `balanceStoreOrig_value` | Full post-state of `keccakPrefix ++ [SSTORE]`: `toState := sstore <pre.toState> (balanceSlotOf m addr) value`. |
-| `balanceStoreOpt_value` | Full post-state of `[SSTORE]`: `toState := sstore <pre.toState> addr value`. |
+| `balanceStoreOpt_value` | Full post-state of `[NOT; SSTORE]`: `toState := sstore <pre.toState> (~addr) value`. |
 | `balanceStore_observable_equiv` | Structural post-state equivalence: both backends `sstore` the same `value` at their respective balance slots. Subsequent reads of the same address recover `value` in both layouts (standard EVM `sload-after-sstore` property). |
 
 ### The "Keccak vanishes" trick
@@ -119,12 +372,13 @@ LHS (the bytecode-side computation) and the RHS (`balanceSlotOf m addr`)
 are *definitionally* the same term.
 
 In the `StorageBalEquivAt` relation, we relate `σ_orig` at slot
-`balanceSlotOf m addr` with `σ_opt` at slot `addr`. The relation
-*quantifies over the address*, not over slots, so the keccak result
-never has to be reduced to a number anywhere — it just gets carried
-around symbolically until the slot is consumed by SLOAD/SSTORE, at
-which point both layouts produce/consume *the same loaded value* by
-the relation.
+`balanceSlotOf m addr` with `σ_opt` at slot `~addr` (the bitwise NOT
+of the address; see the "Collision-avoidance" section). The
+relation *quantifies over the address*, not over slots, so the
+keccak result never has to be reduced to a number anywhere — it
+just gets carried around symbolically until the slot is consumed by
+SLOAD/SSTORE, at which point both layouts produce/consume *the
+same loaded value* by the relation.
 
 The proof's correctness therefore doesn't depend on Keccak's
 *collision-resistance*: even if Keccak collided on two different
@@ -152,6 +406,33 @@ from this demo. Even the two pre-existing evm-smith axioms (precompile
 purity, Keccak collision-resistance) are unused here — the proof
 deliberately avoids needing collision-resistance, which makes it
 robust to even a (hypothetical) cryptographic break of Keccak.
+
+### The injectivity safety condition
+
+A storage-layout optimization is only sound if its *slot function*
+is injective on addresses — otherwise two distinct users alias on
+the opt side, with one's `mint` silently changing the other's
+balance. The orig side gets this from Keccak's collision-resistance
+(the existing evm-smith T5 axiom). The opt side uses
+`UInt256.lnot`, a concrete bitwise op, and we proved its
+injectivity in `EvmSmith/Lemmas/UInt256Order.lean`:
+
+```lean
+theorem lnot_injective : Function.Injective (UInt256.lnot)
+```
+
+Together with the contrapositive corollary
+`distinct_addresses_distinct_opt_slots` in both
+[`Equivalence.lean`](./Equivalence.lean) and
+[`EquivalenceVyper.lean`](./EquivalenceVyper.lean), this is the
+piece that lets two distinct addresses simultaneously hold distinct
+balances on the opt side. No new axioms — `lnot_injective` reduces
+via `sub_toNat_of_le` + `Nat.le_sub_one_of_lt` to Nat subtraction
+cancellation, all kernel-checkable.
+
+A non-injective slot function (say, `addr mod 2^32`) would fail
+this theorem and immediately rule the optimization unsafe at the
+type-check level. With `~addr`, the proof goes through.
 
 ### What's not formalized here (and why)
 

@@ -1,4 +1,5 @@
 import EvmSmith.Lemmas
+import EvmSmith.Lemmas.UInt256Order
 import EvmYul.Frame
 import EvmSmith.Demos.ERC20.Program
 import EvmSmith.Demos.ERC20.OptimizedProgram
@@ -45,15 +46,42 @@ identical-tail-bytecode gives per-function equivalence.
 namespace EvmSmith.ERC20
 open EvmYul EvmYul.EVM EvmSmith
 
+/-! ## Safety condition on the slot function: injectivity
+
+The peephole's *local* equivalence (load/store agreement under a
+per-address storage relation) is necessary but not sufficient for
+the optimization to be sound. The other piece is: distinct
+addresses must map to distinct storage slots — otherwise two users
+would alias on the opt side, with one's mint silently changing the
+other's balance.
+
+The orig side gets this from Keccak's preimage / collision
+resistance (the existing evm-smith T5 axiom). The opt side uses
+`UInt256.lnot`, a concrete bitwise operation, and we prove its
+injectivity in `EvmSmith/Lemmas/UInt256Order.lean` —
+`EvmYul.UInt256.lnot_injective` — with no new axioms. The
+corollary below packages it in the contrapositive form most
+directly usable from storage-disjointness arguments. -/
+
+/-- Distinct addresses produce distinct opt-side balance slots. -/
+theorem distinct_addresses_distinct_opt_slots
+    {a b : UInt256} (hne : a ≠ b) :
+    UInt256.lnot a ≠ UInt256.lnot b := by
+  intro habs
+  exact hne (EvmYul.UInt256.lnot_injective habs)
+
 /-! ## Storage-balance relation -/
 
 /-- Storage equivalence at a single address: the orig's keccak-derived
-balance slot for `addr` holds the same value as the opt's raw-address
-slot. -/
+balance slot for `addr` holds the same value as the opt's `~addr` slot.
+The `~addr` (bitwise NOT) is what the optimized contract uses as a slot
+key — staying clear of low named slots (`_name`, `_symbol`,
+`_decimals`) and of the Solady constants. See the report's
+"Collision-avoidance" section for the why. -/
 def StorageBalEquivAt (σ_orig σ_opt : EvmYul.State .EVM) (m : MachineState)
     (addr : UInt256) : Prop :=
   (EvmYul.State.sload σ_orig (balanceSlotOf m addr)).2 =
-  (EvmYul.State.sload σ_opt   addr).2
+  (EvmYul.State.sload σ_opt   (UInt256.lnot addr)).2
 
 /-! ## Keccak-prefix characterization
 
@@ -300,20 +328,21 @@ theorem balanceLoadOrig_value
         runSeq_cons_ok _ _ _ _ _ hSload]
     unfold runSeq
 
-/-- The optimized balance-load is trivial: SLOAD on the address. -/
+/-- The optimized balance-load: `NOT addr; SLOAD`. -/
 theorem balanceLoadOpt_value
     (s : EVM.State) (addr : UInt256) (rest : Stack UInt256) (pc : UInt256) :
     runSeq balanceLoadOptBlock
         { s with stack := addr :: rest, pc := pc }
       = .ok { s with
-          stack := (EvmYul.State.sload s.toState addr).2 :: rest
-          pc := pc + UInt256.ofNat 1
-          toState := (EvmYul.State.sload s.toState addr).1 } := by
+          stack := (EvmYul.State.sload s.toState (UInt256.lnot addr)).2 :: rest
+          pc := pc + UInt256.ofNat 1 + UInt256.ofNat 1
+          toState := (EvmYul.State.sload s.toState (UInt256.lnot addr)).1 } := by
   show runSeq balanceLoadOptBlock _ = _
-  have h := runOp_sload s addr rest pc
+  have h1 := runOp_not s addr rest pc
+  have h2 := runOp_sload s (UInt256.lnot addr) rest (pc + UInt256.ofNat 1)
   conv_lhs =>
     unfold balanceLoadOptBlock
-    rw [runSeq_cons_ok _ _ _ _ _ h]
+    rw [runSeq_cons_ok _ _ _ _ _ h1, runSeq_cons_ok _ _ _ _ _ h2]
     unfold runSeq
 
 /-- **Observable equivalence for balance loads.**
@@ -453,21 +482,22 @@ theorem balanceStoreOrig_value
         runSeq_cons_ok _ _ _ _ _ hSstore]
     unfold runSeq
 
-/-- The optimized balance-store is trivial: SSTORE pops `[addr, value]`,
-writes `value` at slot `addr`. -/
+/-- The optimized balance-store: NOT addr then SSTORE. Stores `value`
+at slot `~addr`. -/
 theorem balanceStoreOpt_value
     (s : EVM.State) (addr value : UInt256) (rest : Stack UInt256) (pc : UInt256) :
     runSeq balanceStoreOptBlock
         { s with stack := addr :: value :: rest, pc := pc }
       = .ok { s with
           stack := rest
-          pc := pc + UInt256.ofNat 1
-          toState := EvmYul.State.sstore s.toState addr value } := by
+          pc := pc + UInt256.ofNat 1 + UInt256.ofNat 1
+          toState := EvmYul.State.sstore s.toState (UInt256.lnot addr) value } := by
   show runSeq balanceStoreOptBlock _ = _
-  have h := runOp_sstore s addr value rest pc
+  have h1 := runOp_not s addr (value :: rest) pc
+  have h2 := runOp_sstore s (UInt256.lnot addr) value rest (pc + UInt256.ofNat 1)
   conv_lhs =>
     unfold balanceStoreOptBlock
-    rw [runSeq_cons_ok _ _ _ _ _ h]
+    rw [runSeq_cons_ok _ _ _ _ _ h1, runSeq_cons_ok _ _ _ _ _ h2]
     unfold runSeq
 
 /-! ## Structural balance-store observation
@@ -520,7 +550,7 @@ theorem balanceStore_observable_equiv
         EvmYul.State.sstore s_orig.toState
           (balanceSlotOf s_orig.toMachineState addr) value ∧
       r_opt.toState =
-        EvmYul.State.sstore s_opt.toState addr value := by
+        EvmYul.State.sstore s_opt.toState (UInt256.lnot addr) value := by
   refine ⟨_, _,
           balanceStoreOrig_value s_orig addr value rest pc,
           balanceStoreOpt_value  s_opt  addr value rest pc,

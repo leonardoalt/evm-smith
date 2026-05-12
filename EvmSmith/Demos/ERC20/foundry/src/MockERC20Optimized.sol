@@ -74,11 +74,18 @@ contract MockERC20Optimized is ERC20 {
     /*               OVERRIDDEN BALANCE FUNCTIONS                 */
     /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
+    /// @dev The balance slot for `addr` is `not(addr)`, not `addr` itself.
+    ///      `not(addr)` for any 160-bit address has the high 96 bits all
+    ///      one, putting the slot at >= 2^160 — strictly above every
+    ///      named state slot in this contract (`_name` at slot 0,
+    ///      `_symbol` at 1, `_decimals` at 2, plus `_TOTAL_SUPPLY_SLOT`
+    ///      which is a high constant anyway) and well clear of every
+    ///      keccak-derived slot from the allowance / nonce buckets.
+    ///      `not` is bijective so injectivity per address is preserved.
     function balanceOf(address owner) public view virtual override returns (uint256 result) {
         /// @solidity memory-safe-assembly
         assembly {
-            // Clean the 96 high bits and use the address as the slot directly.
-            result := sload(shr(96, shl(96, owner)))
+            result := sload(not(shr(96, shl(96, owner))))
         }
     }
 
@@ -86,18 +93,21 @@ contract MockERC20Optimized is ERC20 {
         _beforeTokenTransfer(msg.sender, to, amount);
         /// @solidity memory-safe-assembly
         assembly {
-            let fromAddr := caller()
-            let toAddr := shr(96, shl(96, to))
-            let fromBal := sload(fromAddr)
+            let fromSlot := not(caller())
+            let toSlot := not(shr(96, shl(96, to)))
+            let fromBal := sload(fromSlot)
             if gt(amount, fromBal) {
                 mstore(0x00, 0xf4d678b8) // `InsufficientBalance()`.
                 revert(0x1c, 0x04)
             }
-            sstore(fromAddr, sub(fromBal, amount))
-            sstore(toAddr, add(sload(toAddr), amount))
-            // Emit Transfer(from=caller, to, amount).
+            sstore(fromSlot, sub(fromBal, amount))
+            sstore(toSlot, add(sload(toSlot), amount))
+            // Emit Transfer(from=caller, to, amount). Topics are the raw
+            // addresses, not the negated slots — the event log must
+            // remain identical to the original.
             mstore(0x00, amount)
-            log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE, fromAddr, toAddr)
+            log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE,
+                 caller(), shr(96, shl(96, to)))
         }
         _afterTokenTransfer(msg.sender, to, amount);
         return true;
@@ -137,14 +147,15 @@ contract MockERC20Optimized is ERC20 {
         assembly {
             let fromAddr := shr(96, shl(96, from))
             let toAddr := shr(96, shl(96, to))
-            let fromBal := sload(fromAddr)
+            let fromSlot := not(fromAddr)
+            let toSlot := not(toAddr)
+            let fromBal := sload(fromSlot)
             if gt(amount, fromBal) {
                 mstore(0x00, 0xf4d678b8) // `InsufficientBalance()`.
                 revert(0x1c, 0x04)
             }
-            sstore(fromAddr, sub(fromBal, amount))
-            sstore(toAddr, add(sload(toAddr), amount))
-            // Emit Transfer(from, to, amount).
+            sstore(fromSlot, sub(fromBal, amount))
+            sstore(toSlot, add(sload(toSlot), amount))
             mstore(0x00, amount)
             log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE, fromAddr, toAddr)
         }
@@ -164,7 +175,8 @@ contract MockERC20Optimized is ERC20 {
             }
             sstore(_TOTAL_SUPPLY_SLOT, totalSupplyAfter)
             let toAddr := shr(96, shl(96, to))
-            sstore(toAddr, add(sload(toAddr), amount))
+            let toSlot := not(toAddr)
+            sstore(toSlot, add(sload(toSlot), amount))
             mstore(0x00, amount)
             log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE, 0, toAddr)
         }
@@ -176,12 +188,13 @@ contract MockERC20Optimized is ERC20 {
         /// @solidity memory-safe-assembly
         assembly {
             let fromAddr := shr(96, shl(96, from))
-            let fromBal := sload(fromAddr)
+            let fromSlot := not(fromAddr)
+            let fromBal := sload(fromSlot)
             if gt(amount, fromBal) {
                 mstore(0x00, 0xf4d678b8) // `InsufficientBalance()`.
                 revert(0x1c, 0x04)
             }
-            sstore(fromAddr, sub(fromBal, amount))
+            sstore(fromSlot, sub(fromBal, amount))
             sstore(_TOTAL_SUPPLY_SLOT, sub(sload(_TOTAL_SUPPLY_SLOT), amount))
             mstore(0x00, amount)
             log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE, fromAddr, 0)
@@ -195,13 +208,15 @@ contract MockERC20Optimized is ERC20 {
         assembly {
             let fromAddr := shr(96, shl(96, from))
             let toAddr := shr(96, shl(96, to))
-            let fromBal := sload(fromAddr)
+            let fromSlot := not(fromAddr)
+            let toSlot := not(toAddr)
+            let fromBal := sload(fromSlot)
             if gt(amount, fromBal) {
                 mstore(0x00, 0xf4d678b8) // `InsufficientBalance()`.
                 revert(0x1c, 0x04)
             }
-            sstore(fromAddr, sub(fromBal, amount))
-            sstore(toAddr, add(sload(toAddr), amount))
+            sstore(fromSlot, sub(fromBal, amount))
+            sstore(toSlot, add(sload(toSlot), amount))
             mstore(0x00, amount)
             log3(0x00, 0x20, _TRANSFER_EVENT_SIGNATURE, fromAddr, toAddr)
         }
