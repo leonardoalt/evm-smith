@@ -173,8 +173,10 @@ complexity. Out of scope for this pass.
 ## Bytecode-level diff: `transfer`
 
 A side-by-side at the relevant sites in the two compiled MockERC20
-contracts. Annotations show the differing prefix; everything else is
-byte-identical.
+contracts. Annotations show the differing prefix; everything else
+*should be* byte-identical (we only edit assembly inside the six
+overridden functions). Verified by Foundry tests, not by a Lean
+proof on the compiled bytes.
 
 ### Original (keccak balance load)
 

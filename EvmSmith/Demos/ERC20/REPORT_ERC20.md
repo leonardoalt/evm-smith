@@ -2,38 +2,168 @@
 
 ## What this demo delivers
 
-A working pipeline that:
+Three things, with very different rigour levels:
 
-1. **Engineers** a Solady-based ERC-20 with two storage layouts —
-   *keccak-mapped balances* (Solady's default) and *raw-address-slot
-   balances* (the optimization) — and runs identical tests against
-   both backends.
-2. **Investigates** Solady's storage layout in
-   [`STORAGE_LAYOUT.md`](./STORAGE_LAYOUT.md), with bytecode-level
-   diffs and gas measurements.
-3. **Proves** the balance-slot peephole sound at the EVM bytecode
-   level in [`Equivalence.lean`](./Equivalence.lean), sorry-free, no
-   new axioms beyond Lean's standard foundations (the proofs don't
-   even need the pre-existing evm-smith axioms on Keccak collision-
-   resistance — they reason about Keccak abstractly).
+1. **Engineering case study.** A Solady-based ERC-20 with two
+   storage layouts — *keccak-mapped balances* (Solady's default)
+   and *`~addr`-as-slot* (the optimization) — running identical
+   tests against both backends, plus per-op gas comparison. Same
+   for Vyper / Snekmate, with the optimization applied at the
+   bytecode level via a length-preserving patcher. **The deployed
+   bytecode in both cases is the actual compiler output**; the
+   tests verify operational equivalence on ~100 Foundry cases plus
+   a no-aliasing fuzz invariant.
 
-The proof is structured as a single peephole transformation:
+2. **A small handful of Lean theorems** about a hand-rolled mirror
+   of the keccak prefix. **The Lean proofs do not target the
+   `solc`/`vyper`-compiled bytecode.** They target ~10-opcode
+   `Program` values we wrote by hand to match the shape of what the
+   compiler emits. The "link" from these theorems to the actual
+   deployed bytes is by inspection, not by proof. See
+   "What is actually proven" below — read it before believing any
+   "equivalence" claim downstream.
 
-```
-[MSTORE 0x0c seed; MSTORE 0x00 addr; KECCAK256 → SLOAD]    -- keccak layout
-        ≡
-[NOT addr; SLOAD]                                           -- ~addr-as-slot
-```
+3. **A refinement framework** (`Spec.lean`) that, *if* a future AI
+   or contributor adds a new storage-layout optimization, forces
+   them to discharge injectivity + named-slot-disjointness as
+   type-level proof obligations. Doesn't retroactively prove the
+   current demo's correctness — it's a *future-facing* safeguard.
 
-— and the structural counterpart for stores. Because Solady's
-balance-touching functions are byte-identical between layouts except
-at these peephole sites, the local equivalence at each peephole lifts
-to whole-function equivalence under a per-address storage-translation
-relation.
+## What is actually proven
 
-(The `NOT` step on the right-hand side is *not* a typo — see the
-"Collision-avoidance" section below for why we don't use the raw
-address as a slot.)
+In Lean, sorry-free, no new axioms beyond Lean's three foundations:
+
+1. **`UInt256.lnot` is injective.** Two distinct 256-bit values get
+   distinct complements. `EvmYul.UInt256.lnot_injective` in
+   `EvmSmith/Lemmas/UInt256Order.lean`.
+
+2. **`UInt256.lnot a` is disjoint from `{0, 1, 2, _TOTAL_SUPPLY_SLOT}`
+   for any 160-bit `a`.** Arithmetic: `lnot a ≥ 2^256 - 2^160`, well
+   above every named slot. `lnot_disjoint_from_named` in `Spec.lean`.
+
+3. **A 10-opcode hand-rolled keccak-prefix block produces
+   `balanceSlotOf m addr` on the stack.** `keccakPrefix_value` in
+   `Equivalence.lean`. The "10-opcode block" is our hand-roll, not
+   the compiler's output.
+
+4. **A 2-opcode hand-rolled `[NOT, SLOAD]` block produces
+   `(sload σ (~addr)).snd` on the stack.** `balanceLoadOpt_value`.
+
+5. **Under a per-address storage relation `R(σ_orig, σ_opt, a)`,
+   the two hand-rolled blocks produce equal stack-tops.** Block-
+   local, pointwise per address, `R` taken as hypothesis.
+   `balanceLoad_observable_equiv`.
+
+6. **The two hand-rolled store blocks land at structurally-known
+   `sstore`d states.** `balanceStore_observable_equiv`. Doesn't say
+   `R` is preserved across the store — that's a separate gap.
+
+7. **The abstract `Function.update`-style storage model preserves a
+   refinement relation across mint / burn / transfer**, provided
+   the caller supplies a `SlotAbstraction` (which requires
+   injectivity + named-slot disjointness proofs).
+   `mint_refines` / `burn_refines` / `transfer_refines` in
+   `Spec.lean`. This is about an abstract `UInt256 → UInt256`
+   storage model, not actual `EvmYul.State` storage.
+
+That is the complete catalogue. The Vyper variant adds three more
+theorems with the same shape against a different (Vyper-emitted)
+keccak prefix.
+
+## What is *not* proven
+
+Things we do **not** have Lean theorems for, despite the demo's
+shape suggesting we might:
+
+- The actual `solc`-compiled `MockERC20Optimized.sol` runtime
+  bytecode is equivalent to the `MockERC20Original.sol` runtime
+  bytecode. *Not proved.* We only proved equivalence of two
+  hand-rolled 10-opcode mirrors. The 2,500-byte deployed bytes
+  could differ from our mirror in ways the proof wouldn't catch.
+
+- The Vyper-patched runtime bytecode is equivalent to the original
+  Vyper-compiled runtime. *Not proved.* Same gap — the patcher
+  operates on real bytes, but our Lean proofs are about a
+  separate hand-rolled mirror.
+
+- Storage round-trip at the `EvmYul.State` level
+  (`sload(sstore σ k v) k = v`). *Not proved.* Needed for the
+  abstract refinement framework to lift to the real EVM.
+
+- The storage relation `R` is preserved by a balance store.
+  *Not proved* directly — the structural form in (6) is *consistent
+  with* preservation but doesn't state it.
+
+- A sequence of mint/transfer/burn operations preserves `R`.
+  *Not proved.* Would follow by induction once (3)–(7) are
+  end-to-end connected and lifted to `EvmYul.State`.
+
+- The contract's `name()` / `symbol()` / `decimals()` getters
+  return their constructor-initialised values after any sequence of
+  operations. *Not proved in Lean*, but checked by the
+  Foundry-level no-aliasing invariant across ~2,000 fuzzed call
+  sequences per backend.
+
+## Trust assumptions
+
+Three layers of trust, distinct:
+
+1. **Lean's three standard foundation axioms** (`propext`,
+   `Classical.choice`, `Quot.sound`). Foundational, not contract-
+   specific.
+
+2. **One pre-existing evm-smith axiom: Keccak collision-resistance
+   (T5).** Used implicitly: the `~addr` slot for the opt layout
+   has to not collide with the keccak-derived allowance / nonce /
+   is_minter slots that the orig layout uses. Disjointness against
+   the *named* slots (slots 0, 1, 2, `_TOTAL_SUPPLY_SLOT`) is
+   proved by Lean arithmetic. Disjointness against
+   *keccak-derived* slots (allowances at
+   `keccak256(spender ++ owner ++ seed)`, etc.) is taken on T5: for
+   `~a` to equal `keccak256(some_preimage)`, an attacker would
+   need to find the preimage — `2^-256` per attempt. This is the
+   same Keccak trust assumption Solady itself rests on for its
+   own mappings; we don't strengthen it.
+
+3. **Deployment-side trust, not encoded in Lean:**
+   - `solc 0.8.20` and `vyper 0.5.0a1` emit the keccak prefixes in
+     the exact opcode shape our hand-rolled `Program` mirrors.
+     Checked by disassembly, not by proof.
+   - The bytecode patcher (Vyper) correctly identifies *every*
+     balance-access site and rewrites *only* those. Fail-closed on
+     AST/site-count mismatch, but the source-AST vs runtime-pattern
+     correspondence is by construction, not by Lean theorem.
+   - Foundry's `vm.etch` faithfully installs runtime bytecode.
+
+## The proof gap, stated plainly
+
+The local peephole theorem `balanceLoad_observable_equiv` says: "two
+specific 10-opcode programs, run on related states, return the same
+value." It does **not** say: "the deployed Solady-compiled bytecode
+on the orig contract is equivalent to the deployed
+`MockERC20Optimized`-compiled bytecode on the opt contract."
+
+The chain from one to the other needs:
+
+- A proof that the deployed bytecode contains exactly the peephole
+  pattern at exactly the sites we modelled. Inspected, not proved.
+- A proof that the rest of the bytecode is byte-identical between
+  layouts (or that any differences don't break `R`). Not proved.
+- The `EvmYul.State` bridge for lifting `R` across the actual EVM
+  operations. Not proved.
+
+The original task — "compile to bytecode, modify it at the EVM level,
+prove equivalence" — would mean walking the *whole bytecode*
+opcode-by-opcode in Lean (the way the WETH solvency proof does for
+its 86-byte hand-rolled bytecode). We did not do that for ERC-20.
+
+The peephole approach in this demo is sound *as a peephole*. Lifting
+it to a whole-bytecode equivalence claim is not in scope of the
+current proofs. Read "What is actually proven" above for the precise
+list, and don't let downstream prose like "the local equivalence at
+each peephole lifts to whole-function equivalence" anywhere else in
+this report bait you into thinking otherwise — that lift is asserted,
+not proved.
 
 ## Repository setup
 
@@ -669,13 +799,16 @@ should arguably ship upstream; that's orthogonal to the storage-layout
 optimization argument we wanted to demonstrate.
 
 So the proof obligation we *don't* discharge here is a property of
-EVMYulLean's storage model, not of the layout optimization. The peephole
-soundness — which is what's *specific* to the optimization — is
-fully proved.
+EVMYulLean's storage model, not of the layout optimization. The
+peephole soundness *as a peephole* (i.e., on the hand-rolled 10-op
+mirror) is proved; the lift to whole-bytecode equivalence on the
+deployed contract is not — see "What is actually proven" at the top
+of this report.
 
 The structural form `balanceStore_observable_equiv` exposes the
 post-store state precisely enough that any consumer wanting the
-round-trip can derive it from the standard EVM property.
+round-trip can derive it from the standard EVM property — but
+they'd still need to close the bridge to `EvmYul.State` themselves.
 
 ## Vyper / Snekmate variant
 
