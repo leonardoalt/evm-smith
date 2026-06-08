@@ -1,5 +1,5 @@
 import EvmSmith.Demos.Weth.Solvency
-import EvmSmith.Demos.Weth.EntryPoints
+import EvmSmith.Demos.Weth.Dispatch
 
 /-!
 # WETH — the formal spec (v1, human-readable)
@@ -40,12 +40,10 @@ what the theorems use" is not a claim, it is checked by Lean.
 5. **The assumptions** — `SolvencyAssumptions`, the real-world /
    chain-state facts the guarantee is conditional on.
 6. **The guarantee** — `weth_is_always_solvent`.
-7. **Entry points, payability & ABI** — properties of the function
-   dispatcher proved directly from the bytecode (`functionSelector`,
-   `weth_has_two_entry_points`, `weth_no_fallback`,
-   `weth_withdraw_accepts_eth`, `weth_deposit_uses_value`,
-   `weth_deposit_is_total`, `weth_withdraw_decodes_arg`,
-   `weth_withdraw_sends_plain_eth`).
+7. **Entry points (behavioural)** — what the dispatcher and functions
+   *do*, established by executing the bytecode (`functionSelector`,
+   `weth_computes_function_selector`, …). More postconditions are added
+   here as they are proved.
 
 ## What the contract does (86 bytes of runtime code)
 
@@ -258,85 +256,37 @@ theorem weth_is_always_solvent
   weth_solvency_invariant ctx.fuel σ ctx.baseFee ctx.block ctx.genesis ctx.history
     tx S_T weth hWellFormed hSolventBefore hNotSender hNotMiner hTxValid hAssumptions
 
-/-! ## Entry points, payability & ABI
+/-! ## Entry points (behavioural)
 
-These properties characterise WETH's function dispatcher *directly from
-its bytecode* — they are the spec-level, human-readable face of the
-theorems in `EntryPoints.lean`, each of which is discharged by
-`native_decide` over the real 86 bytes (change any byte and the proof
-breaks). Together they pin down: which functions exist, how a call is
-routed, what reverts, which function takes ETH, and how arguments and
-the outbound transfer are ABI-shaped.
+What WETH's dispatcher and functions *do*, established by **executing the
+bytecode** through the EVM semantics (proofs in `Dispatch.lean`), rather
+than by inspecting opcodes at fixed program counters. Properties are
+surfaced here as they are proved; the engine lemmas live in
+`Dispatch.lean`.
 
-`opAt pc` is the opcode decoded at byte offset `pc`; `functionSelector`
-is the ABI selector a call carries. -/
+`functionSelector` is the ABI selector a call carries. The step
+hypotheses `hN` in the theorems below say "instruction N executed
+successfully"; whether a step succeeds depends on gas, which is
+orthogonal to *what* the instruction computes. -/
 
 /-- The ABI **function selector** of a call: the high 4 bytes of the
-calldata, `calldataload(0) >> 224`. WETH's dispatcher computes exactly
-this (PCs 0–5: `PUSH1 0; CALLDATALOAD; PUSH1 0xe0; SHR`; see
-`dispatch_extracts_selector`). -/
+first calldata word, `calldataload(0) >> 224`. -/
 def functionSelector (calldata : ByteArray) : UInt256 :=
   selectorOf calldata
 
-/-- **WETH has exactly two entry points.** `deposit` (`0xd0e30db0`) and
-`withdraw` (`0x2e1a7d4d`) have distinct selectors, and the dispatcher
-performs *no other* selector comparison (the only two `EQ`s in the
-dispatch region are at PC 12 and PC 22). -/
-theorem weth_has_two_entry_points :
-    depositSelector ≠ withdrawSelector ∧
-    (List.range' 0 31).filter (fun pc => decide (opAt pc = some .EQ)) = [12, 22] :=
-  ⟨selectors_distinct, dispatch_has_exactly_two_selector_checks⟩
-
-/-- **No fallback or receive function.** A call whose selector matches
-neither entry point — including empty calldata, whose selector is `0` —
-falls through to the dispatcher's `REVERT` (PC 31). Plain ETH transfers
-to the contract therefore revert. -/
-theorem weth_no_fallback :
-    decode bytecode (UInt256.ofNat 31) = some (.REVERT, none) :=
-  dispatch_fallthrough_reverts
-
-/-- **`withdraw` is silently payable.** Solidity's `nonpayable` guard
-(`if (msg.value != 0) revert;`) is *absent*: no `CALLVALUE` instruction
-occurs anywhere in the withdraw region (PCs 42–79), so a `withdraw` call
-carrying ETH does not revert on that account. The sent ETH is added to
-the contract's balance but credited to no user — a caller footgun, and
-harmless to solvency (it only raises the balance side). -/
-theorem weth_withdraw_accepts_eth :
-    ∀ pc ∈ List.range' 42 38, opAt pc ≠ some .CALLVALUE :=
-  withdraw_never_reads_callvalue
-
-/-- **`deposit` is payable and credits the ETH** it receives: it reads
-`msg.value` (`CALLVALUE` at PC 37). -/
-theorem weth_deposit_uses_value :
-    opAt 37 = some .CALLVALUE :=
-  deposit_reads_callvalue
-
-/-- **`deposit` never reverts on its own.** Its block (PCs 32–41) has no
-`REVERT` and no branch (`JUMP`/`JUMPI`): it is straight-line code to
-`STOP`. (Only out-of-gas or a failed entry value-transfer could stop
-it.) -/
-theorem weth_deposit_is_total :
-    ∀ pc ∈ List.range' 32 10,
-      opAt pc ≠ some .REVERT ∧ opAt pc ≠ some .JUMP ∧ opAt pc ≠ some .JUMPI :=
-  deposit_has_no_revert_or_branch
-
-/-- **`withdraw(uint256)` ABI-decodes its argument** from `calldata[4:36]`
-(`PUSH1 4; CALLDATALOAD` at PCs 43/45) — the standard ABI position of the
-first argument. -/
-theorem weth_withdraw_decodes_arg :
-    decode bytecode (UInt256.ofNat 43) = some (.Push .PUSH1, some (UInt256.ofNat 4, 1)) ∧
-    decode bytecode (UInt256.ofNat 45) = some (.CALLDATALOAD, none) :=
-  withdraw_decodes_uint256_arg
-
-/-- **`withdraw` pays out via a plain ETH transfer.** The four `CALL`
-memory arguments — return size/offset and args size/offset — are all
-`0` (PCs 61/63/65/67), so the outbound `CALL` (PC 72) carries empty
-calldata and ignores return data: a bare value transfer to the
-caller. -/
-theorem weth_withdraw_sends_plain_eth :
-    (∀ pc ∈ [61, 63, 65, 67],
-        decode bytecode (UInt256.ofNat pc) = some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) ∧
-    decode bytecode (UInt256.ofNat 72) = some (.CALL, none) :=
-  ⟨withdraw_call_args_are_zero, withdraw_does_external_call⟩
+/-- **The dispatcher computes the ABI selector.** From the contract's
+entry state (empty stack), executing the dispatcher's selector-extraction
+instructions (`PUSH1 0; CALLDATALOAD; PUSH1 0xe0; SHR`) leaves exactly
+`functionSelector calldata` on the stack — the value the two entry-point
+branches are then compared against. -/
+theorem weth_computes_function_selector
+    (s0 s1 s2 s3 s4 : EVM.State) (f c0 c1 c2 c3 : ℕ)
+    (hstk0 : s0.stack = [])
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4) :
+    s4.stack = [functionSelector s0.executionEnv.calldata] :=
+  weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hstk0 h0 h1 h2 h3
 
 end EvmSmith.Weth
