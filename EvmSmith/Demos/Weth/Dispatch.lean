@@ -411,4 +411,107 @@ theorem weth_withdraw_decrements_caller
     rfl
   rw [hcallerEq, hxVEq, hbalEq, hcallerEq]
 
+/-! ## Dispatch routing
+
+Given the selector a call carries, the dispatcher routes to the matching
+function body (or reverts). Built on `weth_dispatcher_computes_selector`
+plus the `EQ`/`JUMPI` branch. -/
+
+/-- `EQ` of a value with itself is `1` (true). -/
+theorem eq_self_eq_one (a : UInt256) : UInt256.eq a a = UInt256.ofNat 1 := by
+  unfold UInt256.eq
+  rw [show decide (a = a) = true by simp]
+  rfl
+
+/-- `EQ` of two distinct values is `0` (false). -/
+theorem eq_ne_eq_zero {a b : UInt256} (h : a ≠ b) : UInt256.eq a b = UInt256.ofNat 0 := by
+  unfold UInt256.eq
+  rw [decide_eq_false h]
+  rfl
+
+/-- **A `deposit` selector routes to the deposit body.** From the entry
+state, if the call's selector is `depositSelector`, then after the
+dispatch prefix (`…; DUP1; PUSH4 depositSelector; EQ; PUSH2 depositLbl;
+JUMPI`) execution is at `depositLbl` (PC 32, the deposit body) with the
+selector left on the stack. -/
+theorem weth_routes_deposit
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 c7 c8 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hsel : selectorOf s0.executionEnv.calldata = depositSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9) :
+    s9.pc = depositLbl ∧ s9.stack = [depositSelector] := by
+  have hs4 := weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hstk0 h0 h1 h2 h3
+  rw [hsel] at hs4
+  obtain ⟨_, h5stk, _, _⟩ := step_DUP1_shape_strong s4 s5 f c4 none depositSelector [] hs4 h4
+  rw [hs4] at h5stk
+  obtain ⟨_, h6stk, _, _⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5
+  rw [h5stk] at h6stk
+  obtain ⟨_, h7stk, _, _⟩ :=
+    step_EQ_value s6 s7 f c6 none depositSelector depositSelector [depositSelector] h6stk h6
+  obtain ⟨_, h8stk, _, _⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7
+  rw [h7stk] at h8stk
+  obtain ⟨h9pc, h9stk, _, _⟩ :=
+    step_JUMPI_shape_strong s8 s9 f c8 none depositLbl
+      (UInt256.eq depositSelector depositSelector) [depositSelector] h8stk h8
+  refine ⟨?_, h9stk⟩
+  rw [h9pc, eq_self_eq_one, if_pos (by decide)]
+
+/-- **A `withdraw` selector routes to the withdraw body.** From the entry
+state, if the call's selector is `withdrawSelector`, the dispatcher's
+first comparison (against `depositSelector`) fails and falls through, the
+second (against `withdrawSelector`) matches, and execution lands at
+`withdrawLbl` (PC 42, the withdraw body) with an empty stack. -/
+theorem weth_routes_withdraw
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hsel : selectorOf s0.executionEnv.calldata = withdrawSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (some (.Push .PUSH4, some (withdrawSelector, 4))) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (some (.EQ, none)) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (some (.Push .PUSH2, some (withdrawLbl, 2))) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (some (.JUMPI, none)) s12 = .ok s13) :
+    s13.pc = withdrawLbl ∧ s13.stack = [] := by
+  have hs4 := weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hstk0 h0 h1 h2 h3
+  rw [hsel] at hs4
+  obtain ⟨_, h5stk, _, _⟩ := step_DUP1_shape_strong s4 s5 f c4 none withdrawSelector [] hs4 h4
+  rw [hs4] at h5stk
+  obtain ⟨_, h6stk, _, _⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5
+  rw [h5stk] at h6stk
+  obtain ⟨_, h7stk, _, _⟩ :=
+    step_EQ_value s6 s7 f c6 none depositSelector withdrawSelector [withdrawSelector] h6stk h6
+  obtain ⟨_, h8stk, _, _⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7
+  rw [h7stk] at h8stk
+  obtain ⟨_, h9stk, _, _⟩ :=
+    step_JUMPI_shape_strong s8 s9 f c8 none depositLbl
+      (UInt256.eq depositSelector withdrawSelector) [withdrawSelector] h8stk h8
+  -- s9.stack = [withdrawSelector]
+  obtain ⟨_, h10stk, _, _⟩ := step_PUSH_shape_strong s9 s10 f c9 .PUSH4 (by decide) withdrawSelector 4 h9
+  rw [h9stk] at h10stk
+  obtain ⟨_, h11stk, _, _⟩ :=
+    step_EQ_value s10 s11 f c10 none withdrawSelector withdrawSelector [] h10stk h10
+  obtain ⟨_, h12stk, _, _⟩ := step_PUSH_shape_strong s11 s12 f c11 .PUSH2 (by decide) withdrawLbl 2 h11
+  rw [h11stk] at h12stk
+  obtain ⟨h13pc, h13stk, _, _⟩ :=
+    step_JUMPI_shape_strong s12 s13 f c12 none withdrawLbl
+      (UInt256.eq withdrawSelector withdrawSelector) [] h12stk h12
+  refine ⟨?_, h13stk⟩
+  rw [h13pc, eq_self_eq_one, if_pos (by decide)]
+
 end EvmSmith.Weth

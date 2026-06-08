@@ -358,4 +358,51 @@ theorem weth_withdraw_decrements_sender
     f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 C acc hCo hstk0 hfind
     h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15
 
+/-- **A `deposit` selector routes to the deposit body.** If the call's
+`functionSelector` is `deposit`'s, the dispatcher lands execution at the
+deposit body (`depositLbl`, PC 32) with the selector on the stack. -/
+theorem weth_deposit_selector_dispatches
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 c7 c8 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hsel : functionSelector s0.executionEnv.calldata = depositSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9) :
+    s9.pc = depositLbl ∧ s9.stack = [depositSelector] :=
+  weth_routes_deposit s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 f c0 c1 c2 c3 c4 c5 c6 c7 c8
+    hstk0 hsel h0 h1 h2 h3 h4 h5 h6 h7 h8
+
+/-- **A `withdraw` selector routes to the withdraw body.** If the call's
+`functionSelector` is `withdraw`'s, the dispatcher (after the deposit
+comparison falls through) lands execution at the withdraw body
+(`withdrawLbl`, PC 42) with an empty stack. -/
+theorem weth_withdraw_selector_dispatches
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hsel : functionSelector s0.executionEnv.calldata = withdrawSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (some (.Push .PUSH4, some (withdrawSelector, 4))) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (some (.EQ, none)) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (some (.Push .PUSH2, some (withdrawLbl, 2))) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (some (.JUMPI, none)) s12 = .ok s13) :
+    s13.pc = withdrawLbl ∧ s13.stack = [] :=
+  weth_routes_withdraw s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13
+    f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 hstk0 hsel
+    h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
+
 end EvmSmith.Weth
