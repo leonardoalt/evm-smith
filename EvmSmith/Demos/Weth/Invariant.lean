@@ -121,8 +121,10 @@ theorem WethInv_balance_increase_at_C
 /-! ## §2.2 — Storage layout: `addressSlot`
 
 A user `a`'s token-balance slot in Weth's storage is the 20-byte
-address zero-extended to 32 bytes — i.e. Solidity's
-`mapping(address => uint256)` layout for a single mapping at slot 0.
+address used directly as the slot key (zero-extended to a 32-byte
+word). This is a deliberate simplification: real Solidity
+`mapping(address => uint256)` would store the value at
+`keccak256(key ‖ slot)`; this contract skips the hashing.
 
 `addressSlot_injective` is what powers the storage-sum reasoning:
 two distinct user addresses occupy two distinct storage slots, so

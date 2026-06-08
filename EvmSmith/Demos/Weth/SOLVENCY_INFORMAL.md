@@ -34,8 +34,10 @@ withdraw(uint256 x):  require storage[msg.sender] ≥ x
 ```
 
 Storage layout: a user `a`'s balance is at slot `addressSlot a` (the
-20-byte address zero-extended to 32 bytes — Solidity's `mapping(address => uint256)`
-layout for a single mapping at slot 0).
+20-byte address used directly as the slot key, zero-extended to a
+32-byte word). This is a deliberate simplification: real Solidity
+`mapping(address => uint256)` would store the value at
+`keccak256(key ‖ slot)`; this contract skips the hashing.
 
 **Reentrancy posture**: storage is decremented *before* the external
 `CALL`. Any reentrant invocation of `withdraw` from the inner CALL's
