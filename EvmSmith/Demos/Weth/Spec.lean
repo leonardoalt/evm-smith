@@ -41,9 +41,13 @@ what the theorems use" is not a claim, it is checked by Lean.
    chain-state facts the guarantee is conditional on.
 6. **The guarantee** — `weth_is_always_solvent`.
 7. **Entry points (behavioural)** — what the dispatcher and functions
-   *do*, established by executing the bytecode (`functionSelector`,
-   `weth_computes_function_selector`, `weth_deposit_credits_sender`, …).
-   More postconditions are added here as they are proved.
+   *do*, established by executing the bytecode:
+   - `weth_computes_function_selector` — the dispatcher computes the ABI selector;
+   - `weth_deposit_credits_sender` — deposit adds `msg.value` to the caller's balance;
+   - `weth_withdraw_decrements_sender` — withdraw subtracts `x` from the caller's balance;
+   - `weth_deposit_selector_dispatches` / `weth_withdraw_selector_dispatches` — selectors route to the right body;
+   - `weth_withdraw_sends_x_to_caller` — withdraw issues a bare `x`-wei transfer to the caller;
+   - `weth_unknown_selector_reverts` — any other selector reverts with no state change (no fallback/receive).
 
 ## What the contract does (86 bytes of runtime code)
 
@@ -404,5 +408,62 @@ theorem weth_withdraw_selector_dispatches
   weth_routes_withdraw s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13
     f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 hstk0 hsel
     h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
+
+/-- **`withdraw` sends `x` wei to the caller.** From the post-update point
+(stack `[x]`, `x` the requested amount), the call-setup sequence
+(`PUSH1 0 ×4; DUP5; CALLER; GAS`) lines up the seven `CALL` arguments so
+that the outbound call goes to the caller with `value = x`, empty
+calldata (`argsSize = 0`) and ignored return data (`retSize = 0`) — a
+bare ETH transfer of `x` to the caller. (The balance movement itself is
+the EVM's `CALL` semantics.) -/
+theorem weth_withdraw_sends_x_to_caller
+    (s0 s1 s2 s3 s4 s5 s6 s7 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 : ℕ) (x : UInt256)
+    (hstk0 : s0.stack = [x])
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP5, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.CALLER, none)) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.GAS, none)) s6 = .ok s7) :
+    ∃ g, s7.stack =
+      [g, UInt256.ofNat s0.executionEnv.source.val, x,
+       UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, x] :=
+  weth_withdraw_call_sends_x s0 s1 s2 s3 s4 s5 s6 s7 f c0 c1 c2 c3 c4 c5 c6 x
+    hstk0 h0 h1 h2 h3 h4 h5 h6
+
+/-- **An unknown selector reverts with no state change.** If the call's
+`functionSelector` is neither `deposit`'s nor `withdraw`'s, both
+dispatch comparisons fall through (`s9.pc = s8.pc + 1` ≠ `depositLbl`;
+`s13.pc = s12.pc + 1` ≠ `withdrawLbl`), so no function body is entered,
+and the account map is unchanged throughout the dispatch
+(`s15.accountMap = s0.accountMap`) — execution proceeds to the
+dispatcher's `REVERT` having modified nothing. So WETH has no fallback or
+receive function, and a stray/empty call is a no-op that reverts. -/
+theorem weth_unknown_selector_reverts
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hne_dep : functionSelector s0.executionEnv.calldata ≠ depositSelector)
+    (hne_wd : functionSelector s0.executionEnv.calldata ≠ withdrawSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (some (.Push .PUSH4, some (withdrawSelector, 4))) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (some (.EQ, none)) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (some (.Push .PUSH2, some (withdrawLbl, 2))) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (some (.JUMPI, none)) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s14 = .ok s15) :
+    s9.pc = s8.pc + ⟨1⟩ ∧ s13.pc = s12.pc + ⟨1⟩ ∧ s15.accountMap = s0.accountMap :=
+  weth_unknown_selector_no_state_change s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15
+    f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 hstk0 hne_dep hne_wd
+    h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14
 
 end EvmSmith.Weth

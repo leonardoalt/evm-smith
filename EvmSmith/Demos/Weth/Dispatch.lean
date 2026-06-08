@@ -514,4 +514,134 @@ theorem weth_routes_withdraw
   refine ⟨?_, h13stk⟩
   rw [h13pc, eq_self_eq_one, if_pos (by decide)]
 
+/-! ## Withdraw's outbound transfer (#3)
+
+The withdraw block's call-setup sequence builds a `CALL` that sends `x`
+wei to the caller with empty calldata. -/
+
+/-- **`withdraw` sends `x` to the caller.** From the post-update point
+(stack `[x]`, where `x` is the requested amount), the call-setup sequence
+`PUSH1 0 ×4; DUP5; CALLER; GAS` leaves the seven `CALL` arguments on the
+stack as `[gas, caller, x, 0, 0, 0, 0]` (and `x` still below): i.e. a
+`CALL` to `caller` (`= addressSlot caller`'s address) with `value = x`,
+`argsSize = 0` and `retSize = 0` — a bare ETH transfer of `x` to the
+caller carrying no calldata. (The actual balance movement is then the
+EVM's `CALL`/`Θ` semantics.) -/
+theorem weth_withdraw_call_sends_x
+    (s0 s1 s2 s3 s4 s5 s6 s7 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 : ℕ) (x : UInt256)
+    (hstk0 : s0.stack = [x])
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP5, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.CALLER, none)) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.GAS, none)) s6 = .ok s7) :
+    ∃ g, s7.stack =
+      [g, UInt256.ofNat s0.executionEnv.source.val, x,
+       UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, x] := by
+  obtain ⟨_, h1stk, h1ee, _⟩ := step_PUSH1_shape_strong s0 s1 f c0 (UInt256.ofNat 0) h0
+  rw [hstk0] at h1stk
+  obtain ⟨_, h2stk, h2ee, _⟩ := step_PUSH1_shape_strong s1 s2 f c1 (UInt256.ofNat 0) h1
+  rw [h1stk] at h2stk
+  obtain ⟨_, h3stk, h3ee, _⟩ := step_PUSH1_shape_strong s2 s3 f c2 (UInt256.ofNat 0) h2
+  rw [h2stk] at h3stk
+  obtain ⟨_, h4stk, h4ee, _⟩ := step_PUSH1_shape_strong s3 s4 f c3 (UInt256.ofNat 0) h3
+  rw [h3stk] at h4stk
+  obtain ⟨_, h5stk, h5ee, _⟩ :=
+    step_DUP5_shape_strong s4 s5 f c4 none (UInt256.ofNat 0) (UInt256.ofNat 0)
+      (UInt256.ofNat 0) (UInt256.ofNat 0) x [] h4stk h4
+  rw [h4stk] at h5stk
+  obtain ⟨_, h6stk, h6ee, _⟩ := step_CALLER_value s5 s6 f c5 none h5
+  rw [h5stk] at h6stk
+  obtain ⟨_, ⟨g, h7stk⟩, _, _⟩ := step_GAS_shape_strong s6 s7 f c6 none h6
+  refine ⟨g, ?_⟩
+  rw [h7stk, h6stk]
+  have hee : s5.executionEnv = s0.executionEnv := by rw [h5ee, h4ee, h3ee, h2ee, h1ee]
+  rw [hee]
+
+/-! ## Unknown selector: reverts with no state change (#4)
+
+A call whose selector matches neither entry point passes through both
+dispatch comparisons (both `JUMPI`s fall through, so neither function
+body is entered) and changes no account — the dispatcher only runs
+stack/calldata ops, never `SSTORE`/`CALL`. Execution then reaches the
+`REVERT` at PC 31. -/
+
+/-- **Unknown selector ⇒ no body entered, no state change.** From the
+entry state, if the call's selector is neither `depositSelector` nor
+`withdrawSelector`, then: the first `JUMPI` falls through
+(`s9.pc = s8.pc + 1`, not `depositLbl`), the second `JUMPI` falls through
+(`s13.pc = s12.pc + 1`, not `withdrawLbl`), and the account map is
+unchanged across the whole dispatch (`s15.accountMap = s0.accountMap`).
+Execution thus proceeds to the dispatcher's `REVERT` having entered no
+function and modified no state. -/
+theorem weth_unknown_selector_no_state_change
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 : ℕ)
+    (hstk0 : s0.stack = [])
+    (hne_dep : selectorOf s0.executionEnv.calldata ≠ depositSelector)
+    (hne_wd : selectorOf s0.executionEnv.calldata ≠ withdrawSelector)
+    (h0 : EVM.step (f + 1) c0 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.CALLDATALOAD, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1))) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.Push .PUSH4, some (depositSelector, 4))) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.EQ, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.Push .PUSH2, some (depositLbl, 2))) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.JUMPI, none)) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (some (.Push .PUSH4, some (withdrawSelector, 4))) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (some (.EQ, none)) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (some (.Push .PUSH2, some (withdrawLbl, 2))) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (some (.JUMPI, none)) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (some (.Push .PUSH1, some (UInt256.ofNat 0, 1))) s14 = .ok s15) :
+    s9.pc = s8.pc + ⟨1⟩ ∧ s13.pc = s12.pc + ⟨1⟩ ∧ s15.accountMap = s0.accountMap := by
+  -- Selector computation (s0 → s4).
+  obtain ⟨_, h1stk, h1ee, a0⟩ := step_PUSH1_shape_strong s0 s1 f c0 (UInt256.ofNat 0) h0
+  rw [hstk0] at h1stk
+  obtain ⟨_, h2stk, _, a1⟩ := step_CALLDATALOAD_value s1 s2 f c1 none (UInt256.ofNat 0) [] h1stk h1
+  obtain ⟨_, h3stk, _, a2⟩ := step_PUSH1_shape_strong s2 s3 f c2 (UInt256.ofNat 0xe0) h2
+  rw [h2stk] at h3stk
+  obtain ⟨_, h4stk, _, a3⟩ :=
+    step_SHR_value s3 s4 f c3 none (UInt256.ofNat 0xe0)
+      (EvmYul.State.calldataload s1.toState (UInt256.ofNat 0)) [] h3stk h3
+  have hsel4 : s4.stack = [selectorOf s0.executionEnv.calldata] := by
+    rw [h4stk]
+    have hcd : s1.toState.executionEnv.calldata = s0.executionEnv.calldata :=
+      congrArg EvmYul.ExecutionEnv.calldata h1ee
+    unfold selectorOf EvmYul.State.calldataload
+    rw [hcd, show (UInt256.ofNat 0).toNat = 0 by decide]
+  -- Dispatch comparisons.
+  obtain ⟨_, h5stk, _, a4⟩ :=
+    step_DUP1_shape_strong s4 s5 f c4 none (selectorOf s0.executionEnv.calldata) [] hsel4 h4
+  rw [hsel4] at h5stk
+  obtain ⟨_, h6stk, _, a5⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5
+  rw [h5stk] at h6stk
+  obtain ⟨_, h7stk, _, a6⟩ :=
+    step_EQ_value s6 s7 f c6 none depositSelector (selectorOf s0.executionEnv.calldata)
+      [selectorOf s0.executionEnv.calldata] h6stk h6
+  obtain ⟨_, h8stk, _, a7⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7
+  rw [h7stk] at h8stk
+  obtain ⟨h9pc, h9stk, _, a8⟩ :=
+    step_JUMPI_shape_strong s8 s9 f c8 none depositLbl
+      (UInt256.eq depositSelector (selectorOf s0.executionEnv.calldata))
+      [selectorOf s0.executionEnv.calldata] h8stk h8
+  obtain ⟨_, h10stk, _, a9⟩ := step_PUSH_shape_strong s9 s10 f c9 .PUSH4 (by decide) withdrawSelector 4 h9
+  rw [h9stk] at h10stk
+  obtain ⟨_, h11stk, _, a10⟩ :=
+    step_EQ_value s10 s11 f c10 none withdrawSelector (selectorOf s0.executionEnv.calldata) [] h10stk h10
+  obtain ⟨_, h12stk, _, a11⟩ := step_PUSH_shape_strong s11 s12 f c11 .PUSH2 (by decide) withdrawLbl 2 h11
+  rw [h11stk] at h12stk
+  obtain ⟨h13pc, _, _, a12⟩ :=
+    step_JUMPI_shape_strong s12 s13 f c12 none withdrawLbl
+      (UInt256.eq withdrawSelector (selectorOf s0.executionEnv.calldata)) [] h12stk h12
+  obtain ⟨_, _, _, a13⟩ := step_PUSH1_shape_strong s13 s14 f c13 (UInt256.ofNat 0) h13
+  obtain ⟨_, _, _, a14⟩ := step_PUSH1_shape_strong s14 s15 f c14 (UInt256.ofNat 0) h14
+  refine ⟨?_, ?_, ?_⟩
+  · rw [h9pc, eq_ne_eq_zero (Ne.symm hne_dep), if_neg (by decide)]
+  · rw [h13pc, eq_ne_eq_zero (Ne.symm hne_wd), if_neg (by decide)]
+  · rw [a14, a13, a12, a11, a10, a9, a8, a7, a6, a5, a4, a3, a2, a1, a0]
+
 end EvmSmith.Weth
