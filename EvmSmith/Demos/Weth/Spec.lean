@@ -42,8 +42,8 @@ what the theorems use" is not a claim, it is checked by Lean.
 6. **The guarantee** — `weth_is_always_solvent`.
 7. **Entry points (behavioural)** — what the dispatcher and functions
    *do*, established by executing the bytecode (`functionSelector`,
-   `weth_computes_function_selector`, …). More postconditions are added
-   here as they are proved.
+   `weth_computes_function_selector`, `weth_deposit_credits_sender`, …).
+   More postconditions are added here as they are proved.
 
 ## What the contract does (86 bytes of runtime code)
 
@@ -288,5 +288,36 @@ theorem weth_computes_function_selector
     (h3 : EVM.step (f + 1) c3 (some (.SHR, none)) s3 = .ok s4) :
     s4.stack = [functionSelector s0.executionEnv.calldata] :=
   weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hstk0 h0 h1 h2 h3
+
+/-- **`deposit` credits the caller by `msg.value`.** Executing the
+deposit body at the contract `C` (entry stack `[selector]`) updates `C`'s
+account so that the caller's token-balance slot
+(`tokenBalanceSlot caller`) goes from its old value `v` to
+`v + msg.value`, and **no other account changes**. This holds with no
+precondition — the deposit body has no branch — so `deposit` always
+credits the sender and never reverts on its own. -/
+theorem weth_deposit_credits_sender
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 c7 c8 : ℕ)
+    (C : Address) (acc : Account .EVM) (sel : UInt256)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hstk0 : s0.stack = [sel])
+    (hfind : s0.accountMap.find? C = some acc)
+    (h0 : EVM.step (f + 1) c0 (some (.JUMPDEST, none)) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.POP, none)) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.CALLER, none)) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.DUP1, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.SLOAD, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.CALLVALUE, none)) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.ADD, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.SWAP1, none)) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.SSTORE, none)) s8 = .ok s9) :
+    s9.accountMap
+      = s0.accountMap.insert C
+          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
+            (UInt256.add s0.executionEnv.weiValue
+              (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source)))) :=
+  weth_deposit_credits_caller s0 s1 s2 s3 s4 s5 s6 s7 s8 s9
+    f c0 c1 c2 c3 c4 c5 c6 c7 c8 C acc sel hCo hstk0 hfind
+    h0 h1 h2 h3 h4 h5 h6 h7 h8
 
 end EvmSmith.Weth
