@@ -320,4 +320,42 @@ theorem weth_deposit_credits_sender
     f c0 c1 c2 c3 c4 c5 c6 c7 c8 C acc sel hCo hstk0 hfind
     h0 h1 h2 h3 h4 h5 h6 h7 h8
 
+/-- **`withdraw` decrements the caller by `x`.** Once execution proceeds
+through the balance check, the withdraw state-update block decrements the
+caller's token-balance slot (`tokenBalanceSlot caller`) by the requested
+amount `x = calldata[4:36]`: from `balance` to `balance − x`, and no
+other account changes. (Reaching the `SSTORE` requires the gate to pass,
+i.e. sufficient balance.) -/
+theorem weth_withdraw_decrements_sender
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 : ℕ)
+    (C : Address) (acc : Account .EVM)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hstk0 : s0.stack = [])
+    (hfind : s0.accountMap.find? C = some acc)
+    (h0 : EVM.step (f + 1) c0 (some (.JUMPDEST, none)) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (some (.Push .PUSH1, some (UInt256.ofNat 4, 1))) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (some (.CALLDATALOAD, none)) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (some (.CALLER, none)) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (some (.DUP1, none)) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (some (.SLOAD, none)) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (some (.DUP3, none)) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (some (.DUP2, none)) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (some (.LT, none)) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (some (.Push .PUSH2, some (revertLbl, 2))) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (some (.JUMPI, none)) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (some (.DUP3, none)) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (some (.SWAP1, none)) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (some (.SUB, none)) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (some (.SWAP1, none)) s14 = .ok s15)
+    (h15 : EVM.step (f + 1) c15 (some (.SSTORE, none)) s15 = .ok s16) :
+    s16.accountMap
+      = s0.accountMap.insert C
+          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
+            (UInt256.sub (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source))
+              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))) :=
+  weth_withdraw_decrements_caller s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16
+    f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 C acc hCo hstk0 hfind
+    h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15
+
 end EvmSmith.Weth
