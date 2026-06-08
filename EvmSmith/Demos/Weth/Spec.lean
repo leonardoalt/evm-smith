@@ -35,9 +35,10 @@ what the theorems use" is not a claim, it is checked by Lean.
 2. **The vocabulary** — `ethBalance`, `tokenBalanceSlot`,
    `tokenBalanceOf`, `recordedTokenSupply`.
 3. **The property** — `Solvent`.
-4. **The assumptions** — `SolvencyAssumptions`, the real-world /
+4. **Running a transaction** — `ExecContext`, `runTx`, `SolventAfter`.
+5. **The assumptions** — `SolvencyAssumptions`, the real-world /
    chain-state facts the guarantee is conditional on.
-5. **The guarantee** — `weth_is_always_solvent`.
+6. **The guarantee** — `weth_is_always_solvent`.
 
 ## What the contract does (86 bytes of runtime code)
 
@@ -50,10 +51,14 @@ what the theorems use" is not a claim, it is checked by Lean.
 (checks-effects-interactions), so a reentrant `withdraw` sees the
 already-decremented balance and cannot double-spend.
 
-The token-balance map is laid out as Solidity's `mapping(address =>
-uint256)` at slot 0: user `a`'s balance lives at the storage slot whose
-key is `a`'s 20-byte address zero-extended to 32 bytes
-(`tokenBalanceSlot`).
+The token-balance map uses a deliberately simplified storage layout:
+user `a`'s balance is stored at the slot key equal to `a`'s own address
+(the 20-byte address zero-extended to a 32-byte word), via
+`tokenBalanceSlot`. This is **not** Solidity's `mapping(address =>
+uint256)` layout — real Solidity stores the value at
+`keccak256(key ‖ slot)`. This contract skips the hashing and uses the
+address directly as the slot key. The spec relies only on distinct
+users getting distinct slots (`addressSlot_injective`).
 -/
 
 namespace EvmSmith.Weth
@@ -83,10 +88,14 @@ account map `σ` at address `weth`. Unknown account ⇒ `0`. -/
 def ethBalance (σ : AccountMap .EVM) (weth : Address) : ℕ :=
   balanceOf σ weth
 
-/-- The storage slot that records user `user`'s WETH token balance.
+/-- The storage slot that records `user`'s WETH token balance.
 
-This is the Solidity `mapping(address => uint256)`-at-slot-0 layout:
-the 20-byte address zero-extended to 32 bytes. -/
+The contract uses the user's address directly as the slot key (the
+20-byte address zero-extended to a 32-byte word) — a deliberate
+simplification. Real Solidity would hash the key
+(`keccak256(key ‖ slot)`); this contract does not. All the proof needs
+is that distinct users map to distinct slots (`addressSlot_injective`),
+so their balances never collide. -/
 def tokenBalanceSlot (user : Address) : UInt256 :=
   addressSlot user
 
@@ -134,6 +143,46 @@ theorem solvent_iff_wethInv (σ : AccountMap .EVM) (weth : Address) :
 theorem solvent_iff_storageSumLeBalance (σ : AccountMap .EVM) (weth : Address) :
     Solvent σ weth ↔ StorageSumLeBalance σ weth := Iff.rfl
 
+/-! ## Running a transaction
+
+EVMYulLean's transaction-level driver is `EVM.Υ`: it runs one whole
+transaction and returns either the post-state (`.ok`) or an error
+(`.error` — a reverted or otherwise failed transaction). The wrappers
+here bundle its plumbing arguments and hide the `Except`/tuple shape, so
+the guarantee at the bottom reads in plain words. -/
+
+/-- The ambient EVM context for running a transaction: everything `Υ`
+needs besides the pre-state and the transaction itself. None of it is
+WETH-specific — it is the surrounding chain/block plumbing.
+
+* `fuel`    — interpreter step budget (large enough to run to completion).
+* `baseFee` — the block's base fee per gas (`H_f` in `Υ`).
+* `block`   — the current block header (`H`).
+* `genesis` — the genesis block header.
+* `history` — the previously processed blocks. -/
+structure ExecContext where
+  fuel    : ℕ
+  baseFee : ℕ
+  block   : BlockHeader
+  genesis : BlockHeader
+  history : ProcessedBlocks
+
+/-- Run one transaction `tx`, sent by `S_T`, on pre-state `σ` in context
+`ctx`. Thin wrapper over EVMYulLean's `EVM.Υ`; returns `.ok` with the
+post-state or `.error`. -/
+def runTx (ctx : ExecContext) (σ : AccountMap .EVM)
+    (tx : Transaction) (S_T : Address) :=
+  EVM.Υ ctx.fuel σ ctx.baseFee ctx.block ctx.genesis ctx.history tx S_T
+
+/-- **WETH is solvent after running `tx`.** Holds when the post-state of
+`runTx` is `Solvent`; vacuously true when the transaction reverts
+(`.error`), since then no state changed. -/
+def SolventAfter (ctx : ExecContext) (σ : AccountMap .EVM)
+    (tx : Transaction) (S_T weth : Address) : Prop :=
+  match runTx ctx σ tx S_T with
+  | .ok (σ', _, _, _) => Solvent σ' weth
+  | .error _ => True
+
 /-! ## The assumptions
 
 The guarantee is conditional on a small bundle of facts that are *not*
@@ -160,11 +209,9 @@ bundle; the five fields, in plain terms, are:
 
 See `Solvency.lean` and `REPORT_WETH.md` for the full justification of
 each. -/
-abbrev SolvencyAssumptions
-    (σ : AccountMap .EVM) (fuel H_f : ℕ)
-    (H H_gen : BlockHeader) (blocks : ProcessedBlocks) (tx : Transaction)
-    (S_T weth : Address) : Prop :=
-  WethAssumptions σ fuel H_f H H_gen blocks tx S_T weth
+abbrev SolvencyAssumptions (ctx : ExecContext) (σ : AccountMap .EVM)
+    (tx : Transaction) (S_T weth : Address) : Prop :=
+  WethAssumptions σ ctx.fuel ctx.baseFee ctx.block ctx.genesis ctx.history tx S_T weth
 
 /-! ## The guarantee
 
@@ -192,19 +239,16 @@ The proof is a single application of `weth_solvency_invariant` — the
 engine that does the instruction-by-instruction bytecode walk. That one
 line is the entire bridge between this spec and the bytecode. -/
 theorem weth_is_always_solvent
-    (fuel : ℕ) (σ : AccountMap .EVM) (H_f : ℕ)
-    (H H_gen : BlockHeader) (blocks : ProcessedBlocks)
+    (ctx : ExecContext) (σ : AccountMap .EVM)
     (tx : Transaction) (S_T weth : Address)
-    (hWellFormed : StateWF σ)
-    (hSolventBefore : Solvent σ weth)
-    (hNotSender : weth ≠ S_T)
-    (hNotMiner : weth ≠ H.beneficiary)
-    (hTxValid : TxValid σ S_T tx H H_f)
-    (hAssumptions : SolvencyAssumptions σ fuel H_f H H_gen blocks tx S_T weth) :
-    match EVM.Υ fuel σ H_f H H_gen blocks tx S_T with
-    | .ok (σ', _, _, _) => Solvent σ' weth
-    | .error _ => True :=
-  weth_solvency_invariant fuel σ H_f H H_gen blocks tx S_T weth
-    hWellFormed hSolventBefore hNotSender hNotMiner hTxValid hAssumptions
+    (hWellFormed     : StateWF σ)
+    (hSolventBefore  : Solvent σ weth)
+    (hNotSender      : weth ≠ S_T)
+    (hNotMiner       : weth ≠ ctx.block.beneficiary)
+    (hTxValid        : TxValid σ S_T tx ctx.block ctx.baseFee)
+    (hAssumptions    : SolvencyAssumptions ctx σ tx S_T weth) :
+    SolventAfter ctx σ tx S_T weth :=
+  weth_solvency_invariant ctx.fuel σ ctx.baseFee ctx.block ctx.genesis ctx.history
+    tx S_T weth hWellFormed hSolventBefore hNotSender hNotMiner hTxValid hAssumptions
 
 end EvmSmith.Weth
