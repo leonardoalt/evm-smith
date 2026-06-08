@@ -7,6 +7,12 @@ lemmas, and the remaining structural assumptions.
 
 All paths are relative to the `evm-smith` repository root.
 
+- `EvmSmith/Demos/Weth/Spec.lean` — **the human-readable spec**, and the
+  recommended entry point for auditors. Plain-English vocabulary
+  (`ethBalance`, `recordedTokenSupply`, `Solvent`), the assumption
+  bundle, and the headline theorem `weth_is_always_solvent`, all stated
+  without proof machinery. `rfl` bridge lemmas tie the spec names to the
+  proven predicates; the headline theorem is proved by the engine below.
 - `EvmSmith/Demos/Weth/Program.lean` — WETH bytecode + decode lemmas.
 - `EvmSmith/Demos/Weth/Invariant.lean` — `WethInv` predicate.
 - `EvmSmith/Demos/Weth/BytecodeFrame.lean` — trace/walks/cascade machinery.
