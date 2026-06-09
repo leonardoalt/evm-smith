@@ -623,42 +623,45 @@ theorem weth_routes_deposit
     (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
     (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
     (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9) :
-    s9.pc = depositLbl ∧ s9.stack = [depositSelector] := by
-  obtain ⟨hs4stk, hs4pc, hs4ee, _⟩ :=
+    s9.pc = depositLbl ∧ s9.stack = [depositSelector]
+    ∧ s9.executionEnv = s0.executionEnv ∧ s9.accountMap = s0.accountMap := by
+  obtain ⟨hs4stk, hs4pc, hs4ee, hs4am⟩ :=
     weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hcode hpc0 hstk0 h0 h1 h2 h3
   rw [hsel] at hs4stk
   have hcode4 : s4.executionEnv.code = bytecode := by rw [hs4ee]; exact hcode
   have h4' := weth_fetch_step s4 s5 f c4 6 _ _ hcode4 hs4pc
     (by native_decide : decode bytecode (UInt256.ofNat 6) = some (.DUP1, none)) h4
-  obtain ⟨h5pc, h5stk, h5ee, _⟩ := step_DUP1_shape_strong s4 s5 f c4 none depositSelector [] hs4stk h4'
+  obtain ⟨h5pc, h5stk, h5ee, h5am⟩ := step_DUP1_shape_strong s4 s5 f c4 none depositSelector [] hs4stk h4'
   rw [hs4stk] at h5stk
   have hcode5 : s5.executionEnv.code = bytecode := by rw [h5ee]; exact hcode4
   have hpc5 : s5.pc = UInt256.ofNat 7 := by rw [h5pc, hs4pc]; decide
   have h5' := weth_fetch_step s5 s6 f c5 7 _ _ hcode5 hpc5
     (by native_decide : decode bytecode (UInt256.ofNat 7) = some (.Push .PUSH4, some (depositSelector, 4))) h5
-  obtain ⟨h6pc, h6stk, h6ee, _⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5'
+  obtain ⟨h6pc, h6stk, h6ee, h6am⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5'
   rw [h5stk] at h6stk
   have hcode6 : s6.executionEnv.code = bytecode := by rw [h6ee]; exact hcode5
   have hpc6 : s6.pc = UInt256.ofNat 12 := by rw [h6pc, hpc5]; decide
   have h6' := weth_fetch_step s6 s7 f c6 12 _ _ hcode6 hpc6
     (by native_decide : decode bytecode (UInt256.ofNat 12) = some (.EQ, none)) h6
-  obtain ⟨h7pc, h7stk, h7ee, _⟩ :=
+  obtain ⟨h7pc, h7stk, h7ee, h7am⟩ :=
     step_EQ_value s6 s7 f c6 none depositSelector depositSelector [depositSelector] h6stk h6'
   have hcode7 : s7.executionEnv.code = bytecode := by rw [h7ee]; exact hcode6
   have hpc7 : s7.pc = UInt256.ofNat 13 := by rw [h7pc, hpc6]; decide
   have h7' := weth_fetch_step s7 s8 f c7 13 _ _ hcode7 hpc7
     (by native_decide : decode bytecode (UInt256.ofNat 13) = some (.Push .PUSH2, some (depositLbl, 2))) h7
-  obtain ⟨h8pc, h8stk, h8ee, _⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7'
+  obtain ⟨h8pc, h8stk, h8ee, h8am⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7'
   rw [h7stk] at h8stk
   have hcode8 : s8.executionEnv.code = bytecode := by rw [h8ee]; exact hcode7
   have hpc8 : s8.pc = UInt256.ofNat 16 := by rw [h8pc, hpc7]; decide
   have h8' := weth_fetch_step s8 s9 f c8 16 _ _ hcode8 hpc8
     (by native_decide : decode bytecode (UInt256.ofNat 16) = some (.JUMPI, none)) h8
-  obtain ⟨h9pc, h9stk, _, _⟩ :=
+  obtain ⟨h9pc, h9stk, h9ee, h9am⟩ :=
     step_JUMPI_shape_strong s8 s9 f c8 none depositLbl
       (UInt256.eq depositSelector depositSelector) [depositSelector] h8stk h8'
-  refine ⟨?_, h9stk⟩
-  rw [h9pc, eq_self_eq_one, if_pos (by decide)]
+  refine ⟨?_, h9stk, ?_, ?_⟩
+  · rw [h9pc, eq_self_eq_one, if_pos (by decide)]
+  · rw [h9ee, h8ee, h7ee, h6ee, h5ee, hs4ee]
+  · rw [h9am, h8am, h7am, h6am, h5am, hs4am]
 
 /-- **A `withdraw` selector routes to the withdraw body.** From the entry
 state, if the call's selector is `withdrawSelector`, the dispatcher's
@@ -685,38 +688,39 @@ theorem weth_routes_withdraw
     (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
     (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
     (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13) :
-    s13.pc = withdrawLbl ∧ s13.stack = [] := by
-  obtain ⟨hs4stk, hs4pc, hs4ee, _⟩ :=
+    s13.pc = withdrawLbl ∧ s13.stack = []
+    ∧ s13.executionEnv = s0.executionEnv ∧ s13.accountMap = s0.accountMap := by
+  obtain ⟨hs4stk, hs4pc, hs4ee, hs4am⟩ :=
     weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hcode hpc0 hstk0 h0 h1 h2 h3
   rw [hsel] at hs4stk
   have hcode4 : s4.executionEnv.code = bytecode := by rw [hs4ee]; exact hcode
   have h4' := weth_fetch_step s4 s5 f c4 6 _ _ hcode4 hs4pc
     (by native_decide : decode bytecode (UInt256.ofNat 6) = some (.DUP1, none)) h4
-  obtain ⟨h5pc, h5stk, h5ee, _⟩ := step_DUP1_shape_strong s4 s5 f c4 none withdrawSelector [] hs4stk h4'
+  obtain ⟨h5pc, h5stk, h5ee, h5am⟩ := step_DUP1_shape_strong s4 s5 f c4 none withdrawSelector [] hs4stk h4'
   rw [hs4stk] at h5stk
   have hcode5 : s5.executionEnv.code = bytecode := by rw [h5ee]; exact hcode4
   have hpc5 : s5.pc = UInt256.ofNat 7 := by rw [h5pc, hs4pc]; decide
   have h5' := weth_fetch_step s5 s6 f c5 7 _ _ hcode5 hpc5
     (by native_decide : decode bytecode (UInt256.ofNat 7) = some (.Push .PUSH4, some (depositSelector, 4))) h5
-  obtain ⟨h6pc, h6stk, h6ee, _⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5'
+  obtain ⟨h6pc, h6stk, h6ee, h6am⟩ := step_PUSH_shape_strong s5 s6 f c5 .PUSH4 (by decide) depositSelector 4 h5'
   rw [h5stk] at h6stk
   have hcode6 : s6.executionEnv.code = bytecode := by rw [h6ee]; exact hcode5
   have hpc6 : s6.pc = UInt256.ofNat 12 := by rw [h6pc, hpc5]; decide
   have h6' := weth_fetch_step s6 s7 f c6 12 _ _ hcode6 hpc6
     (by native_decide : decode bytecode (UInt256.ofNat 12) = some (.EQ, none)) h6
-  obtain ⟨h7pc, h7stk, h7ee, _⟩ :=
+  obtain ⟨h7pc, h7stk, h7ee, h7am⟩ :=
     step_EQ_value s6 s7 f c6 none depositSelector withdrawSelector [withdrawSelector] h6stk h6'
   have hcode7 : s7.executionEnv.code = bytecode := by rw [h7ee]; exact hcode6
   have hpc7 : s7.pc = UInt256.ofNat 13 := by rw [h7pc, hpc6]; decide
   have h7' := weth_fetch_step s7 s8 f c7 13 _ _ hcode7 hpc7
     (by native_decide : decode bytecode (UInt256.ofNat 13) = some (.Push .PUSH2, some (depositLbl, 2))) h7
-  obtain ⟨h8pc, h8stk, h8ee, _⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7'
+  obtain ⟨h8pc, h8stk, h8ee, h8am⟩ := step_PUSH_shape_strong s7 s8 f c7 .PUSH2 (by decide) depositLbl 2 h7'
   rw [h7stk] at h8stk
   have hcode8 : s8.executionEnv.code = bytecode := by rw [h8ee]; exact hcode7
   have hpc8 : s8.pc = UInt256.ofNat 16 := by rw [h8pc, hpc7]; decide
   have h8' := weth_fetch_step s8 s9 f c8 16 _ _ hcode8 hpc8
     (by native_decide : decode bytecode (UInt256.ofNat 16) = some (.JUMPI, none)) h8
-  obtain ⟨h9pc, h9stk, h9ee, _⟩ :=
+  obtain ⟨h9pc, h9stk, h9ee, h9am⟩ :=
     step_JUMPI_shape_strong s8 s9 f c8 none depositLbl
       (UInt256.eq depositSelector withdrawSelector) [withdrawSelector] h8stk h8'
   -- First gate falls through (deposit ≠ withdraw): s9.pc = 17, stack = [withdrawSelector].
@@ -725,29 +729,31 @@ theorem weth_routes_withdraw
     rw [h9pc, eq_ne_eq_zero selectors_distinct, if_neg (by decide), hpc8]; decide
   have h9' := weth_fetch_step s9 s10 f c9 17 _ _ hcode9 hpc9
     (by native_decide : decode bytecode (UInt256.ofNat 17) = some (.Push .PUSH4, some (withdrawSelector, 4))) h9
-  obtain ⟨h10pc, h10stk, h10ee, _⟩ := step_PUSH_shape_strong s9 s10 f c9 .PUSH4 (by decide) withdrawSelector 4 h9'
+  obtain ⟨h10pc, h10stk, h10ee, h10am⟩ := step_PUSH_shape_strong s9 s10 f c9 .PUSH4 (by decide) withdrawSelector 4 h9'
   rw [h9stk] at h10stk
   have hcode10 : s10.executionEnv.code = bytecode := by rw [h10ee]; exact hcode9
   have hpc10 : s10.pc = UInt256.ofNat 22 := by rw [h10pc, hpc9]; decide
   have h10' := weth_fetch_step s10 s11 f c10 22 _ _ hcode10 hpc10
     (by native_decide : decode bytecode (UInt256.ofNat 22) = some (.EQ, none)) h10
-  obtain ⟨h11pc, h11stk, h11ee, _⟩ :=
+  obtain ⟨h11pc, h11stk, h11ee, h11am⟩ :=
     step_EQ_value s10 s11 f c10 none withdrawSelector withdrawSelector [] h10stk h10'
   have hcode11 : s11.executionEnv.code = bytecode := by rw [h11ee]; exact hcode10
   have hpc11 : s11.pc = UInt256.ofNat 23 := by rw [h11pc, hpc10]; decide
   have h11' := weth_fetch_step s11 s12 f c11 23 _ _ hcode11 hpc11
     (by native_decide : decode bytecode (UInt256.ofNat 23) = some (.Push .PUSH2, some (withdrawLbl, 2))) h11
-  obtain ⟨h12pc, h12stk, h12ee, _⟩ := step_PUSH_shape_strong s11 s12 f c11 .PUSH2 (by decide) withdrawLbl 2 h11'
+  obtain ⟨h12pc, h12stk, h12ee, h12am⟩ := step_PUSH_shape_strong s11 s12 f c11 .PUSH2 (by decide) withdrawLbl 2 h11'
   rw [h11stk] at h12stk
   have hcode12 : s12.executionEnv.code = bytecode := by rw [h12ee]; exact hcode11
   have hpc12 : s12.pc = UInt256.ofNat 26 := by rw [h12pc, hpc11]; decide
   have h12' := weth_fetch_step s12 s13 f c12 26 _ _ hcode12 hpc12
     (by native_decide : decode bytecode (UInt256.ofNat 26) = some (.JUMPI, none)) h12
-  obtain ⟨h13pc, h13stk, _, _⟩ :=
+  obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
     step_JUMPI_shape_strong s12 s13 f c12 none withdrawLbl
       (UInt256.eq withdrawSelector withdrawSelector) [] h12stk h12'
-  refine ⟨?_, h13stk⟩
-  rw [h13pc, eq_self_eq_one, if_pos (by decide)]
+  refine ⟨?_, h13stk, ?_, ?_⟩
+  · rw [h13pc, eq_self_eq_one, if_pos (by decide)]
+  · rw [h13ee, h12ee, h11ee, h10ee, h9ee, h8ee, h7ee, h6ee, h5ee, hs4ee]
+  · rw [h13am, h12am, h11am, h10am, h9am, h8am, h7am, h6am, h5am, hs4am]
 
 /-! ## Withdraw's outbound transfer (#3)
 
@@ -950,5 +956,144 @@ theorem weth_unknown_selector_no_state_change
   · rw [h9pc, eq_ne_eq_zero (Ne.symm hne_dep), if_neg (by decide)]
   · rw [h13pc, eq_ne_eq_zero (Ne.symm hne_wd), if_neg (by decide)]
   · rw [a14, a13, a12, a11, a10, a9, a8, a7, a6, a5, a4, hs4am]
+
+/-! ## Composed: dispatch + body, from the call entry
+
+These compose the dispatch router with the function body, so the
+`pc = depositLbl` / `pc = withdrawLbl` entry and the stack at that point
+are **derived from dispatch**, not assumed: the only entry assumption is
+`pc = 0` with an empty stack (the genuine start of a call). -/
+
+/-- **deposit, end to end.** From the call entry (`pc = 0`, empty stack,
+running `bytecode`) with the deposit selector, after the 9 dispatch
+instructions (PCs 0–16) followed by the 9 deposit-body instructions
+(PCs 32–40), the caller's recorded balance slot has increased by
+`msg.value` and nothing else changed. The deposit entry (PC 32) and the
+`[selector]` stack are produced by `weth_routes_deposit`, not assumed. -/
+theorem weth_deposit_from_entry
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 : ℕ)
+    (C : AccountAddress) (acc : Account .EVM)
+    (hcode : s0.executionEnv.code = bytecode)
+    (hpc0 : s0.pc = UInt256.ofNat 0)
+    (hstk0 : s0.stack = [])
+    (hsel : selectorOf s0.executionEnv.calldata = depositSelector)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hfind : s0.accountMap.find? C = some acc)
+    (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (decode s9.executionEnv.code s9.pc) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
+    (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16)
+    (h16 : EVM.step (f + 1) c16 (decode s16.executionEnv.code s16.pc) s16 = .ok s17)
+    (h17 : EVM.step (f + 1) c17 (decode s17.executionEnv.code s17.pc) s17 = .ok s18) :
+    s18.accountMap
+      = s0.accountMap.insert C
+          (acc.updateStorage (UInt256.ofNat s0.executionEnv.source.val)
+            (UInt256.add s0.executionEnv.weiValue
+              (acc.lookupStorage (UInt256.ofNat s0.executionEnv.source.val)))) := by
+  obtain ⟨h9pc, h9stk, h9ee, h9am⟩ :=
+    weth_routes_deposit s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 f c0 c1 c2 c3 c4 c5 c6 c7 c8
+      hcode hpc0 hstk0 hsel h0 h1 h2 h3 h4 h5 h6 h7 h8
+  have hcode9 : s9.executionEnv.code = bytecode := by rw [h9ee]; exact hcode
+  have hCo9 : s9.executionEnv.codeOwner = C := by rw [h9ee]; exact hCo
+  have hfind9 : s9.accountMap.find? C = some acc := by rw [h9am]; exact hfind
+  have hbody :=
+    weth_deposit_credits_caller s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
+      f c9 c10 c11 c12 c13 c14 c15 c16 c17 C acc depositSelector
+      hcode9 h9pc hCo9 h9stk hfind9 h9 h10 h11 h12 h13 h14 h15 h16 h17
+  rw [hbody, h9ee, h9am]
+
+/-- **withdraw, end to end.** From the call entry (`pc = 0`, empty stack,
+running `bytecode`) with the withdraw selector and sufficient balance
+(`x ≤ balance`), after the 13 dispatch instructions (PCs 0–26) followed
+by the 16 withdraw-body instructions (PCs 42–60), the caller's recorded
+balance slot has decreased by `x = calldata[4:36]` and nothing else
+changed. The withdraw entry (PC 42) and the empty stack there are
+produced by `weth_routes_withdraw`, not assumed. -/
+theorem weth_withdraw_from_entry
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22
+      s23 s24 s25 s26 s27 s28 s29 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 c18 c19 c20 c21 c22
+      c23 c24 c25 c26 c27 c28 : ℕ)
+    (C : AccountAddress) (acc : Account .EVM)
+    (hcode : s0.executionEnv.code = bytecode)
+    (hpc0 : s0.pc = UInt256.ofNat 0)
+    (hstk0 : s0.stack = [])
+    (hsel : selectorOf s0.executionEnv.calldata = withdrawSelector)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hfind : s0.accountMap.find? C = some acc)
+    (hle : (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)).toNat
+            ≤ (acc.lookupStorage (UInt256.ofNat s0.executionEnv.source.val)).toNat)
+    (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (decode s9.executionEnv.code s9.pc) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
+    (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16)
+    (h16 : EVM.step (f + 1) c16 (decode s16.executionEnv.code s16.pc) s16 = .ok s17)
+    (h17 : EVM.step (f + 1) c17 (decode s17.executionEnv.code s17.pc) s17 = .ok s18)
+    (h18 : EVM.step (f + 1) c18 (decode s18.executionEnv.code s18.pc) s18 = .ok s19)
+    (h19 : EVM.step (f + 1) c19 (decode s19.executionEnv.code s19.pc) s19 = .ok s20)
+    (h20 : EVM.step (f + 1) c20 (decode s20.executionEnv.code s20.pc) s20 = .ok s21)
+    (h21 : EVM.step (f + 1) c21 (decode s21.executionEnv.code s21.pc) s21 = .ok s22)
+    (h22 : EVM.step (f + 1) c22 (decode s22.executionEnv.code s22.pc) s22 = .ok s23)
+    (h23 : EVM.step (f + 1) c23 (decode s23.executionEnv.code s23.pc) s23 = .ok s24)
+    (h24 : EVM.step (f + 1) c24 (decode s24.executionEnv.code s24.pc) s24 = .ok s25)
+    (h25 : EVM.step (f + 1) c25 (decode s25.executionEnv.code s25.pc) s25 = .ok s26)
+    (h26 : EVM.step (f + 1) c26 (decode s26.executionEnv.code s26.pc) s26 = .ok s27)
+    (h27 : EVM.step (f + 1) c27 (decode s27.executionEnv.code s27.pc) s27 = .ok s28)
+    (h28 : EVM.step (f + 1) c28 (decode s28.executionEnv.code s28.pc) s28 = .ok s29) :
+    s29.accountMap
+      = s0.accountMap.insert C
+          (acc.updateStorage (UInt256.ofNat s0.executionEnv.source.val)
+            (UInt256.sub (acc.lookupStorage (UInt256.ofNat s0.executionEnv.source.val))
+              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))) := by
+  obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
+    weth_routes_withdraw s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13
+      f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 hcode hpc0 hstk0 hsel
+      h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
+  have hcode13 : s13.executionEnv.code = bytecode := by rw [h13ee]; exact hcode
+  have hCo13 : s13.executionEnv.codeOwner = C := by rw [h13ee]; exact hCo
+  have hfind13 : s13.accountMap.find? C = some acc := by rw [h13am]; exact hfind
+  -- The sufficient-balance precondition transports through dispatch (it
+  -- only depends on calldata and the caller, both preserved).
+  have hcdld : EvmYul.State.calldataload s13.toState (UInt256.ofNat 4)
+             = EvmYul.State.calldataload s0.toState (UInt256.ofNat 4) := by
+    unfold EvmYul.State.calldataload
+    rw [show s13.toState.executionEnv.calldata = s0.toState.executionEnv.calldata from
+        congrArg EvmYul.ExecutionEnv.calldata h13ee]
+  have hsrc : s13.executionEnv.source = s0.executionEnv.source :=
+    congrArg EvmYul.ExecutionEnv.source h13ee
+  have hle13 : (EvmYul.State.calldataload s13.toState (UInt256.ofNat 4)).toNat
+             ≤ (acc.lookupStorage (UInt256.ofNat s13.executionEnv.source.val)).toNat := by
+    rw [hcdld, hsrc]; exact hle
+  have hbody :=
+    weth_withdraw_decrements_caller s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25
+      s26 s27 s28 s29 f c13 c14 c15 c16 c17 c18 c19 c20 c21 c22 c23 c24 c25 c26 c27 c28
+      C acc hcode13 h13pc hCo13 h13stk hfind13 hle13
+      h13 h14 h15 h16 h17 h18 h19 h20 h21 h22 h23 h24 h25 h26 h27 h28
+  rw [hbody, h13am, h13ee, hcdld]
 
 end EvmSmith.Weth
