@@ -75,7 +75,7 @@ users getting distinct slots (`addressSlot_injective`).
 
 namespace EvmSmith.Weth
 
-open EvmYul EvmYul.EVM EvmYul.Frame
+open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1
 
 /-! ## The contract -/
 
@@ -117,6 +117,112 @@ slot or account reads as `0`. -/
 def tokenBalanceOf (σ : AccountMap .EVM) (weth user : Address) : ℕ :=
   ((σ.find? weth).map
       (fun acc => (acc.storage.findD (tokenBalanceSlot user) ⟨0⟩).toNat)).getD 0
+
+/-- User `user`'s WETH token balance as a 256-bit word (the raw slot
+value). This is the `UInt256`-valued sibling of `tokenBalanceOf`; using
+it lets the postconditions below state balance changes in faithful
+256-bit arithmetic (`UInt256.add`/`UInt256.sub`, which wrap) rather than
+in `ℕ`. -/
+def recordedBalance (σ : AccountMap .EVM) (weth user : Address) : UInt256 :=
+  ((σ.find? weth).map (fun acc => acc.lookupStorage (tokenBalanceSlot user))).getD ⟨0⟩
+
+/-- The `msg.sender` of the call executing in state `s`. -/
+def msgSender (s : EVM.State) : Address := s.executionEnv.source
+
+/-- The `msg.value` (wei sent) of the call executing in state `s`. -/
+def msgValue (s : EVM.State) : UInt256 := s.executionEnv.weiValue
+
+/-- `withdraw`'s `uint256` argument: the requested amount, ABI-decoded
+from `calldata[4:36]`. -/
+def withdrawArg (s : EVM.State) : UInt256 :=
+  EvmYul.State.calldataload s.toState (UInt256.ofNat 4)
+
+/-! ### Storage readback (used to state balance deltas)
+
+Reading back a slot after `updateStorage`: the written slot reads as the
+written value; every other slot is unchanged. The `v = 0` branch of
+`updateStorage` erases the key, handled via `rbmap_erase_toList_filter`. -/
+
+private theorem uint256_eq_of_beq {a b : UInt256} (h : (a == b) = true) : a = b := by
+  obtain ⟨a⟩ := a; obtain ⟨b⟩ := b
+  exact congrArg UInt256.mk (eq_of_beq (a := a) (b := b) h)
+
+private theorem storage_find?_erase_self (s : Storage) (k : UInt256) :
+    (s.erase k).find? k = none := by
+  cases h : (s.erase k).find? k with
+  | none => rfl
+  | some w =>
+    obtain ⟨y, hMem, hEq⟩ := RBMap.find?_some_mem_toList h
+    rw [rbmap_erase_toList_filter, List.mem_filter] at hMem
+    exact absurd hEq (by simpa using hMem.2)
+
+private theorem storage_find?_erase_ne (s : Storage) (k k' : UInt256) (hne : k' ≠ k) :
+    (s.erase k).find? k' = s.find? k' := by
+  unfold RBMap.find?
+  congr 1
+  ext y
+  rw [RBMap.findEntry?_some, RBMap.findEntry?_some]
+  have hfilter : y ∈ (s.erase k).toList ↔ y ∈ s.toList ∧ compare k y.1 ≠ .eq := by
+    rw [rbmap_erase_toList_filter]; simp [List.mem_filter]
+  constructor
+  · rintro ⟨hMem, hEq⟩; rw [hfilter] at hMem; exact ⟨hMem.1, hEq⟩
+  · rintro ⟨hMem, hEq⟩
+    refine ⟨hfilter.mpr ⟨hMem, ?_⟩, hEq⟩
+    intro hky
+    exact hne ((Std.LawfulEqCmp.compare_eq_iff_eq.mp hEq).trans
+      (Std.LawfulEqCmp.compare_eq_iff_eq.mp hky).symm)
+
+theorem lookupStorage_updateStorage_self (acc : Account .EVM) (k v : UInt256) :
+    (acc.updateStorage k v).lookupStorage k = v := by
+  unfold Account.updateStorage Account.lookupStorage
+  by_cases h : (v == default) = true
+  · rw [if_pos h]
+    show ((acc.storage.erase k).find? k).getD ⟨0⟩ = v
+    rw [storage_find?_erase_self]
+    exact (uint256_eq_of_beq h).symm
+  · rw [if_neg h]
+    show ((acc.storage.insert k v).find? k).getD ⟨0⟩ = v
+    rw [RBMap.find?_insert_of_eq _ Std.ReflCmp.compare_self]; rfl
+
+theorem lookupStorage_updateStorage_ne (acc : Account .EVM) (k k' v : UInt256) (h : k' ≠ k) :
+    (acc.updateStorage k v).lookupStorage k' = acc.lookupStorage k' := by
+  have hcmp : compare k' k ≠ .eq := fun hc => h (Std.LawfulEqCmp.compare_eq_iff_eq.mp hc)
+  unfold Account.updateStorage Account.lookupStorage
+  by_cases hv : (v == default) = true
+  · rw [if_pos hv]
+    show ((acc.storage.erase k).find? k').getD ⟨0⟩ = (acc.storage.find? k').getD ⟨0⟩
+    rw [storage_find?_erase_ne _ _ _ h]
+  · rw [if_neg hv]
+    show ((acc.storage.insert k v).find? k').getD ⟨0⟩ = (acc.storage.find? k').getD ⟨0⟩
+    rw [RBMap.find?_insert_of_ne _ hcmp]
+
+/-- After a deposit/withdraw `SSTORE` (which `insert`s the codeOwner's
+account with the caller's slot updated to `v`), reading back that slot
+gives `v`. -/
+theorem recordedBalance_insert_self
+    (σ : AccountMap .EVM) (C a : Address) (v : UInt256) (acc : Account .EVM) :
+    recordedBalance (σ.insert C (acc.updateStorage (tokenBalanceSlot a) v)) C a = v := by
+  unfold recordedBalance
+  rw [find?_insert_self]
+  simpa using lookupStorage_updateStorage_self acc (tokenBalanceSlot a) v
+
+/-- When `C`'s account is `acc`, `recordedBalance` reads back through it. -/
+theorem recordedBalance_of_find
+    (σ : AccountMap .EVM) (C a : Address) (acc : Account .EVM)
+    (hfind : σ.find? C = some acc) :
+    recordedBalance σ C a = acc.lookupStorage (tokenBalanceSlot a) := by
+  unfold recordedBalance; rw [hfind]; rfl
+
+/-- The same `SSTORE` leaves every *other* user's balance slot unchanged. -/
+theorem recordedBalance_insert_ne
+    (σ : AccountMap .EVM) (C a b : Address) (v : UInt256) (acc : Account .EVM)
+    (hfind : σ.find? C = some acc) (hb : b ≠ a) :
+    recordedBalance (σ.insert C (acc.updateStorage (tokenBalanceSlot a) v)) C b
+      = recordedBalance σ C b := by
+  unfold recordedBalance
+  rw [find?_insert_self, hfind]
+  have hslot : tokenBalanceSlot b ≠ tokenBalanceSlot a := fun he => hb (addressSlot_injective he)
+  simpa using lookupStorage_updateStorage_ne acc (tokenBalanceSlot a) (tokenBalanceSlot b) v hslot
 
 /-- The total WETH token supply *recorded in storage*: the sum, over
 every user, of their recorded token balance. (Equivalently: the sum of
@@ -505,15 +611,22 @@ theorem weth_deposit_credits_from_call
     (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16)
     (h16 : EVM.step (f + 1) c16 (decode s16.executionEnv.code s16.pc) s16 = .ok s17)
     (h17 : EVM.step (f + 1) c17 (decode s17.executionEnv.code s17.pc) s17 = .ok s18) :
-    s18.accountMap
-      = s0.accountMap.insert C
-          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
-            (UInt256.add s0.executionEnv.weiValue
-              (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source)))) :=
-  weth_deposit_from_entry s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
+    recordedBalance s18.accountMap C (msgSender s0)
+        = UInt256.add (msgValue s0) (recordedBalance s0.accountMap C (msgSender s0))
+    ∧ ∀ b, b ≠ msgSender s0 →
+        recordedBalance s18.accountMap C b = recordedBalance s0.accountMap C b := by
+  simp only [msgSender, msgValue]
+  have hb := weth_deposit_from_entry s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
     f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 C acc
     hcode hpc0 hstk0 hsel hCo hfind
     h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15 h16 h17
+  rw [show (UInt256.ofNat s0.executionEnv.source.val)
+        = tokenBalanceSlot s0.executionEnv.source from rfl] at hb
+  refine ⟨?_, ?_⟩
+  · rw [hb, recordedBalance_insert_self, recordedBalance_of_find s0.accountMap C s0.executionEnv.source acc hfind]
+  · intro b hbne
+    rw [hb]
+    exact recordedBalance_insert_ne s0.accountMap C s0.executionEnv.source b _ acc hfind hbne
 
 /-- **A withdraw call decrements the caller by `x` (end to end).** From
 the call entry (`pc = 0`, empty stack, running WETH's bytecode) with the
@@ -564,16 +677,23 @@ theorem weth_withdraw_decrements_from_call
     (h26 : EVM.step (f + 1) c26 (decode s26.executionEnv.code s26.pc) s26 = .ok s27)
     (h27 : EVM.step (f + 1) c27 (decode s27.executionEnv.code s27.pc) s27 = .ok s28)
     (h28 : EVM.step (f + 1) c28 (decode s28.executionEnv.code s28.pc) s28 = .ok s29) :
-    s29.accountMap
-      = s0.accountMap.insert C
-          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
-            (UInt256.sub (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source))
-              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))) :=
-  weth_withdraw_from_entry s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
+    recordedBalance s29.accountMap C (msgSender s0)
+        = UInt256.sub (recordedBalance s0.accountMap C (msgSender s0)) (withdrawArg s0)
+    ∧ ∀ b, b ≠ msgSender s0 →
+        recordedBalance s29.accountMap C b = recordedBalance s0.accountMap C b := by
+  simp only [msgSender, withdrawArg]
+  have hb := weth_withdraw_from_entry s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
     s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29
     f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 c18 c19 c20 c21 c22
     c23 c24 c25 c26 c27 c28 C acc hcode hpc0 hstk0 hsel hCo hfind hle
     h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15 h16 h17 h18 h19 h20 h21 h22
     h23 h24 h25 h26 h27 h28
+  rw [show (UInt256.ofNat s0.executionEnv.source.val)
+        = tokenBalanceSlot s0.executionEnv.source from rfl] at hb
+  refine ⟨?_, ?_⟩
+  · rw [hb, recordedBalance_insert_self, recordedBalance_of_find s0.accountMap C s0.executionEnv.source acc hfind]
+  · intro b hbne
+    rw [hb]
+    exact recordedBalance_insert_ne s0.accountMap C s0.executionEnv.source b _ acc hfind hbne
 
 end EvmSmith.Weth
