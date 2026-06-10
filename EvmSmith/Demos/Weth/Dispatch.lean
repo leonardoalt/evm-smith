@@ -438,11 +438,14 @@ theorem weth_withdraw_decrements_caller
     (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
     (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
     (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16) :
-    s16.accountMap
+    (s16.accountMap
       = s0.accountMap.insert C
           (acc.updateStorage (UInt256.ofNat s0.executionEnv.source.val)
             (UInt256.sub (acc.lookupStorage (UInt256.ofNat s0.executionEnv.source.val))
-              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))) := by
+              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))))
+    ∧ s16.pc = UInt256.ofNat 61
+    ∧ s16.stack = [EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)]
+    ∧ s16.executionEnv = s0.executionEnv := by
   set xV := EvmYul.State.calldataload s2.toState (UInt256.ofNat 4) with hxV
   set caller := UInt256.ofNat s3.executionEnv.source.val with hcaller
   -- JUMPDEST (42)
@@ -583,7 +586,13 @@ theorem weth_withdraw_decrements_caller
     rw [ham, h15co]; exact hfind
   obtain h16am :=
     step_SSTORE_to_insert s15 s16 f c15 none caller (UInt256.sub balV xV) [xV] h15stk acc h15find h15'
-  rw [h16am, h15co, ham, hcallerEq, hxVEq, hbalEq, hcallerEq]
+  obtain ⟨h16pc, h16stk, h16ee⟩ :=
+    step_SSTORE_shape s15 s16 f c15 none caller (UInt256.sub balV xV) [xV] h15stk h15'
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · rw [h16am, h15co, ham, hcallerEq, hxVEq, hbalEq, hcallerEq]
+  · rw [h16pc, hp15]; decide
+  · rw [h16stk, hxVEq]
+  · rw [h16ee, hee]
 
 /-! ## Dispatch routing
 
@@ -1094,6 +1103,101 @@ theorem weth_withdraw_from_entry
       s26 s27 s28 s29 f c13 c14 c15 c16 c17 c18 c19 c20 c21 c22 c23 c24 c25 c26 c27 c28
       C acc hcode13 h13pc hCo13 h13stk hfind13 hle13
       h13 h14 h15 h16 h17 h18 h19 h20 h21 h22 h23 h24 h25 h26 h27 h28
-  rw [hbody, h13am, h13ee, hcdld]
+  rw [hbody.1, h13am, h13ee, hcdld]
+
+/-- **withdraw's outbound send, end to end.** From the call entry
+(`pc = 0`, empty stack, running `bytecode`) with the withdraw selector and
+sufficient balance, after dispatch (PCs 0–26), the state-update block
+(PCs 42–60) and the call-setup (PCs 61–71), the seven `CALL` arguments are
+lined up so the outbound call sends `value = x = calldata[4:36]` to the
+caller with empty calldata. The PC-61 call-setup entry is produced by
+dispatch + the body, not assumed. -/
+theorem weth_withdraw_sends_from_entry
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22
+      s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 c18 c19 c20 c21 c22
+      c23 c24 c25 c26 c27 c28 c29 c30 c31 c32 c33 c34 c35 : ℕ)
+    (C : AccountAddress) (acc : Account .EVM)
+    (hcode : s0.executionEnv.code = bytecode)
+    (hpc0 : s0.pc = UInt256.ofNat 0)
+    (hstk0 : s0.stack = [])
+    (hsel : selectorOf s0.executionEnv.calldata = withdrawSelector)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hfind : s0.accountMap.find? C = some acc)
+    (hle : (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)).toNat
+            ≤ (acc.lookupStorage (UInt256.ofNat s0.executionEnv.source.val)).toNat)
+    (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
+    (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
+    (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
+    (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
+    (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
+    (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
+    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (decode s9.executionEnv.code s9.pc) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
+    (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16)
+    (h16 : EVM.step (f + 1) c16 (decode s16.executionEnv.code s16.pc) s16 = .ok s17)
+    (h17 : EVM.step (f + 1) c17 (decode s17.executionEnv.code s17.pc) s17 = .ok s18)
+    (h18 : EVM.step (f + 1) c18 (decode s18.executionEnv.code s18.pc) s18 = .ok s19)
+    (h19 : EVM.step (f + 1) c19 (decode s19.executionEnv.code s19.pc) s19 = .ok s20)
+    (h20 : EVM.step (f + 1) c20 (decode s20.executionEnv.code s20.pc) s20 = .ok s21)
+    (h21 : EVM.step (f + 1) c21 (decode s21.executionEnv.code s21.pc) s21 = .ok s22)
+    (h22 : EVM.step (f + 1) c22 (decode s22.executionEnv.code s22.pc) s22 = .ok s23)
+    (h23 : EVM.step (f + 1) c23 (decode s23.executionEnv.code s23.pc) s23 = .ok s24)
+    (h24 : EVM.step (f + 1) c24 (decode s24.executionEnv.code s24.pc) s24 = .ok s25)
+    (h25 : EVM.step (f + 1) c25 (decode s25.executionEnv.code s25.pc) s25 = .ok s26)
+    (h26 : EVM.step (f + 1) c26 (decode s26.executionEnv.code s26.pc) s26 = .ok s27)
+    (h27 : EVM.step (f + 1) c27 (decode s27.executionEnv.code s27.pc) s27 = .ok s28)
+    (h28 : EVM.step (f + 1) c28 (decode s28.executionEnv.code s28.pc) s28 = .ok s29)
+    (h29 : EVM.step (f + 1) c29 (decode s29.executionEnv.code s29.pc) s29 = .ok s30)
+    (h30 : EVM.step (f + 1) c30 (decode s30.executionEnv.code s30.pc) s30 = .ok s31)
+    (h31 : EVM.step (f + 1) c31 (decode s31.executionEnv.code s31.pc) s31 = .ok s32)
+    (h32 : EVM.step (f + 1) c32 (decode s32.executionEnv.code s32.pc) s32 = .ok s33)
+    (h33 : EVM.step (f + 1) c33 (decode s33.executionEnv.code s33.pc) s33 = .ok s34)
+    (h34 : EVM.step (f + 1) c34 (decode s34.executionEnv.code s34.pc) s34 = .ok s35)
+    (h35 : EVM.step (f + 1) c35 (decode s35.executionEnv.code s35.pc) s35 = .ok s36) :
+    ∃ g, s36.stack =
+      [g, UInt256.ofNat s0.executionEnv.source.val,
+       EvmYul.State.calldataload s0.toState (UInt256.ofNat 4),
+       UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0,
+       EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)] := by
+  obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
+    weth_routes_withdraw s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13
+      f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 hcode hpc0 hstk0 hsel
+      h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
+  have hcode13 : s13.executionEnv.code = bytecode := by rw [h13ee]; exact hcode
+  have hCo13 : s13.executionEnv.codeOwner = C := by rw [h13ee]; exact hCo
+  have hfind13 : s13.accountMap.find? C = some acc := by rw [h13am]; exact hfind
+  have hcdld : EvmYul.State.calldataload s13.toState (UInt256.ofNat 4)
+             = EvmYul.State.calldataload s0.toState (UInt256.ofNat 4) := by
+    unfold EvmYul.State.calldataload
+    rw [show s13.toState.executionEnv.calldata = s0.toState.executionEnv.calldata from
+        congrArg EvmYul.ExecutionEnv.calldata h13ee]
+  have hsrc : s13.executionEnv.source = s0.executionEnv.source :=
+    congrArg EvmYul.ExecutionEnv.source h13ee
+  have hle13 : (EvmYul.State.calldataload s13.toState (UInt256.ofNat 4)).toNat
+             ≤ (acc.lookupStorage (UInt256.ofNat s13.executionEnv.source.val)).toNat := by
+    rw [hcdld, hsrc]; exact hle
+  obtain ⟨_, hdec_pc, hdec_stk, hdec_ee⟩ :=
+    weth_withdraw_decrements_caller s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25
+      s26 s27 s28 s29 f c13 c14 c15 c16 c17 c18 c19 c20 c21 c22 c23 c24 c25 c26 c27 c28
+      C acc hcode13 h13pc hCo13 h13stk hfind13 hle13
+      h13 h14 h15 h16 h17 h18 h19 h20 h21 h22 h23 h24 h25 h26 h27 h28
+  -- s29 = call-setup entry (pc 61, stack [x]); reconcile its frame to s0.
+  have hee29 : s29.executionEnv = s0.executionEnv := by rw [hdec_ee, h13ee]
+  have hcode29 : s29.executionEnv.code = bytecode := by rw [hee29]; exact hcode
+  have hstk29 : s29.stack = [EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)] := by
+    rw [hdec_stk, hcdld]
+  obtain ⟨g, hsend⟩ :=
+    weth_withdraw_call_sends_x s29 s30 s31 s32 s33 s34 s35 s36
+      f c29 c30 c31 c32 c33 c34 c35 (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4))
+      hcode29 hdec_pc hstk29 h29 h30 h31 h32 h33 h34 h35
+  exact ⟨g, by rw [hsend, hee29]⟩
 
 end EvmSmith.Weth

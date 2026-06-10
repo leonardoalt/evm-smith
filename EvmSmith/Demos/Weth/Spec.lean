@@ -41,14 +41,16 @@ what the theorems use" is not a claim, it is checked by Lean.
    chain-state facts the guarantee is conditional on.
 6. **The guarantee** — `weth_is_always_solvent`.
 7. **Entry points (behavioural)** — what the dispatcher and functions
-   *do*, established by executing the bytecode:
+   *do*, established by executing the bytecode. Every theorem here starts
+   at the genuine call entry (`pc = 0`, empty stack); the function-body
+   entry points (PC 32 / 42 / 61) are *derived* from dispatch, not
+   assumed.
    - `weth_computes_function_selector` — the dispatcher computes the ABI selector;
-   - `weth_deposit_credits_sender` — deposit adds `msg.value` to the caller's balance;
-   - `weth_withdraw_decrements_sender` — withdraw subtracts `x` from the caller's balance;
-   - `weth_deposit_selector_dispatches` / `weth_withdraw_selector_dispatches` — selectors route to the right body;
-   - `weth_withdraw_sends_x_to_caller` — withdraw issues a bare `x`-wei transfer to the caller;
+   - `weth_deposit_selector_dispatches` / `weth_withdraw_selector_dispatches` — each selector routes to the right body;
    - `weth_unknown_selector_reverts` — any other selector reverts with no state change (no fallback/receive);
-   - `weth_deposit_credits_from_call` / `weth_withdraw_decrements_from_call` — the end-to-end versions: from the call entry (`pc = 0`), dispatch **and** body composed, so the function-body entry is derived, not assumed.
+   - `weth_deposit_credits_from_call` — a deposit call adds `msg.value` to the caller's balance (dispatch + body composed);
+   - `weth_withdraw_decrements_from_call` — a withdraw call subtracts `x` from the caller's balance;
+   - `weth_withdraw_sends_from_call` — a withdraw call issues a bare `x`-wei transfer to the caller.
 
 ## What the contract does (86 bytes of runtime code)
 
@@ -299,80 +301,6 @@ theorem weth_computes_function_selector
     s4.stack = [functionSelector s0.executionEnv.calldata] :=
   (weth_dispatcher_computes_selector s0 s1 s2 s3 s4 f c0 c1 c2 c3 hcode hpc0 hstk0 h0 h1 h2 h3).1
 
-/-- **`deposit` credits the caller by `msg.value`.** Running WETH's
-bytecode from the deposit body (`pc = 32`, entry stack `[selector]`) at
-the contract `C` updates `C`'s account so the caller's token-balance slot
-(`tokenBalanceSlot caller`) goes from `v` to `v + msg.value`, and **no
-other account changes**. Holds with no balance precondition — the deposit
-body has no branch — so `deposit` always credits and never reverts on its
-own. -/
-theorem weth_deposit_credits_sender
-    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 c7 c8 : ℕ)
-    (C : Address) (acc : Account .EVM) (sel : UInt256)
-    (hcode : s0.executionEnv.code = wethBytecode)
-    (hpc0 : s0.pc = UInt256.ofNat 32)
-    (hCo : s0.executionEnv.codeOwner = C)
-    (hstk0 : s0.stack = [sel])
-    (hfind : s0.accountMap.find? C = some acc)
-    (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
-    (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
-    (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
-    (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
-    (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
-    (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
-    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
-    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
-    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9) :
-    s9.accountMap
-      = s0.accountMap.insert C
-          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
-            (UInt256.add s0.executionEnv.weiValue
-              (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source)))) :=
-  weth_deposit_credits_caller s0 s1 s2 s3 s4 s5 s6 s7 s8 s9
-    f c0 c1 c2 c3 c4 c5 c6 c7 c8 C acc sel hcode hpc0 hCo hstk0 hfind
-    h0 h1 h2 h3 h4 h5 h6 h7 h8
-
-/-- **`withdraw` decrements the caller by `x`.** Running WETH's bytecode
-from the withdraw body (`pc = 42`) with sufficient balance (so the `LT`
-gate falls through), the state-update block decrements the caller's
-token-balance slot by `x = calldata[4:36]`: from `balance` to
-`balance − x`, and no other account changes. -/
-theorem weth_withdraw_decrements_sender
-    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 : EVM.State)
-    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 : ℕ)
-    (C : Address) (acc : Account .EVM)
-    (hcode : s0.executionEnv.code = wethBytecode)
-    (hpc0 : s0.pc = UInt256.ofNat 42)
-    (hCo : s0.executionEnv.codeOwner = C)
-    (hstk0 : s0.stack = [])
-    (hfind : s0.accountMap.find? C = some acc)
-    (hle : (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)).toNat
-            ≤ (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source)).toNat)
-    (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
-    (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
-    (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
-    (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
-    (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
-    (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
-    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
-    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
-    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9)
-    (h9 : EVM.step (f + 1) c9 (decode s9.executionEnv.code s9.pc) s9 = .ok s10)
-    (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
-    (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
-    (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13)
-    (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
-    (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
-    (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16) :
-    s16.accountMap
-      = s0.accountMap.insert C
-          (acc.updateStorage (tokenBalanceSlot s0.executionEnv.source)
-            (UInt256.sub (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source))
-              (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)))) :=
-  weth_withdraw_decrements_caller s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16
-    f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 C acc hcode hpc0 hCo hstk0 hfind hle
-    h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15
-
 /-- **A `deposit` selector routes to the deposit body.** Running WETH's
 bytecode from `pc = 0`, if the call's `functionSelector` is `deposit`'s,
 the dispatcher lands execution at the deposit body (`depositLbl`, PC 32)
@@ -428,29 +356,76 @@ theorem weth_withdraw_selector_dispatches
     h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12
   exact ⟨hp, hs⟩
 
-/-- **`withdraw` sends `x` wei to the caller.** Running WETH's bytecode
-from the call-setup point (`pc = 61`, stack `[x]`), the outbound `CALL`
-arguments come out as `value = x`, recipient = the caller, empty calldata
-(`argsSize = 0`) and ignored return data (`retSize = 0`) — a bare ETH
-transfer of `x` to the caller. (The balance movement itself is the EVM's
-`CALL` semantics.) -/
-theorem weth_withdraw_sends_x_to_caller
-    (s0 s1 s2 s3 s4 s5 s6 s7 : EVM.State) (f c0 c1 c2 c3 c4 c5 c6 : ℕ) (x : UInt256)
+/-- **A withdraw call sends `x` to the caller (end to end).** From the
+call entry (`pc = 0`, empty stack, running WETH's bytecode) with the
+withdraw selector and sufficient balance, after dispatch (PCs 0–26), the
+state-update block (PCs 42–60) and the call-setup (PCs 61–71), the seven
+`CALL` arguments come out as `value = x = calldata[4:36]`, recipient = the
+caller, empty calldata (`argsSize = 0`) and ignored return data
+(`retSize = 0`) — a bare ETH transfer of `x` to the caller. The PC-61
+call-setup point is reached by dispatch + the body, not assumed. (The
+balance movement itself is the EVM's `CALL` semantics.) -/
+theorem weth_withdraw_sends_from_call
+    (s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22
+      s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36 : EVM.State)
+    (f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 c18 c19 c20 c21 c22
+      c23 c24 c25 c26 c27 c28 c29 c30 c31 c32 c33 c34 c35 : ℕ)
+    (C : Address) (acc : Account .EVM)
     (hcode : s0.executionEnv.code = wethBytecode)
-    (hpc0 : s0.pc = UInt256.ofNat 61)
-    (hstk0 : s0.stack = [x])
+    (hpc0 : s0.pc = UInt256.ofNat 0)
+    (hstk0 : s0.stack = [])
+    (hsel : functionSelector s0.executionEnv.calldata = withdrawSelector)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hfind : s0.accountMap.find? C = some acc)
+    (hle : (EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)).toNat
+            ≤ (acc.lookupStorage (tokenBalanceSlot s0.executionEnv.source)).toNat)
     (h0 : EVM.step (f + 1) c0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1)
     (h1 : EVM.step (f + 1) c1 (decode s1.executionEnv.code s1.pc) s1 = .ok s2)
     (h2 : EVM.step (f + 1) c2 (decode s2.executionEnv.code s2.pc) s2 = .ok s3)
     (h3 : EVM.step (f + 1) c3 (decode s3.executionEnv.code s3.pc) s3 = .ok s4)
     (h4 : EVM.step (f + 1) c4 (decode s4.executionEnv.code s4.pc) s4 = .ok s5)
     (h5 : EVM.step (f + 1) c5 (decode s5.executionEnv.code s5.pc) s5 = .ok s6)
-    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7) :
-    ∃ g, s7.stack =
-      [g, UInt256.ofNat s0.executionEnv.source.val, x,
-       UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, x] :=
-  weth_withdraw_call_sends_x s0 s1 s2 s3 s4 s5 s6 s7 f c0 c1 c2 c3 c4 c5 c6 x
-    hcode hpc0 hstk0 h0 h1 h2 h3 h4 h5 h6
+    (h6 : EVM.step (f + 1) c6 (decode s6.executionEnv.code s6.pc) s6 = .ok s7)
+    (h7 : EVM.step (f + 1) c7 (decode s7.executionEnv.code s7.pc) s7 = .ok s8)
+    (h8 : EVM.step (f + 1) c8 (decode s8.executionEnv.code s8.pc) s8 = .ok s9)
+    (h9 : EVM.step (f + 1) c9 (decode s9.executionEnv.code s9.pc) s9 = .ok s10)
+    (h10 : EVM.step (f + 1) c10 (decode s10.executionEnv.code s10.pc) s10 = .ok s11)
+    (h11 : EVM.step (f + 1) c11 (decode s11.executionEnv.code s11.pc) s11 = .ok s12)
+    (h12 : EVM.step (f + 1) c12 (decode s12.executionEnv.code s12.pc) s12 = .ok s13)
+    (h13 : EVM.step (f + 1) c13 (decode s13.executionEnv.code s13.pc) s13 = .ok s14)
+    (h14 : EVM.step (f + 1) c14 (decode s14.executionEnv.code s14.pc) s14 = .ok s15)
+    (h15 : EVM.step (f + 1) c15 (decode s15.executionEnv.code s15.pc) s15 = .ok s16)
+    (h16 : EVM.step (f + 1) c16 (decode s16.executionEnv.code s16.pc) s16 = .ok s17)
+    (h17 : EVM.step (f + 1) c17 (decode s17.executionEnv.code s17.pc) s17 = .ok s18)
+    (h18 : EVM.step (f + 1) c18 (decode s18.executionEnv.code s18.pc) s18 = .ok s19)
+    (h19 : EVM.step (f + 1) c19 (decode s19.executionEnv.code s19.pc) s19 = .ok s20)
+    (h20 : EVM.step (f + 1) c20 (decode s20.executionEnv.code s20.pc) s20 = .ok s21)
+    (h21 : EVM.step (f + 1) c21 (decode s21.executionEnv.code s21.pc) s21 = .ok s22)
+    (h22 : EVM.step (f + 1) c22 (decode s22.executionEnv.code s22.pc) s22 = .ok s23)
+    (h23 : EVM.step (f + 1) c23 (decode s23.executionEnv.code s23.pc) s23 = .ok s24)
+    (h24 : EVM.step (f + 1) c24 (decode s24.executionEnv.code s24.pc) s24 = .ok s25)
+    (h25 : EVM.step (f + 1) c25 (decode s25.executionEnv.code s25.pc) s25 = .ok s26)
+    (h26 : EVM.step (f + 1) c26 (decode s26.executionEnv.code s26.pc) s26 = .ok s27)
+    (h27 : EVM.step (f + 1) c27 (decode s27.executionEnv.code s27.pc) s27 = .ok s28)
+    (h28 : EVM.step (f + 1) c28 (decode s28.executionEnv.code s28.pc) s28 = .ok s29)
+    (h29 : EVM.step (f + 1) c29 (decode s29.executionEnv.code s29.pc) s29 = .ok s30)
+    (h30 : EVM.step (f + 1) c30 (decode s30.executionEnv.code s30.pc) s30 = .ok s31)
+    (h31 : EVM.step (f + 1) c31 (decode s31.executionEnv.code s31.pc) s31 = .ok s32)
+    (h32 : EVM.step (f + 1) c32 (decode s32.executionEnv.code s32.pc) s32 = .ok s33)
+    (h33 : EVM.step (f + 1) c33 (decode s33.executionEnv.code s33.pc) s33 = .ok s34)
+    (h34 : EVM.step (f + 1) c34 (decode s34.executionEnv.code s34.pc) s34 = .ok s35)
+    (h35 : EVM.step (f + 1) c35 (decode s35.executionEnv.code s35.pc) s35 = .ok s36) :
+    ∃ g, s36.stack =
+      [g, UInt256.ofNat s0.executionEnv.source.val,
+       EvmYul.State.calldataload s0.toState (UInt256.ofNat 4),
+       UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0, UInt256.ofNat 0,
+       EvmYul.State.calldataload s0.toState (UInt256.ofNat 4)] :=
+  weth_withdraw_sends_from_entry s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16
+    s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 s32 s33 s34 s35 s36
+    f c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 c16 c17 c18 c19 c20 c21 c22
+    c23 c24 c25 c26 c27 c28 c29 c30 c31 c32 c33 c34 c35 C acc hcode hpc0 hstk0 hsel hCo hfind hle
+    h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15 h16 h17 h18 h19 h20 h21 h22
+    h23 h24 h25 h26 h27 h28 h29 h30 h31 h32 h33 h34 h35
 
 /-- **An unknown selector reverts with no state change.** Running WETH's
 bytecode from `pc = 0`, if the call's `functionSelector` is neither
