@@ -15,7 +15,7 @@ formal spec, i.e., what the contract should do/not do, into a separate file.
 ## human-readable spec                                                                                                                                                  
                                                                                                                                                                         
 Let's design a very simple v1 human-readable spec format/language for our weth properties.                                                                              
-We want any Solidity dev to be able to read these properties without knowing the internals of EVMYulLean, evm-smith or Lean.                                            
+We want any smart contract dev to be able to read these properties without knowing the internals of EVMYulLean, evm-smith or Lean.                                            
 Some Lean-reading skills is okay to be assumed/required.                                                                                                                
 This v1 may use functions to abstract odd symbols/math/syntax, named types etc.                                                                                         
 The spec must be what the theorems use.

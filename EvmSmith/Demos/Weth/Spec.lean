@@ -3,7 +3,7 @@ import EvmSmith.Demos.Weth.Behaviour
 /-!
 # WETH — the formal spec (human-readable)
 
-This file is **the spec**: the single place an auditor or Solidity dev
+This file is **the spec**: the single place an auditor or smart contract dev
 needs to read to know *what* the WETH contract guarantees. It states the
 guarantees in plain Lean `def`s and `theorem`s with English names; all
 the proof machinery — the storage-readback lemmas, the bytecode walk,

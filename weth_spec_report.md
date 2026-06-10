@@ -1,7 +1,7 @@
 # WETH readable-spec — report
 
 Task: `weth_spec.md`. Extract WETH's formal spec into a separate file
-and give it a v1 human-readable form a Solidity dev can read without
+and give it a v1 human-readable form a smart contract dev can read without
 knowing EVMYulLean / evm-smith / deep Lean internals.
 
 ## What I did
