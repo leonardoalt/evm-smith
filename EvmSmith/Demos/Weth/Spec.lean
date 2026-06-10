@@ -696,4 +696,362 @@ theorem weth_withdraw_decrements_from_call
     rw [hb]
     exact recordedBalance_insert_ne s0.accountMap C s0.executionEnv.source b _ acc hfind hbne
 
+/-! ### A gas-free "big-step" run
+
+`wethRun` iterates the **real** `EVM.step` (decoding each instruction from
+the contract's own code at the current pc, exactly as the interpreter
+does) until it reaches a halting instruction, returning the final state
+and the return data. It is the EVM's frame loop `EVM.X` **with gas
+ignored** (`gasCost = 0`, ample step fuel) — the one modelling
+assumption. (The genuine `EVM.X` form would additionally require the
+framework's gas/halt fuel-induction, which is currently an open
+`sorry`-staged obligation in `XFrame.lean`.) The point: the spec
+theorems below take a *single* `wethRun … = some (s', o)` hypothesis,
+hiding the per-step chain, and can talk about the return data `o`. -/
+
+/-- The halting opcodes (where `EVM.X` stops the frame). -/
+def isHaltOp : Operation .EVM → Bool
+  | .STOP => true
+  | .REVERT => true
+  | .RETURN => true
+  | _ => false
+
+/-- The frame's return data at a halt (matching `EVM.X`'s `H`): the
+returned memory slice for `RETURN`/`REVERT`, empty for `STOP`. -/
+def haltOutput (s : EVM.State) : Operation .EVM → ByteArray
+  | .RETURN => s.toMachineState.H_return
+  | .REVERT => s.toMachineState.H_return
+  | _ => .empty
+
+/-- Run the contract gas-free from `s`: fetch-and-`EVM.step` until a halt
+opcode, returning the (pre-halt) state and the halt's return data.
+`callFuel` bounds any nested call; the outer `ℕ` bounds the number of
+instructions. -/
+def wethRun (callFuel : ℕ) : ℕ → EVM.State → Option (EVM.State × ByteArray)
+  | 0, _ => none
+  | n + 1, s =>
+    match decode s.executionEnv.code s.pc with
+    | none => none
+    | some (op, arg) =>
+      if isHaltOp op then some (s, haltOutput s op)
+      else
+        match EVM.step (callFuel + 1) 0 (some (op, arg)) s with
+        | .ok s' => wethRun callFuel n s'
+        | .error _ => none
+
+/-- One non-halting `wethRun` step: peel off the `EVM.step` fact and the
+remaining run. -/
+theorem wethRun_succ_step
+    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (res : EVM.State × ByteArray)
+    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
+    (hnh : isHaltOp op = false)
+    (hrun : wethRun callFuel (n + 1) s = some res) :
+    ∃ s1, EVM.step (callFuel + 1) 0 (some (op, arg)) s = .ok s1
+        ∧ wethRun callFuel n s1 = some res := by
+  rw [wethRun, hdec] at hrun
+  simp only [hnh] at hrun
+  cases hstep : EVM.step (callFuel + 1) 0 (some (op, arg)) s with
+  | error e => rw [hstep] at hrun; simp at hrun
+  | ok s1 => rw [hstep] at hrun; exact ⟨s1, rfl, hrun⟩
+
+/-- `SSTORE` advances the pc by one and preserves the execution
+environment (the post-`pc` is needed to reach the trailing `STOP`). -/
+theorem step_SSTORE_pc_ee
+    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
+    (slot newVal : UInt256) (tl : Stack UInt256)
+    (hStk : s.stack = slot :: newVal :: tl)
+    (hStep : EVM.step (f' + 1) cost (some (.SSTORE, arg)) s = .ok s') :
+    s'.pc = s.pc + UInt256.ofNat 1 ∧ s'.executionEnv = s.executionEnv := by
+  unfold EVM.step at hStep
+  simp only [bind, Except.bind, pure, Except.pure] at hStep
+  unfold EvmYul.step at hStep
+  simp only [Id.run] at hStep
+  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
+  rw [hStk] at hStep
+  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
+  subst hStep
+  refine ⟨?_, ?_⟩
+  · simp only [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC]
+  · show (EvmYul.State.sstore s.toState slot newVal).executionEnv = s.executionEnv
+    rw [sstore_preserves_executionEnv]
+
+/-- A halting `wethRun` step returns the current state and the halt
+output. -/
+theorem wethRun_halt_step
+    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (res : EVM.State × ByteArray)
+    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
+    (hh : isHaltOp op = true)
+    (hrun : wethRun callFuel (n + 1) s = some res) :
+    res = (s, haltOutput s op) := by
+  rw [wethRun, hdec] at hrun
+  simp only [hh, if_true] at hrun
+  exact (Option.some.inj hrun).symm
+
+/-- **deposit, as a single big-step over the gas-free interpreter.**
+From a call entry (`pc = 0`, empty stack, running WETH's bytecode) whose
+ABI selector is `deposit`'s, *running the contract to its halt*
+(`wethRun … = some (s', o)`) credits `msg.value` to the caller's recorded
+balance, leaves every other balance untouched, and returns empty data.
+The whole per-instruction chain — dispatch routing *and* the deposit
+body — is hidden inside the single `wethRun` hypothesis. -/
+theorem weth_deposit_run
+    (s0 : EVM.State) (callFuel N : ℕ) (res : EVM.State × ByteArray)
+    (C : Address) (acc : Account .EVM)
+    (hcode : s0.executionEnv.code = wethBytecode)
+    (hpc0 : s0.pc = UInt256.ofNat 0)
+    (hstk0 : s0.stack = [])
+    (hsel : functionSelector s0.executionEnv.calldata = depositSelector)
+    (hCo : s0.executionEnv.codeOwner = C)
+    (hfind : s0.accountMap.find? C = some acc)
+    (hrun : wethRun callFuel N s0 = some res) :
+    recordedBalance res.1.accountMap C (msgSender s0)
+        = UInt256.add (msgValue s0) (recordedBalance s0.accountMap C (msgSender s0))
+    ∧ (∀ b, b ≠ msgSender s0 →
+        recordedBalance res.1.accountMap C b = recordedBalance s0.accountMap C b)
+    ∧ res.2 = ByteArray.empty := by
+  have hcodeB : s0.executionEnv.code = bytecode := hcode
+  have hselB : selectorOf s0.executionEnv.calldata = depositSelector := hsel
+  -- === DISPATCH (PCs 0–16): peel h0..h8, threading the pc ===
+  -- 0: PUSH1 0 @ 0
+  have hd0 : decode s0.executionEnv.code s0.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
+    rw [hcodeB, hpc0]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s1, hst0, hrun⟩ := wethRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
+  have h0 : EVM.step (callFuel + 1) 0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1 := by
+    rw [hd0]; exact hst0
+  obtain ⟨h1pc, h1stk, h1ee, h1am⟩ := step_PUSH1_shape_strong s0 s1 callFuel 0 (UInt256.ofNat 0) hst0
+  rw [hstk0] at h1stk
+  have hc1 : s1.executionEnv.code = bytecode := by rw [h1ee]; exact hcodeB
+  have hp1 : s1.pc = UInt256.ofNat 2 := by rw [h1pc, hpc0]; decide
+  -- 1: CALLDATALOAD @ 2
+  have hd1 : decode s1.executionEnv.code s1.pc = some (.CALLDATALOAD, none) := by
+    rw [hc1, hp1]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s2, hst1, hrun⟩ := wethRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
+  have h1 : EVM.step (callFuel + 1) 0 (decode s1.executionEnv.code s1.pc) s1 = .ok s2 := by
+    rw [hd1]; exact hst1
+  obtain ⟨h2pc, h2stk, h2ee, h2am⟩ :=
+    step_CALLDATALOAD_value s1 s2 callFuel 0 none (UInt256.ofNat 0) [] h1stk hst1
+  have hc2 : s2.executionEnv.code = bytecode := by rw [h2ee]; exact hc1
+  have hp2 : s2.pc = UInt256.ofNat 3 := by rw [h2pc, hp1]; decide
+  -- 2: PUSH1 0xe0 @ 3
+  have hd2 : decode s2.executionEnv.code s2.pc = some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1)) := by
+    rw [hc2, hp2]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s3, hst2, hrun⟩ := wethRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
+  have h2 : EVM.step (callFuel + 1) 0 (decode s2.executionEnv.code s2.pc) s2 = .ok s3 := by
+    rw [hd2]; exact hst2
+  obtain ⟨h3pc, h3stk, h3ee, h3am⟩ := step_PUSH1_shape_strong s2 s3 callFuel 0 (UInt256.ofNat 0xe0) hst2
+  rw [h2stk] at h3stk
+  have hc3 : s3.executionEnv.code = bytecode := by rw [h3ee]; exact hc2
+  have hp3 : s3.pc = UInt256.ofNat 5 := by rw [h3pc, hp2]; decide
+  -- 3: SHR @ 5
+  have hd3 : decode s3.executionEnv.code s3.pc = some (.SHR, none) := by
+    rw [hc3, hp3]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s4, hst3, hrun⟩ := wethRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
+  have h3 : EVM.step (callFuel + 1) 0 (decode s3.executionEnv.code s3.pc) s3 = .ok s4 := by
+    rw [hd3]; exact hst3
+  obtain ⟨h4pc, h4stk, h4ee, h4am⟩ :=
+    step_SHR_value s3 s4 callFuel 0 none (UInt256.ofNat 0xe0)
+      (EvmYul.State.calldataload s1.toState (UInt256.ofNat 0)) [] h3stk hst3
+  have hc4 : s4.executionEnv.code = bytecode := by rw [h4ee]; exact hc3
+  have hp4 : s4.pc = UInt256.ofNat 6 := by rw [h4pc, hp3]; decide
+  -- 4: DUP1 @ 6
+  have hd4 : decode s4.executionEnv.code s4.pc = some (.DUP1, none) := by
+    rw [hc4, hp4]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s5, hst4, hrun⟩ := wethRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
+  have h4 : EVM.step (callFuel + 1) 0 (decode s4.executionEnv.code s4.pc) s4 = .ok s5 := by
+    rw [hd4]; exact hst4
+  obtain ⟨h5pc, h5stk, h5ee, h5am⟩ :=
+    step_DUP1_shape_strong s4 s5 callFuel 0 none _ [] h4stk hst4
+  rw [h4stk] at h5stk
+  have hc5 : s5.executionEnv.code = bytecode := by rw [h5ee]; exact hc4
+  have hp5 : s5.pc = UInt256.ofNat 7 := by rw [h5pc, hp4]; decide
+  -- 5: PUSH4 depositSelector @ 7
+  have hd5 : decode s5.executionEnv.code s5.pc = some (.Push .PUSH4, some (depositSelector, 4)) := by
+    rw [hc5, hp5]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s6, hst5, hrun⟩ := wethRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
+  have h5 : EVM.step (callFuel + 1) 0 (decode s5.executionEnv.code s5.pc) s5 = .ok s6 := by
+    rw [hd5]; exact hst5
+  obtain ⟨h6pc, h6stk, h6ee, h6am⟩ :=
+    step_PUSH_shape_strong s5 s6 callFuel 0 .PUSH4 (by decide) depositSelector 4 hst5
+  rw [h5stk] at h6stk
+  have hc6 : s6.executionEnv.code = bytecode := by rw [h6ee]; exact hc5
+  have hp6 : s6.pc = UInt256.ofNat 12 := by rw [h6pc, hp5]; decide
+  -- 6: EQ @ 12
+  have hd6 : decode s6.executionEnv.code s6.pc = some (.EQ, none) := by
+    rw [hc6, hp6]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s7, hst6, hrun⟩ := wethRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
+  have h6 : EVM.step (callFuel + 1) 0 (decode s6.executionEnv.code s6.pc) s6 = .ok s7 := by
+    rw [hd6]; exact hst6
+  obtain ⟨h7pc, h7stk, h7ee, h7am⟩ :=
+    step_EQ_value s6 s7 callFuel 0 none depositSelector _ _ h6stk hst6
+  have hc7 : s7.executionEnv.code = bytecode := by rw [h7ee]; exact hc6
+  have hp7 : s7.pc = UInt256.ofNat 13 := by rw [h7pc, hp6]; decide
+  -- 7: PUSH2 depositLbl @ 13
+  have hd7 : decode s7.executionEnv.code s7.pc = some (.Push .PUSH2, some (depositLbl, 2)) := by
+    rw [hc7, hp7]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s8, hst7, hrun⟩ := wethRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
+  have h7 : EVM.step (callFuel + 1) 0 (decode s7.executionEnv.code s7.pc) s7 = .ok s8 := by
+    rw [hd7]; exact hst7
+  obtain ⟨h8pc, h8stk, h8ee, h8am⟩ :=
+    step_PUSH_shape_strong s7 s8 callFuel 0 .PUSH2 (by decide) depositLbl 2 hst7
+  have hc8 : s8.executionEnv.code = bytecode := by rw [h8ee]; exact hc7
+  have hp8 : s8.pc = UInt256.ofNat 16 := by rw [h8pc, hp7]; decide
+  -- 8: JUMPI @ 16 (branch logic delegated to weth_routes_deposit)
+  have hd8 : decode s8.executionEnv.code s8.pc = some (.JUMPI, none) := by
+    rw [hc8, hp8]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s9, hst8, hrun⟩ := wethRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
+  have h8 : EVM.step (callFuel + 1) 0 (decode s8.executionEnv.code s8.pc) s8 = .ok s9 := by
+    rw [hd8]; exact hst8
+  obtain ⟨h9pc, h9stk, h9ee, h9am⟩ :=
+    weth_routes_deposit s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 callFuel 0 0 0 0 0 0 0 0 0
+      hcodeB hpc0 hstk0 hselB h0 h1 h2 h3 h4 h5 h6 h7 h8
+  have hc9 : s9.executionEnv.code = bytecode := by rw [h9ee]; exact hcodeB
+  -- === DEPOSIT BODY (PCs 32–40): peel h9..h17 ===
+  -- 9: JUMPDEST @ 32
+  have hd9 : decode s9.executionEnv.code s9.pc = some (.JUMPDEST, none) := by
+    rw [hc9, h9pc]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s10, hst9, hrun⟩ := wethRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
+  have h9 : EVM.step (callFuel + 1) 0 (decode s9.executionEnv.code s9.pc) s9 = .ok s10 := by
+    rw [hd9]; exact hst9
+  obtain ⟨h10pc, h10stk, h10ee, h10am⟩ := step_JUMPDEST_shape_strong s9 s10 callFuel 0 none hst9
+  rw [h9stk] at h10stk
+  have hc10 : s10.executionEnv.code = bytecode := by rw [h10ee]; exact hc9
+  have hp10 : s10.pc = UInt256.ofNat 33 := by rw [h10pc, h9pc]; decide
+  -- 10: POP @ 33
+  have hd10 : decode s10.executionEnv.code s10.pc = some (.POP, none) := by
+    rw [hc10, hp10]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s11, hst10, hrun⟩ := wethRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
+  have h10 : EVM.step (callFuel + 1) 0 (decode s10.executionEnv.code s10.pc) s10 = .ok s11 := by
+    rw [hd10]; exact hst10
+  obtain ⟨h11pc, h11stk, h11ee, h11am⟩ :=
+    step_POP_shape_strong s10 s11 callFuel 0 none depositSelector [] h10stk hst10
+  have hc11 : s11.executionEnv.code = bytecode := by rw [h11ee]; exact hc10
+  have hp11 : s11.pc = UInt256.ofNat 34 := by rw [h11pc, hp10]; decide
+  -- 11: CALLER @ 34
+  have hd11 : decode s11.executionEnv.code s11.pc = some (.CALLER, none) := by
+    rw [hc11, hp11]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+  have h11 : EVM.step (callFuel + 1) 0 (decode s11.executionEnv.code s11.pc) s11 = .ok s12 := by
+    rw [hd11]; exact hst11
+  obtain ⟨h12pc, h12stk, h12ee, h12am⟩ := step_CALLER_value s11 s12 callFuel 0 none hst11
+  rw [h11stk] at h12stk
+  have hc12 : s12.executionEnv.code = bytecode := by rw [h12ee]; exact hc11
+  have hp12 : s12.pc = UInt256.ofNat 35 := by rw [h12pc, hp11]; decide
+  -- 12: DUP1 @ 35
+  have hd12 : decode s12.executionEnv.code s12.pc = some (.DUP1, none) := by
+    rw [hc12, hp12]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s13, hst12, hrun⟩ := wethRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+  have h12 : EVM.step (callFuel + 1) 0 (decode s12.executionEnv.code s12.pc) s12 = .ok s13 := by
+    rw [hd12]; exact hst12
+  obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
+    step_DUP1_shape_strong s12 s13 callFuel 0 none _ [] h12stk hst12
+  rw [h12stk] at h13stk
+  have hc13 : s13.executionEnv.code = bytecode := by rw [h13ee]; exact hc12
+  have hp13 : s13.pc = UInt256.ofNat 36 := by rw [h13pc, hp12]; decide
+  -- 13: SLOAD @ 36
+  have hd13 : decode s13.executionEnv.code s13.pc = some (.SLOAD, none) := by
+    rw [hc13, hp13]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s14, hst13, hrun⟩ := wethRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
+  have h13 : EVM.step (callFuel + 1) 0 (decode s13.executionEnv.code s13.pc) s13 = .ok s14 := by
+    rw [hd13]; exact hst13
+  obtain ⟨h14pc, h14stk, h14ee, h14am⟩ :=
+    step_SLOAD_shape_strong s13 s14 callFuel 0 none _ _ h13stk hst13
+  have hc14 : s14.executionEnv.code = bytecode := by rw [h14ee]; exact hc13
+  have hp14 : s14.pc = UInt256.ofNat 37 := by rw [h14pc, hp13]; decide
+  -- 14: CALLVALUE @ 37
+  have hd14 : decode s14.executionEnv.code s14.pc = some (.CALLVALUE, none) := by
+    rw [hc14, hp14]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s15, hst14, hrun⟩ := wethRun_succ_step callFuel N s14 _ _ _ hd14 (by decide) hrun
+  have h14 : EVM.step (callFuel + 1) 0 (decode s14.executionEnv.code s14.pc) s14 = .ok s15 := by
+    rw [hd14]; exact hst14
+  obtain ⟨h15pc, h15stk, h15ee, h15am⟩ := step_CALLVALUE_value s14 s15 callFuel 0 none hst14
+  rw [h14stk] at h15stk
+  have hc15 : s15.executionEnv.code = bytecode := by rw [h15ee]; exact hc14
+  have hp15 : s15.pc = UInt256.ofNat 38 := by rw [h15pc, hp14]; decide
+  -- 15: ADD @ 38
+  have hd15 : decode s15.executionEnv.code s15.pc = some (.ADD, none) := by
+    rw [hc15, hp15]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s16, hst15, hrun⟩ := wethRun_succ_step callFuel N s15 _ _ _ hd15 (by decide) hrun
+  have h15 : EVM.step (callFuel + 1) 0 (decode s15.executionEnv.code s15.pc) s15 = .ok s16 := by
+    rw [hd15]; exact hst15
+  obtain ⟨h16pc, h16stk, h16ee, h16am⟩ :=
+    step_ADD_value s15 s16 callFuel 0 none _ _ _ h15stk hst15
+  have hc16 : s16.executionEnv.code = bytecode := by rw [h16ee]; exact hc15
+  have hp16 : s16.pc = UInt256.ofNat 39 := by rw [h16pc, hp15]; decide
+  -- 16: SWAP1 @ 39
+  have hd16 : decode s16.executionEnv.code s16.pc = some (.SWAP1, none) := by
+    rw [hc16, hp16]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s17, hst16, hrun⟩ := wethRun_succ_step callFuel N s16 _ _ _ hd16 (by decide) hrun
+  have h16 : EVM.step (callFuel + 1) 0 (decode s16.executionEnv.code s16.pc) s16 = .ok s17 := by
+    rw [hd16]; exact hst16
+  obtain ⟨h17pc, h17stk, h17ee, h17am⟩ :=
+    step_SWAP1_shape_strong s16 s17 callFuel 0 none _ _ [] h16stk hst16
+  have hc17 : s17.executionEnv.code = bytecode := by rw [h17ee]; exact hc16
+  have hp17 : s17.pc = UInt256.ofNat 40 := by rw [h17pc, hp16]; decide
+  -- 17: SSTORE @ 40
+  have hd17 : decode s17.executionEnv.code s17.pc = some (.SSTORE, none) := by
+    rw [hc17, hp17]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  obtain ⟨s18, hst17, hrun⟩ := wethRun_succ_step callFuel N s17 _ _ _ hd17 (by decide) hrun
+  have h17 : EVM.step (callFuel + 1) 0 (decode s17.executionEnv.code s17.pc) s17 = .ok s18 := by
+    rw [hd17]; exact hst17
+  obtain ⟨h18pc, h18ee⟩ :=
+    step_SSTORE_pc_ee s17 s18 callFuel 0 none _ _ [] h17stk hst17
+  have hc18 : s18.executionEnv.code = bytecode := by rw [h18ee]; exact hc17
+  have hp18 : s18.pc = UInt256.ofNat 41 := by rw [h18pc, hp17]; decide
+  -- 18: STOP @ 41 — halt, empty return data
+  have hd18 : decode s18.executionEnv.code s18.pc = some (.STOP, none) := by
+    rw [hc18, hp18]; native_decide
+  obtain _ | N := N
+  · simp [wethRun] at hrun
+  have hres := wethRun_halt_step callFuel N s18 _ _ _ hd18 (by decide) hrun
+  -- res = (s18, .empty)
+  have hres1 : res.1 = s18 := by rw [hres]
+  have hres2 : res.2 = ByteArray.empty := by rw [hres]; rfl
+  -- === deliver the domain conclusion via the credits-from-call theorem ===
+  obtain ⟨hcredit, hother⟩ :=
+    weth_deposit_credits_from_call s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18
+      callFuel 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 C acc
+      hcode hpc0 hstk0 hsel hCo hfind
+      h0 h1 h2 h3 h4 h5 h6 h7 h8 h9 h10 h11 h12 h13 h14 h15 h16 h17
+  refine ⟨?_, ?_, hres2⟩
+  · rw [hres1]; exact hcredit
+  · intro b hb; rw [hres1]; exact hother b hb
+
 end EvmSmith.Weth
