@@ -51,6 +51,15 @@ what the theorems use" is not a claim, it is checked by Lean.
    - `weth_deposit_credits_from_call` — a deposit call adds `msg.value` to the caller's balance (dispatch + body composed);
    - `weth_withdraw_decrements_from_call` — a withdraw call subtracts `x` from the caller's balance;
    - `weth_withdraw_sends_from_call` — a withdraw call issues a bare `x`-wei transfer to the caller.
+8. **Big-step runs (single hypothesis)** — `wethRun`, a gas-free
+   interpreter that iterates the *real* `EVM.step` from the contract's own
+   bytecode until it halts (it is `EVM.X` with gas ignored — the one
+   modelling assumption). The theorems below take a *single*
+   `wethRun … = some (s', o)` hypothesis, hiding the entire per-instruction
+   chain, and talk about the final state and return data:
+   - `weth_deposit_run` — a deposit call run to halt credits `msg.value` and returns empty data;
+   - `weth_unknown_run` — an unknown-selector call run to halt changes no account (reverts);
+   - `weth_withdraw_run` — a withdraw call run to halt *through the external `CALL`* decrements the caller by `x`, under the explicit no-reentrancy / codeless-recipient hypothesis `hcallKeep` (covering both the success → `STOP` and failure → `REVERT` halts).
 
 ## What the contract does (86 bytes of runtime code)
 
