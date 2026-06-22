@@ -40,7 +40,7 @@ hashed `mapping` slot) — see `tokenBalanceSlot` in `SpecDSL.lean`.
 
 namespace EvmSmith.Weth
 
-open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1
+open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1 EvmSmith.Spec
 
 /-! ## Behavioural guarantees -/
 

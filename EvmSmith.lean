@@ -16,6 +16,7 @@ import EvmSmith.Demos.Weth.BytecodeFrame
 import EvmSmith.Demos.Weth.Solvency
 import EvmSmith.Demos.Weth.EntryPoints
 import EvmSmith.Demos.Weth.Dispatch
+import EvmSmith.Spec.Dsl
 import EvmSmith.Demos.Weth.Behaviour
 import EvmSmith.Demos.Weth.SpecDSL
 import EvmSmith.Demos.Weth.Spec

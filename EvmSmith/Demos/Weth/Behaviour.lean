@@ -1,5 +1,6 @@
 import EvmSmith.Demos.Weth.Solvency
 import EvmSmith.Demos.Weth.Dispatch
+import EvmSmith.Spec.Dsl
 
 /-!
 # WETH — behavioural machinery (internal)
@@ -16,7 +17,7 @@ This is the **engine** behind the auditor-facing `Spec.lean`; read
   (`weth_*_selector_dispatches`, `weth_unknown_selector_reverts`), the
   bare-transfer `weth_withdraw_sends_from_call`, and the composed
   `*_from_call` balance deltas;
-* the gas-free interpreter `wethRun` (the real `EVM.step` with gas
+* the gas-free interpreter `evmRun` (the real `EVM.step` with gas
   ignored) and its extraction helpers, with the three big-step
   `*_run_impl` theorems.
 
@@ -27,13 +28,9 @@ one-line restatements of the `*_run_impl` theorems below.
 
 namespace EvmSmith.Weth
 
-open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1
+open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1 EvmSmith.Spec
 
 /-! ## The contract -/
-
-/-- An on-chain account / contract address. (Alias of EVMYulLean's
-`AccountAddress`, renamed for readability of the spec below.) -/
-abbrev Address := AccountAddress
 
 /-- WETH's runtime bytecode — the 86 bytes whose behaviour this spec
 constrains. `weth` (the address argument throughout the spec) is the
@@ -489,116 +486,6 @@ theorem weth_withdraw_decrements_from_call
     rw [hb]
     exact recordedBalance_insert_ne s0.accountMap C s0.executionEnv.source b _ acc hfind hbne
 
-/-! ### A gas-free "big-step" run
-
-`wethRun` iterates the **real** `EVM.step` (decoding each instruction from
-the contract's own code at the current pc, exactly as the interpreter
-does) until it reaches a halting instruction, returning the final state
-and the return data. It is the EVM's frame loop `EVM.X` **with gas
-ignored** (`gasCost = 0`, ample step fuel) — the one modelling
-assumption. (The genuine `EVM.X` form would additionally require the
-framework's gas/halt fuel-induction, which is currently an open
-`sorry`-staged obligation in `XFrame.lean`.) The point: the spec
-theorems below take a *single* `wethRun … = some (s', o)` hypothesis,
-hiding the per-step chain, and can talk about the return data `o`. -/
-
-/-- The halting opcodes (where `EVM.X` stops the frame). -/
-def isHaltOp : Operation .EVM → Bool
-  | .STOP => true
-  | .REVERT => true
-  | .RETURN => true
-  | _ => false
-
-/-- The frame's return data at a halt (matching `EVM.X`'s `H`): the
-returned memory slice for `RETURN`/`REVERT`, empty for `STOP`. -/
-def haltOutput (s : EVM.State) : Operation .EVM → ByteArray
-  | .RETURN => s.toMachineState.H_return
-  | .REVERT => s.toMachineState.H_return
-  | _ => .empty
-
-/-- Run the contract gas-free from `s`: fetch-and-`EVM.step` until a halt
-opcode, returning the (pre-halt) state and the halt's return data.
-`callFuel` bounds any nested call; the outer `ℕ` bounds the number of
-instructions. -/
-def wethRun (callFuel : ℕ) : ℕ → EVM.State → Option (EVM.State × ByteArray)
-  | 0, _ => none
-  | n + 1, s =>
-    match decode s.executionEnv.code s.pc with
-    | none => none
-    | some (op, arg) =>
-      if isHaltOp op then some (s, haltOutput s op)
-      else
-        match EVM.step (callFuel + 1) 0 (some (op, arg)) s with
-        | .ok s' => wethRun callFuel n s'
-        | .error _ => none
-
-/-- One non-halting `wethRun` step: peel off the `EVM.step` fact and the
-remaining run. -/
-theorem wethRun_succ_step
-    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
-    (res : EVM.State × ByteArray)
-    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
-    (hnh : isHaltOp op = false)
-    (hrun : wethRun callFuel (n + 1) s = some res) :
-    ∃ s1, EVM.step (callFuel + 1) 0 (some (op, arg)) s = .ok s1
-        ∧ wethRun callFuel n s1 = some res := by
-  rw [wethRun, hdec] at hrun
-  simp only [hnh] at hrun
-  cases hstep : EVM.step (callFuel + 1) 0 (some (op, arg)) s with
-  | error e => rw [hstep] at hrun; simp at hrun
-  | ok s1 => rw [hstep] at hrun; exact ⟨s1, rfl, hrun⟩
-
-/-- `SSTORE` advances the pc by one and preserves the execution
-environment (the post-`pc` is needed to reach the trailing `STOP`). -/
-theorem step_SSTORE_pc_ee
-    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
-    (slot newVal : UInt256) (tl : Stack UInt256)
-    (hStk : s.stack = slot :: newVal :: tl)
-    (hStep : EVM.step (f' + 1) cost (some (.SSTORE, arg)) s = .ok s') :
-    s'.pc = s.pc + UInt256.ofNat 1 ∧ s'.executionEnv = s.executionEnv := by
-  unfold EVM.step at hStep
-  simp only [bind, Except.bind, pure, Except.pure] at hStep
-  unfold EvmYul.step at hStep
-  simp only [Id.run] at hStep
-  unfold dispatchBinaryStateOp EVM.binaryStateOp at hStep
-  rw [hStk] at hStep
-  simp only [Stack.pop2, Id_run_ok, Except.ok.injEq] at hStep
-  subst hStep
-  refine ⟨?_, ?_⟩
-  · simp only [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC]
-  · show (EvmYul.State.sstore s.toState slot newVal).executionEnv = s.executionEnv
-    rw [sstore_preserves_executionEnv]
-
-/-- `ISZERO` preserves the account map (a pure stack op). Needed to carry
-the recorded balance through the post-`CALL` success check. -/
-theorem step_ISZERO_am
-    (s s' : EVM.State) (f' cost : ℕ) (arg : Option (UInt256 × Nat))
-    (hd : UInt256) (tl : Stack UInt256) (hStk : s.stack = hd :: tl)
-    (hStep : EVM.step (f' + 1) cost (some (.ISZERO, arg)) s = .ok s') :
-    s'.accountMap = s.accountMap := by
-  unfold EVM.step at hStep
-  simp only [bind, Except.bind, pure, Except.pure] at hStep
-  unfold EvmYul.step at hStep
-  simp only [Id.run] at hStep
-  unfold dispatchUnary EVM.execUnOp at hStep
-  rw [hStk] at hStep
-  simp only [Stack.pop, Id_run_ok, Except.ok.injEq] at hStep
-  subst hStep
-  simp only [accountMap_replaceStackAndIncrPC]
-
-/-- A halting `wethRun` step returns the current state and the halt
-output. -/
-theorem wethRun_halt_step
-    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
-    (res : EVM.State × ByteArray)
-    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
-    (hh : isHaltOp op = true)
-    (hrun : wethRun callFuel (n + 1) s = some res) :
-    res = (s, haltOutput s op) := by
-  rw [wethRun, hdec] at hrun
-  simp only [hh, if_true] at hrun
-  exact (Option.some.inj hrun).symm
-
 /-- **The withdraw tail through the external CALL preserves the recorded
 balance.** From the post-`SSTORE` state (pc 61, stack `[x]`), running the
 gas-free interpreter to its halt — the call-setup, the outbound `CALL`
@@ -607,7 +494,7 @@ unchanged at `T`. The `CALL`'s effect on `C`'s storage is the explicit
 no-reentrancy / codeless-recipient hypothesis `hcallKeep`. Both the
 success (→ `STOP`) and failure (→ `REVERT`) branches of the post-call
 `JUMPI` are covered, so no call-success assumption is needed. -/
-theorem wethRun_withdraw_tail
+theorem weth_withdraw_tail
     (s : EVM.State) (callFuel N : ℕ) (res : EVM.State × ByteArray)
     (C : Address) (u : AccountAddress) (x T : UInt256)
     (hcode : s.executionEnv.code = bytecode)
@@ -617,14 +504,14 @@ theorem wethRun_withdraw_tail
     (hcallKeep : ∀ (sa sb : EVM.State),
         EVM.step (callFuel + 1) 0 (some (.CALL, none)) sa = .ok sb →
         recordedBalance sb.accountMap C u = recordedBalance sa.accountMap C u)
-    (hrun : wethRun callFuel N s = some res) :
+    (hrun : evmRun callFuel N s = some res) :
     recordedBalance res.1.accountMap C u = T := by
   -- 61: PUSH1 0
   have hd0 : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hcode, hpc]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s1, hst0, hrun⟩ := wethRun_succ_step callFuel N s _ _ _ hd0 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s1, hst0, hrun⟩ := evmRun_succ_step callFuel N s _ _ _ hd0 (by decide) hrun
   obtain ⟨h1pc, h1stk, h1ee, h1am⟩ := step_PUSH1_shape_strong s s1 callFuel 0 (UInt256.ofNat 0) hst0
   rw [hstk] at h1stk
   have hc1 : s1.executionEnv.code = bytecode := by rw [h1ee]; exact hcode
@@ -634,8 +521,8 @@ theorem wethRun_withdraw_tail
   have hd1 : decode s1.executionEnv.code s1.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hc1, hp1]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s2, hst1, hrun⟩ := wethRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s2, hst1, hrun⟩ := evmRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
   obtain ⟨h2pc, h2stk, h2ee, h2am⟩ := step_PUSH1_shape_strong s1 s2 callFuel 0 (UInt256.ofNat 0) hst1
   rw [h1stk] at h2stk
   have hc2 : s2.executionEnv.code = bytecode := by rw [h2ee]; exact hc1
@@ -645,8 +532,8 @@ theorem wethRun_withdraw_tail
   have hd2 : decode s2.executionEnv.code s2.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hc2, hp2]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s3, hst2, hrun⟩ := wethRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s3, hst2, hrun⟩ := evmRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
   obtain ⟨h3pc, h3stk, h3ee, h3am⟩ := step_PUSH1_shape_strong s2 s3 callFuel 0 (UInt256.ofNat 0) hst2
   rw [h2stk] at h3stk
   have hc3 : s3.executionEnv.code = bytecode := by rw [h3ee]; exact hc2
@@ -656,8 +543,8 @@ theorem wethRun_withdraw_tail
   have hd3 : decode s3.executionEnv.code s3.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hc3, hp3]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s4, hst3, hrun⟩ := wethRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s4, hst3, hrun⟩ := evmRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
   obtain ⟨h4pc, h4stk, h4ee, h4am⟩ := step_PUSH1_shape_strong s3 s4 callFuel 0 (UInt256.ofNat 0) hst3
   rw [h3stk] at h4stk
   have hc4 : s4.executionEnv.code = bytecode := by rw [h4ee]; exact hc3
@@ -667,8 +554,8 @@ theorem wethRun_withdraw_tail
   have hd4 : decode s4.executionEnv.code s4.pc = some (.DUP5, none) := by
     rw [hc4, hp4]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s5, hst4, hrun⟩ := wethRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s5, hst4, hrun⟩ := evmRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
   obtain ⟨h5pc, h5stk, h5ee, h5am⟩ :=
     step_DUP5_shape_strong s4 s5 callFuel 0 none (UInt256.ofNat 0) (UInt256.ofNat 0)
       (UInt256.ofNat 0) (UInt256.ofNat 0) x [] h4stk hst4
@@ -680,8 +567,8 @@ theorem wethRun_withdraw_tail
   have hd5 : decode s5.executionEnv.code s5.pc = some (.CALLER, none) := by
     rw [hc5, hp5]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s6, hst5, hrun⟩ := wethRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s6, hst5, hrun⟩ := evmRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
   obtain ⟨h6pc, h6stk, h6ee, h6am⟩ := step_CALLER_value s5 s6 callFuel 0 none hst5
   rw [h5stk] at h6stk
   have hc6 : s6.executionEnv.code = bytecode := by rw [h6ee]; exact hc5
@@ -691,8 +578,8 @@ theorem wethRun_withdraw_tail
   have hd6 : decode s6.executionEnv.code s6.pc = some (.GAS, none) := by
     rw [hc6, hp6]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s7, hst6, hrun⟩ := wethRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s7, hst6, hrun⟩ := evmRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
   obtain ⟨h7pc, ⟨g, h7stk⟩, h7ee, h7am⟩ := step_GAS_shape_strong s6 s7 callFuel 0 none hst6
   rw [h6stk] at h7stk
   have hc7 : s7.executionEnv.code = bytecode := by rw [h7ee]; exact hc6
@@ -702,8 +589,8 @@ theorem wethRun_withdraw_tail
   have hd7 : decode s7.executionEnv.code s7.pc = some (.CALL, none) := by
     rw [hc7, hp7]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s8, hst7, hrun⟩ := wethRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s8, hst7, hrun⟩ := evmRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
   obtain ⟨h8pc, ⟨flag, h8stk⟩, h8ee⟩ :=
     step_CALL_shape s7 s8 callFuel 0 none _ _ _ _ _ _ _ [x] h7stk hst7
   have hc8 : s8.executionEnv.code = bytecode := by rw [h8ee]; exact hc7
@@ -713,8 +600,8 @@ theorem wethRun_withdraw_tail
   have hd8 : decode s8.executionEnv.code s8.pc = some (.ISZERO, none) := by
     rw [hc8, hp8]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s9, hst8, hrun⟩ := wethRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s9, hst8, hrun⟩ := evmRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
   obtain ⟨h9pc, ⟨v2, h9stk⟩, h9ee⟩ := step_ISZERO_shape s8 s9 callFuel 0 none flag [x] h8stk hst8
   have h9am : s9.accountMap = s8.accountMap := step_ISZERO_am s8 s9 callFuel 0 none flag [x] h8stk hst8
   have hc9 : s9.executionEnv.code = bytecode := by rw [h9ee]; exact hc8
@@ -724,8 +611,8 @@ theorem wethRun_withdraw_tail
   have hd9 : decode s9.executionEnv.code s9.pc = some (.Push .PUSH2, some (revertLbl, 2)) := by
     rw [hc9, hp9]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s10, hst9, hrun⟩ := wethRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s10, hst9, hrun⟩ := evmRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
   obtain ⟨h10pc, h10stk, h10ee, h10am⟩ :=
     step_PUSH_shape_strong s9 s10 callFuel 0 .PUSH2 (by decide) revertLbl 2 hst9
   rw [h9stk] at h10stk
@@ -736,8 +623,8 @@ theorem wethRun_withdraw_tail
   have hd10 : decode s10.executionEnv.code s10.pc = some (.JUMPI, none) := by
     rw [hc10, hp10]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s11, hst10, hrun⟩ := wethRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s11, hst10, hrun⟩ := evmRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
   obtain ⟨h11pc, h11stk, h11ee, h11am⟩ :=
     step_JUMPI_shape_strong s10 s11 callFuel 0 none revertLbl v2 [x] h10stk hst10
   have hc11 : s11.executionEnv.code = bytecode := by rw [h11ee]; exact hc10
@@ -749,8 +636,8 @@ theorem wethRun_withdraw_tail
     have hd11 : decode s11.executionEnv.code s11.pc = some (.JUMPDEST, none) := by
       rw [hc11, hp11']; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+    · simp [evmRun] at hrun
+    obtain ⟨s12, hst11, hrun⟩ := evmRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
     obtain ⟨h12pc, _, h12ee, h12am⟩ := step_JUMPDEST_shape_strong s11 s12 callFuel 0 none hst11
     have hc12 : s12.executionEnv.code = bytecode := by rw [h12ee]; exact hc11
     have hp12 : s12.pc = UInt256.ofNat 81 := by rw [h12pc, hp11']; decide
@@ -759,8 +646,8 @@ theorem wethRun_withdraw_tail
     have hd12 : decode s12.executionEnv.code s12.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
       rw [hc12, hp12]; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    obtain ⟨s13, hst12, hrun⟩ := wethRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+    · simp [evmRun] at hrun
+    obtain ⟨s13, hst12, hrun⟩ := evmRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
     obtain ⟨h13pc, _, h13ee, h13am⟩ := step_PUSH1_shape_strong s12 s13 callFuel 0 (UInt256.ofNat 0) hst12
     have hc13 : s13.executionEnv.code = bytecode := by rw [h13ee]; exact hc12
     have hp13 : s13.pc = UInt256.ofNat 83 := by rw [h13pc, hp12]; decide
@@ -769,8 +656,8 @@ theorem wethRun_withdraw_tail
     have hd13 : decode s13.executionEnv.code s13.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
       rw [hc13, hp13]; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    obtain ⟨s14, hst13, hrun⟩ := wethRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
+    · simp [evmRun] at hrun
+    obtain ⟨s14, hst13, hrun⟩ := evmRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
     obtain ⟨h14pc, _, h14ee, h14am⟩ := step_PUSH1_shape_strong s13 s14 callFuel 0 (UInt256.ofNat 0) hst13
     have hc14 : s14.executionEnv.code = bytecode := by rw [h14ee]; exact hc13
     have hp14 : s14.pc = UInt256.ofNat 85 := by rw [h14pc, hp13]; decide
@@ -779,8 +666,8 @@ theorem wethRun_withdraw_tail
     have hd14 : decode s14.executionEnv.code s14.pc = some (.REVERT, none) := by
       rw [hc14, hp14]; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    have hres := wethRun_halt_step callFuel N s14 _ _ _ hd14 (by decide) hrun
+    · simp [evmRun] at hrun
+    have hres := evmRun_halt_step callFuel N s14 _ _ _ hd14 (by decide) hrun
     rw [show res.1 = s14 from by rw [hres]]; exact hrb14
   · -- CALL succeeded: JUMPI not taken → POP; STOP (PCs 78–79)
     have hp11 : s11.pc = UInt256.ofNat 78 := by
@@ -789,8 +676,8 @@ theorem wethRun_withdraw_tail
     have hd11 : decode s11.executionEnv.code s11.pc = some (.POP, none) := by
       rw [hc11, hp11]; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+    · simp [evmRun] at hrun
+    obtain ⟨s12, hst11, hrun⟩ := evmRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
     obtain ⟨h12pc, _, h12ee, h12am⟩ := step_POP_shape_strong s11 s12 callFuel 0 none x [] h11stk hst11
     have hc12 : s12.executionEnv.code = bytecode := by rw [h12ee]; exact hc11
     have hp12 : s12.pc = UInt256.ofNat 79 := by rw [h12pc, hp11]; decide
@@ -799,17 +686,17 @@ theorem wethRun_withdraw_tail
     have hd12 : decode s12.executionEnv.code s12.pc = some (.STOP, none) := by
       rw [hc12, hp12]; native_decide
     obtain _ | N := N
-    · simp [wethRun] at hrun
-    have hres := wethRun_halt_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+    · simp [evmRun] at hrun
+    have hres := evmRun_halt_step callFuel N s12 _ _ _ hd12 (by decide) hrun
     rw [show res.1 = s12 from by rw [hres]]; exact hrb12
 
 /-- **deposit, as a single big-step over the gas-free interpreter.**
 From a call entry (`pc = 0`, empty stack, running WETH's bytecode) whose
 ABI selector is `deposit`'s, *running the contract to its halt*
-(`wethRun … = some (s', o)`) credits `msg.value` to the caller's recorded
+(`evmRun … = some (s', o)`) credits `msg.value` to the caller's recorded
 balance, leaves every other balance untouched, and returns empty data.
 The whole per-instruction chain — dispatch routing *and* the deposit
-body — is hidden inside the single `wethRun` hypothesis. -/
+body — is hidden inside the single `evmRun` hypothesis. -/
 theorem weth_deposit_run_impl
     (s0 : EVM.State) (callFuel N : ℕ) (res : EVM.State × ByteArray)
     (C : Address) (acc : Account .EVM)
@@ -819,7 +706,7 @@ theorem weth_deposit_run_impl
     (hsel : functionSelector s0.executionEnv.calldata = depositSelector)
     (hCo : s0.executionEnv.codeOwner = C)
     (hfind : s0.accountMap.find? C = some acc)
-    (hrun : wethRun callFuel N s0 = some res) :
+    (hrun : evmRun callFuel N s0 = some res) :
     recordedBalance res.1.accountMap C (msgSender s0)
         = UInt256.add (msgValue s0) (recordedBalance s0.accountMap C (msgSender s0))
     ∧ (∀ b, b ≠ msgSender s0 →
@@ -832,8 +719,8 @@ theorem weth_deposit_run_impl
   have hd0 : decode s0.executionEnv.code s0.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hcodeB, hpc0]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s1, hst0, hrun⟩ := wethRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s1, hst0, hrun⟩ := evmRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
   have h0 : EVM.step (callFuel + 1) 0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1 := by
     rw [hd0]; exact hst0
   obtain ⟨h1pc, h1stk, h1ee, h1am⟩ := step_PUSH1_shape_strong s0 s1 callFuel 0 (UInt256.ofNat 0) hst0
@@ -844,8 +731,8 @@ theorem weth_deposit_run_impl
   have hd1 : decode s1.executionEnv.code s1.pc = some (.CALLDATALOAD, none) := by
     rw [hc1, hp1]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s2, hst1, hrun⟩ := wethRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s2, hst1, hrun⟩ := evmRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
   have h1 : EVM.step (callFuel + 1) 0 (decode s1.executionEnv.code s1.pc) s1 = .ok s2 := by
     rw [hd1]; exact hst1
   obtain ⟨h2pc, h2stk, h2ee, h2am⟩ :=
@@ -856,8 +743,8 @@ theorem weth_deposit_run_impl
   have hd2 : decode s2.executionEnv.code s2.pc = some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1)) := by
     rw [hc2, hp2]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s3, hst2, hrun⟩ := wethRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s3, hst2, hrun⟩ := evmRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
   have h2 : EVM.step (callFuel + 1) 0 (decode s2.executionEnv.code s2.pc) s2 = .ok s3 := by
     rw [hd2]; exact hst2
   obtain ⟨h3pc, h3stk, h3ee, h3am⟩ := step_PUSH1_shape_strong s2 s3 callFuel 0 (UInt256.ofNat 0xe0) hst2
@@ -868,8 +755,8 @@ theorem weth_deposit_run_impl
   have hd3 : decode s3.executionEnv.code s3.pc = some (.SHR, none) := by
     rw [hc3, hp3]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s4, hst3, hrun⟩ := wethRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s4, hst3, hrun⟩ := evmRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
   have h3 : EVM.step (callFuel + 1) 0 (decode s3.executionEnv.code s3.pc) s3 = .ok s4 := by
     rw [hd3]; exact hst3
   obtain ⟨h4pc, h4stk, h4ee, h4am⟩ :=
@@ -881,8 +768,8 @@ theorem weth_deposit_run_impl
   have hd4 : decode s4.executionEnv.code s4.pc = some (.DUP1, none) := by
     rw [hc4, hp4]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s5, hst4, hrun⟩ := wethRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s5, hst4, hrun⟩ := evmRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
   have h4 : EVM.step (callFuel + 1) 0 (decode s4.executionEnv.code s4.pc) s4 = .ok s5 := by
     rw [hd4]; exact hst4
   obtain ⟨h5pc, h5stk, h5ee, h5am⟩ :=
@@ -894,8 +781,8 @@ theorem weth_deposit_run_impl
   have hd5 : decode s5.executionEnv.code s5.pc = some (.Push .PUSH4, some (depositSelector, 4)) := by
     rw [hc5, hp5]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s6, hst5, hrun⟩ := wethRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s6, hst5, hrun⟩ := evmRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
   have h5 : EVM.step (callFuel + 1) 0 (decode s5.executionEnv.code s5.pc) s5 = .ok s6 := by
     rw [hd5]; exact hst5
   obtain ⟨h6pc, h6stk, h6ee, h6am⟩ :=
@@ -907,8 +794,8 @@ theorem weth_deposit_run_impl
   have hd6 : decode s6.executionEnv.code s6.pc = some (.EQ, none) := by
     rw [hc6, hp6]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s7, hst6, hrun⟩ := wethRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s7, hst6, hrun⟩ := evmRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
   have h6 : EVM.step (callFuel + 1) 0 (decode s6.executionEnv.code s6.pc) s6 = .ok s7 := by
     rw [hd6]; exact hst6
   obtain ⟨h7pc, h7stk, h7ee, h7am⟩ :=
@@ -919,8 +806,8 @@ theorem weth_deposit_run_impl
   have hd7 : decode s7.executionEnv.code s7.pc = some (.Push .PUSH2, some (depositLbl, 2)) := by
     rw [hc7, hp7]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s8, hst7, hrun⟩ := wethRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s8, hst7, hrun⟩ := evmRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
   have h7 : EVM.step (callFuel + 1) 0 (decode s7.executionEnv.code s7.pc) s7 = .ok s8 := by
     rw [hd7]; exact hst7
   obtain ⟨h8pc, h8stk, h8ee, h8am⟩ :=
@@ -931,8 +818,8 @@ theorem weth_deposit_run_impl
   have hd8 : decode s8.executionEnv.code s8.pc = some (.JUMPI, none) := by
     rw [hc8, hp8]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s9, hst8, hrun⟩ := wethRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s9, hst8, hrun⟩ := evmRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
   have h8 : EVM.step (callFuel + 1) 0 (decode s8.executionEnv.code s8.pc) s8 = .ok s9 := by
     rw [hd8]; exact hst8
   obtain ⟨h9pc, h9stk, h9ee, h9am⟩ :=
@@ -944,8 +831,8 @@ theorem weth_deposit_run_impl
   have hd9 : decode s9.executionEnv.code s9.pc = some (.JUMPDEST, none) := by
     rw [hc9, h9pc]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s10, hst9, hrun⟩ := wethRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s10, hst9, hrun⟩ := evmRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
   have h9 : EVM.step (callFuel + 1) 0 (decode s9.executionEnv.code s9.pc) s9 = .ok s10 := by
     rw [hd9]; exact hst9
   obtain ⟨h10pc, h10stk, h10ee, h10am⟩ := step_JUMPDEST_shape_strong s9 s10 callFuel 0 none hst9
@@ -956,8 +843,8 @@ theorem weth_deposit_run_impl
   have hd10 : decode s10.executionEnv.code s10.pc = some (.POP, none) := by
     rw [hc10, hp10]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s11, hst10, hrun⟩ := wethRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s11, hst10, hrun⟩ := evmRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
   have h10 : EVM.step (callFuel + 1) 0 (decode s10.executionEnv.code s10.pc) s10 = .ok s11 := by
     rw [hd10]; exact hst10
   obtain ⟨h11pc, h11stk, h11ee, h11am⟩ :=
@@ -968,8 +855,8 @@ theorem weth_deposit_run_impl
   have hd11 : decode s11.executionEnv.code s11.pc = some (.CALLER, none) := by
     rw [hc11, hp11]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s12, hst11, hrun⟩ := evmRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
   have h11 : EVM.step (callFuel + 1) 0 (decode s11.executionEnv.code s11.pc) s11 = .ok s12 := by
     rw [hd11]; exact hst11
   obtain ⟨h12pc, h12stk, h12ee, h12am⟩ := step_CALLER_value s11 s12 callFuel 0 none hst11
@@ -980,8 +867,8 @@ theorem weth_deposit_run_impl
   have hd12 : decode s12.executionEnv.code s12.pc = some (.DUP1, none) := by
     rw [hc12, hp12]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s13, hst12, hrun⟩ := wethRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s13, hst12, hrun⟩ := evmRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
   have h12 : EVM.step (callFuel + 1) 0 (decode s12.executionEnv.code s12.pc) s12 = .ok s13 := by
     rw [hd12]; exact hst12
   obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
@@ -993,8 +880,8 @@ theorem weth_deposit_run_impl
   have hd13 : decode s13.executionEnv.code s13.pc = some (.SLOAD, none) := by
     rw [hc13, hp13]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s14, hst13, hrun⟩ := wethRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s14, hst13, hrun⟩ := evmRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
   have h13 : EVM.step (callFuel + 1) 0 (decode s13.executionEnv.code s13.pc) s13 = .ok s14 := by
     rw [hd13]; exact hst13
   obtain ⟨h14pc, h14stk, h14ee, h14am⟩ :=
@@ -1005,8 +892,8 @@ theorem weth_deposit_run_impl
   have hd14 : decode s14.executionEnv.code s14.pc = some (.CALLVALUE, none) := by
     rw [hc14, hp14]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s15, hst14, hrun⟩ := wethRun_succ_step callFuel N s14 _ _ _ hd14 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s15, hst14, hrun⟩ := evmRun_succ_step callFuel N s14 _ _ _ hd14 (by decide) hrun
   have h14 : EVM.step (callFuel + 1) 0 (decode s14.executionEnv.code s14.pc) s14 = .ok s15 := by
     rw [hd14]; exact hst14
   obtain ⟨h15pc, h15stk, h15ee, h15am⟩ := step_CALLVALUE_value s14 s15 callFuel 0 none hst14
@@ -1017,8 +904,8 @@ theorem weth_deposit_run_impl
   have hd15 : decode s15.executionEnv.code s15.pc = some (.ADD, none) := by
     rw [hc15, hp15]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s16, hst15, hrun⟩ := wethRun_succ_step callFuel N s15 _ _ _ hd15 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s16, hst15, hrun⟩ := evmRun_succ_step callFuel N s15 _ _ _ hd15 (by decide) hrun
   have h15 : EVM.step (callFuel + 1) 0 (decode s15.executionEnv.code s15.pc) s15 = .ok s16 := by
     rw [hd15]; exact hst15
   obtain ⟨h16pc, h16stk, h16ee, h16am⟩ :=
@@ -1029,8 +916,8 @@ theorem weth_deposit_run_impl
   have hd16 : decode s16.executionEnv.code s16.pc = some (.SWAP1, none) := by
     rw [hc16, hp16]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s17, hst16, hrun⟩ := wethRun_succ_step callFuel N s16 _ _ _ hd16 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s17, hst16, hrun⟩ := evmRun_succ_step callFuel N s16 _ _ _ hd16 (by decide) hrun
   have h16 : EVM.step (callFuel + 1) 0 (decode s16.executionEnv.code s16.pc) s16 = .ok s17 := by
     rw [hd16]; exact hst16
   obtain ⟨h17pc, h17stk, h17ee, h17am⟩ :=
@@ -1041,8 +928,8 @@ theorem weth_deposit_run_impl
   have hd17 : decode s17.executionEnv.code s17.pc = some (.SSTORE, none) := by
     rw [hc17, hp17]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s18, hst17, hrun⟩ := wethRun_succ_step callFuel N s17 _ _ _ hd17 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s18, hst17, hrun⟩ := evmRun_succ_step callFuel N s17 _ _ _ hd17 (by decide) hrun
   have h17 : EVM.step (callFuel + 1) 0 (decode s17.executionEnv.code s17.pc) s17 = .ok s18 := by
     rw [hd17]; exact hst17
   obtain ⟨h18pc, h18ee⟩ :=
@@ -1053,8 +940,8 @@ theorem weth_deposit_run_impl
   have hd18 : decode s18.executionEnv.code s18.pc = some (.STOP, none) := by
     rw [hc18, hp18]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  have hres := wethRun_halt_step callFuel N s18 _ _ _ hd18 (by decide) hrun
+  · simp [evmRun] at hrun
+  have hres := evmRun_halt_step callFuel N s18 _ _ _ hd18 (by decide) hrun
   -- res = (s18, .empty)
   have hres1 : res.1 = s18 := by rw [hres]
   have hres2 : res.2 = ByteArray.empty := by rw [hres]; rfl
@@ -1070,11 +957,11 @@ theorem weth_deposit_run_impl
 
 /-- **Unknown selector, as a single big-step over the gas-free
 interpreter.** From a call entry whose ABI selector is neither entry
-point's, *running the contract to its halt* (`wethRun … = some (s', o)`)
+point's, *running the contract to its halt* (`evmRun … = some (s', o)`)
 changes no account: both dispatch comparisons fall through, no function
 body is entered, and execution reaches the dispatcher's `REVERT` having
 modified nothing. The entire 15-instruction dispatch is hidden in the
-single `wethRun` hypothesis. -/
+single `evmRun` hypothesis. -/
 theorem weth_unknown_run_impl
     (s0 : EVM.State) (callFuel N : ℕ) (res : EVM.State × ByteArray)
     (hcode : s0.executionEnv.code = wethBytecode)
@@ -1082,7 +969,7 @@ theorem weth_unknown_run_impl
     (hstk0 : s0.stack = [])
     (hne_dep : functionSelector s0.executionEnv.calldata ≠ depositSelector)
     (hne_wd : functionSelector s0.executionEnv.calldata ≠ withdrawSelector)
-    (hrun : wethRun callFuel N s0 = some res) :
+    (hrun : evmRun callFuel N s0 = some res) :
     res.1.accountMap = s0.accountMap := by
   have hcodeB : s0.executionEnv.code = bytecode := hcode
   have hne_depB : selectorOf s0.executionEnv.calldata ≠ depositSelector := hne_dep
@@ -1092,8 +979,8 @@ theorem weth_unknown_run_impl
   have hd0 : decode s0.executionEnv.code s0.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hcodeB, hpc0]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s1, hst0, hrun⟩ := wethRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s1, hst0, hrun⟩ := evmRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
   have h0 : EVM.step (callFuel + 1) 0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1 := by
     rw [hd0]; exact hst0
   obtain ⟨h1pc, h1stk, h1ee, h1am⟩ := step_PUSH1_shape_strong s0 s1 callFuel 0 (UInt256.ofNat 0) hst0
@@ -1103,8 +990,8 @@ theorem weth_unknown_run_impl
   have hd1 : decode s1.executionEnv.code s1.pc = some (.CALLDATALOAD, none) := by
     rw [hc1, hp1]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s2, hst1, hrun⟩ := wethRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s2, hst1, hrun⟩ := evmRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
   have h1 : EVM.step (callFuel + 1) 0 (decode s1.executionEnv.code s1.pc) s1 = .ok s2 := by
     rw [hd1]; exact hst1
   have hc2 : s2.executionEnv.code = bytecode := by
@@ -1117,8 +1004,8 @@ theorem weth_unknown_run_impl
   have hd2 : decode s2.executionEnv.code s2.pc = some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1)) := by
     rw [hc2, hp2]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s3, hst2, hrun⟩ := wethRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s3, hst2, hrun⟩ := evmRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
   have h2 : EVM.step (callFuel + 1) 0 (decode s2.executionEnv.code s2.pc) s2 = .ok s3 := by
     rw [hd2]; exact hst2
   obtain ⟨h3pc, _, h3ee, _⟩ := step_PUSH1_shape_strong s2 s3 callFuel 0 (UInt256.ofNat 0xe0) hst2
@@ -1128,8 +1015,8 @@ theorem weth_unknown_run_impl
   have hd3 : decode s3.executionEnv.code s3.pc = some (.SHR, none) := by
     rw [hc3, hp3]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s4, hst3, hrun⟩ := wethRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s4, hst3, hrun⟩ := evmRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
   have h3 : EVM.step (callFuel + 1) 0 (decode s3.executionEnv.code s3.pc) s3 = .ok s4 := by
     rw [hd3]; exact hst3
   -- dispatch reaches the selector on the stack at pc 6
@@ -1141,8 +1028,8 @@ theorem weth_unknown_run_impl
   have hd4 : decode s4.executionEnv.code s4.pc = some (.DUP1, none) := by
     rw [hc4, hs4pc]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s5, hst4, hrun⟩ := wethRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s5, hst4, hrun⟩ := evmRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
   have h4 : EVM.step (callFuel + 1) 0 (decode s4.executionEnv.code s4.pc) s4 = .ok s5 := by
     rw [hd4]; exact hst4
   obtain ⟨h5pc, h5stk, h5ee, _⟩ := step_DUP1_shape_strong s4 s5 callFuel 0 none selVal [] hs4stk hst4
@@ -1153,8 +1040,8 @@ theorem weth_unknown_run_impl
   have hd5 : decode s5.executionEnv.code s5.pc = some (.Push .PUSH4, some (depositSelector, 4)) := by
     rw [hc5, hp5]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s6, hst5, hrun⟩ := wethRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s6, hst5, hrun⟩ := evmRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
   have h5 : EVM.step (callFuel + 1) 0 (decode s5.executionEnv.code s5.pc) s5 = .ok s6 := by
     rw [hd5]; exact hst5
   obtain ⟨h6pc, h6stk, h6ee, _⟩ :=
@@ -1166,8 +1053,8 @@ theorem weth_unknown_run_impl
   have hd6 : decode s6.executionEnv.code s6.pc = some (.EQ, none) := by
     rw [hc6, hp6]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s7, hst6, hrun⟩ := wethRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s7, hst6, hrun⟩ := evmRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
   have h6 : EVM.step (callFuel + 1) 0 (decode s6.executionEnv.code s6.pc) s6 = .ok s7 := by
     rw [hd6]; exact hst6
   obtain ⟨h7pc, h7stk, h7ee, _⟩ :=
@@ -1178,8 +1065,8 @@ theorem weth_unknown_run_impl
   have hd7 : decode s7.executionEnv.code s7.pc = some (.Push .PUSH2, some (depositLbl, 2)) := by
     rw [hc7, hp7]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s8, hst7, hrun⟩ := wethRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s8, hst7, hrun⟩ := evmRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
   have h7 : EVM.step (callFuel + 1) 0 (decode s7.executionEnv.code s7.pc) s7 = .ok s8 := by
     rw [hd7]; exact hst7
   obtain ⟨h8pc, h8stk, h8ee, _⟩ :=
@@ -1191,8 +1078,8 @@ theorem weth_unknown_run_impl
   have hd8 : decode s8.executionEnv.code s8.pc = some (.JUMPI, none) := by
     rw [hc8, hp8]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s9, hst8, hrun⟩ := wethRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s9, hst8, hrun⟩ := evmRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
   have h8 : EVM.step (callFuel + 1) 0 (decode s8.executionEnv.code s8.pc) s8 = .ok s9 := by
     rw [hd8]; exact hst8
   obtain ⟨h9pc, h9stk, h9ee, _⟩ :=
@@ -1205,8 +1092,8 @@ theorem weth_unknown_run_impl
   have hd9 : decode s9.executionEnv.code s9.pc = some (.Push .PUSH4, some (withdrawSelector, 4)) := by
     rw [hc9, hp9]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s10, hst9, hrun⟩ := wethRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s10, hst9, hrun⟩ := evmRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
   have h9 : EVM.step (callFuel + 1) 0 (decode s9.executionEnv.code s9.pc) s9 = .ok s10 := by
     rw [hd9]; exact hst9
   obtain ⟨h10pc, h10stk, h10ee, _⟩ :=
@@ -1218,8 +1105,8 @@ theorem weth_unknown_run_impl
   have hd10 : decode s10.executionEnv.code s10.pc = some (.EQ, none) := by
     rw [hc10, hp10]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s11, hst10, hrun⟩ := wethRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s11, hst10, hrun⟩ := evmRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
   have h10 : EVM.step (callFuel + 1) 0 (decode s10.executionEnv.code s10.pc) s10 = .ok s11 := by
     rw [hd10]; exact hst10
   obtain ⟨h11pc, h11stk, h11ee, _⟩ :=
@@ -1230,8 +1117,8 @@ theorem weth_unknown_run_impl
   have hd11 : decode s11.executionEnv.code s11.pc = some (.Push .PUSH2, some (withdrawLbl, 2)) := by
     rw [hc11, hp11]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s12, hst11, hrun⟩ := evmRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
   have h11 : EVM.step (callFuel + 1) 0 (decode s11.executionEnv.code s11.pc) s11 = .ok s12 := by
     rw [hd11]; exact hst11
   obtain ⟨h12pc, h12stk, h12ee, _⟩ :=
@@ -1243,8 +1130,8 @@ theorem weth_unknown_run_impl
   have hd12 : decode s12.executionEnv.code s12.pc = some (.JUMPI, none) := by
     rw [hc12, hp12]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s13, hst12, hrun⟩ := wethRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s13, hst12, hrun⟩ := evmRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
   have h12 : EVM.step (callFuel + 1) 0 (decode s12.executionEnv.code s12.pc) s12 = .ok s13 := by
     rw [hd12]; exact hst12
   obtain ⟨h13pc, h13stk, h13ee, _⟩ :=
@@ -1257,8 +1144,8 @@ theorem weth_unknown_run_impl
   have hd13 : decode s13.executionEnv.code s13.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hc13, hp13]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s14, hst13, hrun⟩ := wethRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s14, hst13, hrun⟩ := evmRun_succ_step callFuel N s13 _ _ _ hd13 (by decide) hrun
   have h13 : EVM.step (callFuel + 1) 0 (decode s13.executionEnv.code s13.pc) s13 = .ok s14 := by
     rw [hd13]; exact hst13
   obtain ⟨h14pc, _, h14ee, _⟩ := step_PUSH1_shape_strong s13 s14 callFuel 0 (UInt256.ofNat 0) hst13
@@ -1268,8 +1155,8 @@ theorem weth_unknown_run_impl
   have hd14 : decode s14.executionEnv.code s14.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hc14, hp14]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s15, hst14, hrun⟩ := wethRun_succ_step callFuel N s14 _ _ _ hd14 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s15, hst14, hrun⟩ := evmRun_succ_step callFuel N s14 _ _ _ hd14 (by decide) hrun
   have h14 : EVM.step (callFuel + 1) 0 (decode s14.executionEnv.code s14.pc) s14 = .ok s15 := by
     rw [hd14]; exact hst14
   obtain ⟨h15pc, _, h15ee, _⟩ := step_PUSH1_shape_strong s14 s15 callFuel 0 (UInt256.ofNat 0) hst14
@@ -1279,8 +1166,8 @@ theorem weth_unknown_run_impl
   have hd15 : decode s15.executionEnv.code s15.pc = some (.REVERT, none) := by
     rw [hc15, hp15]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  have hres := wethRun_halt_step callFuel N s15 _ _ _ hd15 (by decide) hrun
+  · simp [evmRun] at hrun
+  have hres := evmRun_halt_step callFuel N s15 _ _ _ hd15 (by decide) hrun
   have hres1 : res.1 = s15 := by rw [hres]
   -- account map unchanged across the whole dispatch
   obtain ⟨_, _, ham⟩ :=
@@ -1299,7 +1186,7 @@ exactly `x`. The external `CALL` is genuinely stepped through; its effect
 on `C`'s storage is the explicit no-reentrancy / codeless-recipient
 hypothesis `hcallKeep`. Holds whether the call succeeds (→ `STOP`) or
 fails (→ `REVERT`). The whole ~40-instruction chain is hidden in the
-single `wethRun` hypothesis. -/
+single `evmRun` hypothesis. -/
 theorem weth_withdraw_run_impl
     (s0 : EVM.State) (callFuel N : ℕ) (res : EVM.State × ByteArray)
     (C : Address) (acc : Account .EVM)
@@ -1315,7 +1202,7 @@ theorem weth_withdraw_run_impl
         EVM.step (callFuel + 1) 0 (some (.CALL, none)) sa = .ok sb →
         recordedBalance sb.accountMap C (msgSender s0)
           = recordedBalance sa.accountMap C (msgSender s0))
-    (hrun : wethRun callFuel N s0 = some res) :
+    (hrun : evmRun callFuel N s0 = some res) :
     recordedBalance res.1.accountMap C (msgSender s0)
         = UInt256.sub (recordedBalance s0.accountMap C (msgSender s0)) (withdrawArg s0) := by
   have hcodeB : s0.executionEnv.code = bytecode := hcode
@@ -1326,8 +1213,8 @@ theorem weth_withdraw_run_impl
   have hd0 : decode s0.executionEnv.code s0.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hcodeB, hpc0]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s1, hst0, hrun⟩ := wethRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s1, hst0, hrun⟩ := evmRun_succ_step callFuel N s0 _ _ _ hd0 (by decide) hrun
   have h0 : EVM.step (callFuel + 1) 0 (decode s0.executionEnv.code s0.pc) s0 = .ok s1 := by
     rw [hd0]; exact hst0
   obtain ⟨h1pc, h1stk, h1ee, _⟩ := step_PUSH1_shape_strong s0 s1 callFuel 0 (UInt256.ofNat 0) hst0
@@ -1337,8 +1224,8 @@ theorem weth_withdraw_run_impl
   have hd1 : decode s1.executionEnv.code s1.pc = some (.CALLDATALOAD, none) := by
     rw [hc1, hp1]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s2, hst1, hrun⟩ := wethRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s2, hst1, hrun⟩ := evmRun_succ_step callFuel N s1 _ _ _ hd1 (by decide) hrun
   have h1 : EVM.step (callFuel + 1) 0 (decode s1.executionEnv.code s1.pc) s1 = .ok s2 := by
     rw [hd1]; exact hst1
   obtain ⟨h2pc, _, h2ee, _⟩ := step_CALLDATALOAD_value s1 s2 callFuel 0 none (UInt256.ofNat 0) [] h1stk hst1
@@ -1347,8 +1234,8 @@ theorem weth_withdraw_run_impl
   have hd2 : decode s2.executionEnv.code s2.pc = some (.Push .PUSH1, some (UInt256.ofNat 0xe0, 1)) := by
     rw [hc2, hp2]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s3, hst2, hrun⟩ := wethRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s3, hst2, hrun⟩ := evmRun_succ_step callFuel N s2 _ _ _ hd2 (by decide) hrun
   have h2 : EVM.step (callFuel + 1) 0 (decode s2.executionEnv.code s2.pc) s2 = .ok s3 := by
     rw [hd2]; exact hst2
   obtain ⟨h3pc, _, h3ee, _⟩ := step_PUSH1_shape_strong s2 s3 callFuel 0 (UInt256.ofNat 0xe0) hst2
@@ -1357,8 +1244,8 @@ theorem weth_withdraw_run_impl
   have hd3 : decode s3.executionEnv.code s3.pc = some (.SHR, none) := by
     rw [hc3, hp3]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s4, hst3, hrun⟩ := wethRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s4, hst3, hrun⟩ := evmRun_succ_step callFuel N s3 _ _ _ hd3 (by decide) hrun
   have h3 : EVM.step (callFuel + 1) 0 (decode s3.executionEnv.code s3.pc) s3 = .ok s4 := by
     rw [hd3]; exact hst3
   obtain ⟨hs4stk, hs4pc, hs4ee, _⟩ :=
@@ -1368,8 +1255,8 @@ theorem weth_withdraw_run_impl
   have hd4 : decode s4.executionEnv.code s4.pc = some (.DUP1, none) := by
     rw [hc4, hs4pc]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s5, hst4, hrun⟩ := wethRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s5, hst4, hrun⟩ := evmRun_succ_step callFuel N s4 _ _ _ hd4 (by decide) hrun
   have h4 : EVM.step (callFuel + 1) 0 (decode s4.executionEnv.code s4.pc) s4 = .ok s5 := by
     rw [hd4]; exact hst4
   obtain ⟨h5pc, h5stk, h5ee, _⟩ := step_DUP1_shape_strong s4 s5 callFuel 0 none withdrawSelector [] hs4stk hst4
@@ -1379,8 +1266,8 @@ theorem weth_withdraw_run_impl
   have hd5 : decode s5.executionEnv.code s5.pc = some (.Push .PUSH4, some (depositSelector, 4)) := by
     rw [hc5, hp5]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s6, hst5, hrun⟩ := wethRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s6, hst5, hrun⟩ := evmRun_succ_step callFuel N s5 _ _ _ hd5 (by decide) hrun
   have h5 : EVM.step (callFuel + 1) 0 (decode s5.executionEnv.code s5.pc) s5 = .ok s6 := by
     rw [hd5]; exact hst5
   obtain ⟨h6pc, h6stk, h6ee, _⟩ :=
@@ -1391,8 +1278,8 @@ theorem weth_withdraw_run_impl
   have hd6 : decode s6.executionEnv.code s6.pc = some (.EQ, none) := by
     rw [hc6, hp6]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s7, hst6, hrun⟩ := wethRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s7, hst6, hrun⟩ := evmRun_succ_step callFuel N s6 _ _ _ hd6 (by decide) hrun
   have h6 : EVM.step (callFuel + 1) 0 (decode s6.executionEnv.code s6.pc) s6 = .ok s7 := by
     rw [hd6]; exact hst6
   obtain ⟨h7pc, h7stk, h7ee, _⟩ :=
@@ -1402,8 +1289,8 @@ theorem weth_withdraw_run_impl
   have hd7 : decode s7.executionEnv.code s7.pc = some (.Push .PUSH2, some (depositLbl, 2)) := by
     rw [hc7, hp7]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s8, hst7, hrun⟩ := wethRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s8, hst7, hrun⟩ := evmRun_succ_step callFuel N s7 _ _ _ hd7 (by decide) hrun
   have h7 : EVM.step (callFuel + 1) 0 (decode s7.executionEnv.code s7.pc) s7 = .ok s8 := by
     rw [hd7]; exact hst7
   obtain ⟨h8pc, h8stk, h8ee, _⟩ :=
@@ -1414,8 +1301,8 @@ theorem weth_withdraw_run_impl
   have hd8 : decode s8.executionEnv.code s8.pc = some (.JUMPI, none) := by
     rw [hc8, hp8]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s9, hst8, hrun⟩ := wethRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s9, hst8, hrun⟩ := evmRun_succ_step callFuel N s8 _ _ _ hd8 (by decide) hrun
   have h8 : EVM.step (callFuel + 1) 0 (decode s8.executionEnv.code s8.pc) s8 = .ok s9 := by
     rw [hd8]; exact hst8
   obtain ⟨h9pc, h9stk, h9ee, _⟩ :=
@@ -1427,8 +1314,8 @@ theorem weth_withdraw_run_impl
   have hd9 : decode s9.executionEnv.code s9.pc = some (.Push .PUSH4, some (withdrawSelector, 4)) := by
     rw [hc9, hp9]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s10, hst9, hrun⟩ := wethRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s10, hst9, hrun⟩ := evmRun_succ_step callFuel N s9 _ _ _ hd9 (by decide) hrun
   have h9 : EVM.step (callFuel + 1) 0 (decode s9.executionEnv.code s9.pc) s9 = .ok s10 := by
     rw [hd9]; exact hst9
   obtain ⟨h10pc, h10stk, h10ee, _⟩ :=
@@ -1439,8 +1326,8 @@ theorem weth_withdraw_run_impl
   have hd10 : decode s10.executionEnv.code s10.pc = some (.EQ, none) := by
     rw [hc10, hp10]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s11, hst10, hrun⟩ := wethRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s11, hst10, hrun⟩ := evmRun_succ_step callFuel N s10 _ _ _ hd10 (by decide) hrun
   have h10 : EVM.step (callFuel + 1) 0 (decode s10.executionEnv.code s10.pc) s10 = .ok s11 := by
     rw [hd10]; exact hst10
   obtain ⟨h11pc, h11stk, h11ee, _⟩ :=
@@ -1450,8 +1337,8 @@ theorem weth_withdraw_run_impl
   have hd11 : decode s11.executionEnv.code s11.pc = some (.Push .PUSH2, some (withdrawLbl, 2)) := by
     rw [hc11, hp11]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s12, hst11, hrun⟩ := wethRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s12, hst11, hrun⟩ := evmRun_succ_step callFuel N s11 _ _ _ hd11 (by decide) hrun
   have h11 : EVM.step (callFuel + 1) 0 (decode s11.executionEnv.code s11.pc) s11 = .ok s12 := by
     rw [hd11]; exact hst11
   obtain ⟨h12pc, _, h12ee, _⟩ :=
@@ -1461,8 +1348,8 @@ theorem weth_withdraw_run_impl
   have hd12 : decode s12.executionEnv.code s12.pc = some (.JUMPI, none) := by
     rw [hc12, hp12]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s13, hst12, hrun⟩ := wethRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s13, hst12, hrun⟩ := evmRun_succ_step callFuel N s12 _ _ _ hd12 (by decide) hrun
   have h12 : EVM.step (callFuel + 1) 0 (decode s12.executionEnv.code s12.pc) s12 = .ok s13 := by
     rw [hd12]; exact hst12
   obtain ⟨h13pc, h13stk, h13ee, h13am⟩ :=
@@ -1488,8 +1375,8 @@ theorem weth_withdraw_run_impl
   have hd13d : decode s13.executionEnv.code s13.pc = some (.JUMPDEST, none) := by
     rw [hc13, h13pc]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s14, hst13, hrun⟩ := wethRun_succ_step callFuel N s13 _ _ _ hd13d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s14, hst13, hrun⟩ := evmRun_succ_step callFuel N s13 _ _ _ hd13d (by decide) hrun
   have h13' : EVM.step (callFuel + 1) 0 (decode s13.executionEnv.code s13.pc) s13 = .ok s14 := by
     rw [hd13d]; exact hst13
   obtain ⟨h14pc, h14stk, h14ee, _⟩ := step_JUMPDEST_shape_strong s13 s14 callFuel 0 none hst13
@@ -1500,8 +1387,8 @@ theorem weth_withdraw_run_impl
   have hd14d : decode s14.executionEnv.code s14.pc = some (.Push .PUSH1, some (UInt256.ofNat 4, 1)) := by
     rw [hc14, hp14]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s15, hst14, hrun⟩ := wethRun_succ_step callFuel N s14 _ _ _ hd14d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s15, hst14, hrun⟩ := evmRun_succ_step callFuel N s14 _ _ _ hd14d (by decide) hrun
   have h14' : EVM.step (callFuel + 1) 0 (decode s14.executionEnv.code s14.pc) s14 = .ok s15 := by
     rw [hd14d]; exact hst14
   obtain ⟨h15pc, h15stk, h15ee, _⟩ := step_PUSH1_shape_strong s14 s15 callFuel 0 (UInt256.ofNat 4) hst14
@@ -1512,8 +1399,8 @@ theorem weth_withdraw_run_impl
   have hd15d : decode s15.executionEnv.code s15.pc = some (.CALLDATALOAD, none) := by
     rw [hc15, hp15]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s16, hst15, hrun⟩ := wethRun_succ_step callFuel N s15 _ _ _ hd15d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s16, hst15, hrun⟩ := evmRun_succ_step callFuel N s15 _ _ _ hd15d (by decide) hrun
   have h15' : EVM.step (callFuel + 1) 0 (decode s15.executionEnv.code s15.pc) s15 = .ok s16 := by
     rw [hd15d]; exact hst15
   obtain ⟨h16pc, h16stk, h16ee, _⟩ :=
@@ -1526,8 +1413,8 @@ theorem weth_withdraw_run_impl
   have hd16d : decode s16.executionEnv.code s16.pc = some (.CALLER, none) := by
     rw [hc16, hp16]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s17, hst16, hrun⟩ := wethRun_succ_step callFuel N s16 _ _ _ hd16d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s17, hst16, hrun⟩ := evmRun_succ_step callFuel N s16 _ _ _ hd16d (by decide) hrun
   have h16'' : EVM.step (callFuel + 1) 0 (decode s16.executionEnv.code s16.pc) s16 = .ok s17 := by
     rw [hd16d]; exact hst16
   obtain ⟨h17pc, h17stk, h17ee, _⟩ := step_CALLER_value s16 s17 callFuel 0 none hst16
@@ -1539,8 +1426,8 @@ theorem weth_withdraw_run_impl
   have hd17d : decode s17.executionEnv.code s17.pc = some (.DUP1, none) := by
     rw [hc17, hp17]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s18, hst17, hrun⟩ := wethRun_succ_step callFuel N s17 _ _ _ hd17d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s18, hst17, hrun⟩ := evmRun_succ_step callFuel N s17 _ _ _ hd17d (by decide) hrun
   have h17' : EVM.step (callFuel + 1) 0 (decode s17.executionEnv.code s17.pc) s17 = .ok s18 := by
     rw [hd17d]; exact hst17
   obtain ⟨h18pc, h18stk, h18ee, _⟩ :=
@@ -1554,8 +1441,8 @@ theorem weth_withdraw_run_impl
   have hd18d : decode s18.executionEnv.code s18.pc = some (.SLOAD, none) := by
     rw [hc18, hp18]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s19, hst18, hrun⟩ := wethRun_succ_step callFuel N s18 _ _ _ hd18d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s19, hst18, hrun⟩ := evmRun_succ_step callFuel N s18 _ _ _ hd18d (by decide) hrun
   have h18' : EVM.step (callFuel + 1) 0 (decode s18.executionEnv.code s18.pc) s18 = .ok s19 := by
     rw [hd18d]; exact hst18
   obtain ⟨h19pc, h19stk, h19ee, _⟩ :=
@@ -1567,8 +1454,8 @@ theorem weth_withdraw_run_impl
   have hd19d : decode s19.executionEnv.code s19.pc = some (.DUP3, none) := by
     rw [hc19, hp19]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s20, hst19, hrun⟩ := wethRun_succ_step callFuel N s19 _ _ _ hd19d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s20, hst19, hrun⟩ := evmRun_succ_step callFuel N s19 _ _ _ hd19d (by decide) hrun
   have h19' : EVM.step (callFuel + 1) 0 (decode s19.executionEnv.code s19.pc) s19 = .ok s20 := by
     rw [hd19d]; exact hst19
   obtain ⟨h20pc, h20stk, h20ee, _⟩ :=
@@ -1580,8 +1467,8 @@ theorem weth_withdraw_run_impl
   have hd20d : decode s20.executionEnv.code s20.pc = some (.DUP2, none) := by
     rw [hc20, hp20]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s21, hst20, hrun⟩ := wethRun_succ_step callFuel N s20 _ _ _ hd20d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s21, hst20, hrun⟩ := evmRun_succ_step callFuel N s20 _ _ _ hd20d (by decide) hrun
   have h20' : EVM.step (callFuel + 1) 0 (decode s20.executionEnv.code s20.pc) s20 = .ok s21 := by
     rw [hd20d]; exact hst20
   obtain ⟨h21pc, h21stk, h21ee, _⟩ :=
@@ -1593,8 +1480,8 @@ theorem weth_withdraw_run_impl
   have hd21d : decode s21.executionEnv.code s21.pc = some (.LT, none) := by
     rw [hc21, hp21]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s22, hst21, hrun⟩ := wethRun_succ_step callFuel N s21 _ _ _ hd21d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s22, hst21, hrun⟩ := evmRun_succ_step callFuel N s21 _ _ _ hd21d (by decide) hrun
   have h21' : EVM.step (callFuel + 1) 0 (decode s21.executionEnv.code s21.pc) s21 = .ok s22 := by
     rw [hd21d]; exact hst21
   obtain ⟨h22pc, h22stk, h22ee, _⟩ :=
@@ -1605,8 +1492,8 @@ theorem weth_withdraw_run_impl
   have hd22d : decode s22.executionEnv.code s22.pc = some (.Push .PUSH2, some (revertLbl, 2)) := by
     rw [hc22, hp22]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s23, hst22, hrun⟩ := wethRun_succ_step callFuel N s22 _ _ _ hd22d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s23, hst22, hrun⟩ := evmRun_succ_step callFuel N s22 _ _ _ hd22d (by decide) hrun
   have h22' : EVM.step (callFuel + 1) 0 (decode s22.executionEnv.code s22.pc) s22 = .ok s23 := by
     rw [hd22d]; exact hst22
   obtain ⟨h23pc, h23stk, h23ee, _⟩ :=
@@ -1641,8 +1528,8 @@ theorem weth_withdraw_run_impl
   have hd23d : decode s23.executionEnv.code s23.pc = some (.JUMPI, none) := by
     rw [hc23, hp23]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s24, hst23, hrun⟩ := wethRun_succ_step callFuel N s23 _ _ _ hd23d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s24, hst23, hrun⟩ := evmRun_succ_step callFuel N s23 _ _ _ hd23d (by decide) hrun
   have h23' : EVM.step (callFuel + 1) 0 (decode s23.executionEnv.code s23.pc) s23 = .ok s24 := by
     rw [hd23d]; exact hst23
   obtain ⟨h24pc, h24stk, h24ee, _⟩ :=
@@ -1655,8 +1542,8 @@ theorem weth_withdraw_run_impl
   have hd24d : decode s24.executionEnv.code s24.pc = some (.DUP3, none) := by
     rw [hc24, hp24]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s25, hst24, hrun⟩ := wethRun_succ_step callFuel N s24 _ _ _ hd24d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s25, hst24, hrun⟩ := evmRun_succ_step callFuel N s24 _ _ _ hd24d (by decide) hrun
   have h24' : EVM.step (callFuel + 1) 0 (decode s24.executionEnv.code s24.pc) s24 = .ok s25 := by
     rw [hd24d]; exact hst24
   obtain ⟨h25pc, h25stk, h25ee, _⟩ :=
@@ -1668,8 +1555,8 @@ theorem weth_withdraw_run_impl
   have hd25d : decode s25.executionEnv.code s25.pc = some (.SWAP1, none) := by
     rw [hc25, hp25]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s26, hst25, hrun⟩ := wethRun_succ_step callFuel N s25 _ _ _ hd25d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s26, hst25, hrun⟩ := evmRun_succ_step callFuel N s25 _ _ _ hd25d (by decide) hrun
   have h25' : EVM.step (callFuel + 1) 0 (decode s25.executionEnv.code s25.pc) s25 = .ok s26 := by
     rw [hd25d]; exact hst25
   obtain ⟨h26pc, h26stk, h26ee, _⟩ :=
@@ -1680,8 +1567,8 @@ theorem weth_withdraw_run_impl
   have hd26d : decode s26.executionEnv.code s26.pc = some (.SUB, none) := by
     rw [hc26, hp26]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s27, hst26, hrun⟩ := wethRun_succ_step callFuel N s26 _ _ _ hd26d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s27, hst26, hrun⟩ := evmRun_succ_step callFuel N s26 _ _ _ hd26d (by decide) hrun
   have h26' : EVM.step (callFuel + 1) 0 (decode s26.executionEnv.code s26.pc) s26 = .ok s27 := by
     rw [hd26d]; exact hst26
   obtain ⟨h27pc, h27stk, h27ee, _⟩ :=
@@ -1692,8 +1579,8 @@ theorem weth_withdraw_run_impl
   have hd27d : decode s27.executionEnv.code s27.pc = some (.SWAP1, none) := by
     rw [hc27, hp27]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s28, hst27, hrun⟩ := wethRun_succ_step callFuel N s27 _ _ _ hd27d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s28, hst27, hrun⟩ := evmRun_succ_step callFuel N s27 _ _ _ hd27d (by decide) hrun
   have h27' : EVM.step (callFuel + 1) 0 (decode s27.executionEnv.code s27.pc) s27 = .ok s28 := by
     rw [hd27d]; exact hst27
   obtain ⟨h28pc, h28stk, h28ee, _⟩ :=
@@ -1704,8 +1591,8 @@ theorem weth_withdraw_run_impl
   have hd28d : decode s28.executionEnv.code s28.pc = some (.SSTORE, none) := by
     rw [hc28, hp28]; native_decide
   obtain _ | N := N
-  · simp [wethRun] at hrun
-  obtain ⟨s29, hst28, hrun⟩ := wethRun_succ_step callFuel N s28 _ _ _ hd28d (by decide) hrun
+  · simp [evmRun] at hrun
+  obtain ⟨s29, hst28, hrun⟩ := evmRun_succ_step callFuel N s28 _ _ _ hd28d (by decide) hrun
   have h28' : EVM.step (callFuel + 1) 0 (decode s28.executionEnv.code s28.pc) s28 = .ok s29 := by
     rw [hd28d]; exact hst28
   obtain ⟨h29pc, h29stk, h29ee⟩ :=
@@ -1723,7 +1610,7 @@ theorem weth_withdraw_run_impl
   -- s29.stack = [xV]
   have h29stk' : s29.stack = [xV] := h29stk
   -- ===== run the tail through the CALL to the halt =====
-  exact wethRun_withdraw_tail s29 callFuel N res C (msgSender s0) xV
+  exact weth_withdraw_tail s29 callFuel N res C (msgSender s0) xV
     (UInt256.sub (recordedBalance s0.accountMap C (msgSender s0)) (withdrawArg s0))
     hc29 hp29 h29stk' hrb29 hcallKeep hrun
 

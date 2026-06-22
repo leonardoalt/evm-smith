@@ -1,33 +1,29 @@
 import EvmSmith.Demos.Weth.Behaviour
+import EvmSmith.Spec.Dsl
 
 /-!
-# WETH — a tiny spec eDSL
+# WETH-specific spec vocabulary
 
-Vocabulary that lets the behavioural guarantees in `Spec.lean` read like a
-Solidity-style pre/post spec (`balance[msg.sender]`, `old …`, `after run:`,
-`untouched (others)`, `returndata = empty`). Every piece here is a thin
-`def`/`notation`; the readable theorems prove by delegation to the
-`weth_*_run_impl` engine in `Behaviour.lean`, so Lean checks that the
-pretty statement *is* the proven one.
+The WETH layer on top of the contract-agnostic `EvmSmith/Spec/Dsl.lean`
+(which provides `evmRun`/`Halts`/`ensures`/`sender`/`value`/`returndata`/
+`storage`, the transaction plumbing `ExecContext`/`runTx`/`afterTx`, and
+`ethBalance`). Here live only the pieces that mention WETH: its entry
+points, its `balance[·]` ledger (the address-as-slot layout), its ABI
+argument `amount`, the token-solvency property, and the no-reentrancy
+assumption. Each readable theorem in `Spec.lean` proves by delegation to
+the `weth_*_run_impl` engine in `Behaviour.lean`.
 -/
 
 namespace EvmSmith.Weth
 
-open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1
+open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Layer1 EvmSmith.Spec
 
 /-! ## Entry points -/
 
-/-- The contract's two ABI entry points, plus the catch-all for any other
+/-- WETH's two ABI entry points, plus the catch-all for any other
 selector. -/
 inductive Entry | deposit | withdraw | unknown
 deriving DecidableEq
-
-/-! ## Running the contract (fuel hidden)
-
-`Halts s s' o` : running WETH's gas-free interpreter from `s` reaches a
-halt at `s'`, returning `o`. The interpreter fuel is existentially hidden. -/
-def Halts (s s' : EVM.State) (o : ByteArray) : Prop :=
-  ∃ callFuel N, wethRun callFuel N s = some (s', o)
 
 /-! ## "This is a call to f"
 
@@ -48,77 +44,53 @@ def Calls (e : Entry) (s : EVM.State) : Prop :=
 /-! ## The no-reentrancy assumption
 
 `NoReentrancy s` : the external `CALL` does not reenter to change the
-caller's recorded balance at this contract (the codeless-recipient
-assumption `withdraw` needs end-to-end). Quantified over all interpreter
-fuels so the statement need not mention fuel. -/
+caller's recorded balance at this contract.
+
+This is an **assumption**, not a theorem — and it is *not* what makes WETH
+safe. WETH's *solvency* (`weth_is_always_solvent`) is proven
+**unconditionally**, against arbitrary reentering recipients: the `SSTORE`
+runs before the `CALL` (checks-effects-interactions), so a reentrant
+`withdraw` sees the already-decremented balance and the `LT` gate blocks
+over-withdrawal. `NoReentrancy` is needed only for `withdraw`'s *exact*
+end-balance (`balance = old − amount`): a reentering recipient could call
+`deposit` during the callback and change the final figure, so the precise
+delta — unlike solvency — is conditional. It holds vacuously for a
+codeless (EOA) recipient. Quantified over all interpreter fuels so the
+statement need not mention fuel. -/
 def NoReentrancy (s : EVM.State) : Prop :=
   ∀ callFuel (sa sb : EVM.State),
     EVM.step (callFuel + 1) 0 (some (.CALL, none)) sa = .ok sb →
     recordedBalance sb.accountMap s.executionEnv.codeOwner s.executionEnv.source
       = recordedBalance sa.accountMap s.executionEnv.codeOwner s.executionEnv.source
 
-/-! ## Bridge lemmas
-
-Each accessor below is *definitionally* its `Behaviour.lean` counterpart;
-these `rfl` lemmas make that explicit (and let the readable proofs rewrite
-between the two views). -/
-
+/-- `Calls .deposit s` unfolded — the explicit entry conditions. -/
 theorem calls_deposit_iff (s : EVM.State) :
     Calls .deposit s ↔
       (s.executionEnv.code = wethBytecode ∧ s.pc = UInt256.ofNat 0 ∧ s.stack = []
        ∧ (∃ acc, s.accountMap.find? s.executionEnv.codeOwner = some acc)
        ∧ functionSelector s.executionEnv.calldata = depositSelector) := Iff.rfl
 
-theorem halts_iff (s s' : EVM.State) (o : ByteArray) :
-    Halts s s' o ↔ ∃ callFuel N, wethRun callFuel N s = some (s', o) := Iff.rfl
+/-! ## WETH-specific surface notation
 
-/-! ## Solidity-style surface notation
-
-The notations below are bound, by convention, to a pre-state `s`, a
-post-state `s'`, and return data `o`. `ensures BODY` is the postcondition
-of running the contract: it introduces `s'`/`o` and the run, and inside
-`BODY` bare `balance[a]` reads the post-state, `old balance[a]` the
-pre-state (both at the call's own contract). `sender`/`value`/`amount` are
-the call's `msg.sender` / `msg.value` / decoded `uint256` argument. -/
+On top of the generic `sender`/`value`/`returndata`/`storage`: the token
+`balance[a]` ledger (post-state by default, `old balance[a]` for the
+pre-state, both at the call's own contract) and the ABI `amount`. -/
 
 set_option hygiene false in
 section
-notation "sender" => s.executionEnv.source
-notation "value"  => s.executionEnv.weiValue
 notation "amount" => EvmYul.State.calldataload s.toState (UInt256.ofNat 4)
 notation:max "balance" "[" a "]"        => recordedBalance s'.accountMap s.executionEnv.codeOwner a
 notation:max "old" "balance" "[" a "]"  => recordedBalance s.accountMap s.executionEnv.codeOwner a
-notation "returndata" => o
-notation "empty"      => ByteArray.empty
-notation "storage"     => s'.accountMap
-notation "old" "storage" => s.accountMap
 notation "untouched" "(" "others" ")" =>
   (∀ b, b ≠ s.executionEnv.source →
     recordedBalance s'.accountMap s.executionEnv.codeOwner b
       = recordedBalance s.accountMap s.executionEnv.codeOwner b)
-
-macro "ensures " body:term : term =>
-  `(∀ {s' : EvmYul.EVM.State} {o : ByteArray}, Halts s s' o → $body)
 end
 
-/-- Faithful 256-bit addition is commutative (for the idiomatic
-`balance += value` reading in the deposit spec). -/
-theorem uint256_add_comm (a b : UInt256) : a + b = b + a := by
-  show UInt256.add a b = UInt256.add b a
-  unfold UInt256.add
-  congr 1
-  apply Fin.ext
-  rw [Fin.val_add, Fin.val_add, Nat.add_comm]
+/-! ## Token-solvency vocabulary
 
-/-! ## Solvency vocabulary
-
-The `≤`-style solvency property and the transaction wrappers behind
-`weth_is_always_solvent`. Readable `ℕ`-valued wrappers, *definitionally*
-equal to the proof-side predicates (the `*_iff_*` bridges witness it). -/
-
-/-- WETH's actual on-chain ETH balance (in wei) at `weth`. Unknown ⇒ `0`. -/
-def ethBalance (σ : AccountMap .EVM) (weth : Address) : ℕ :=
-  balanceOf σ weth
+The `≤`-style solvency property behind `weth_is_always_solvent`. Readable
+`ℕ`-valued wrappers, *definitionally* equal to the proof-side predicates. -/
 
 /-- User `user`'s WETH token balance *recorded in storage* (in wei). -/
 def tokenBalanceOf (σ : AccountMap .EVM) (weth user : Address) : ℕ :=
@@ -142,27 +114,11 @@ theorem solvent_iff_wethInv (σ : AccountMap .EVM) (weth : Address) :
 theorem solvent_iff_storageSumLeBalance (σ : AccountMap .EVM) (weth : Address) :
     Solvent σ weth ↔ StorageSumLeBalance σ weth := Iff.rfl
 
-/-- The ambient chain/block plumbing `EVM.Υ` needs besides the pre-state
-and the transaction. -/
-structure ExecContext where
-  fuel    : ℕ
-  baseFee : ℕ
-  block   : BlockHeader
-  genesis : BlockHeader
-  history : ProcessedBlocks
-
-/-- Run one transaction `tx` (sender `S_T`) on `σ` in context `ctx`. Thin
-wrapper over `EVM.Υ`; returns `.ok` post-state or `.error`. -/
-def runTx (ctx : ExecContext) (σ : AccountMap .EVM)
-    (tx : Transaction) (S_T : Address) :=
-  EVM.Υ ctx.fuel σ ctx.baseFee ctx.block ctx.genesis ctx.history tx S_T
-
-/-- WETH is solvent after running `tx` (vacuous if the tx reverts). -/
+/-- WETH is solvent after running `tx` (vacuous if the tx reverts). The
+WETH instance of the generic `afterTx`. -/
 def SolventAfter (ctx : ExecContext) (σ : AccountMap .EVM)
     (tx : Transaction) (S_T weth : Address) : Prop :=
-  match runTx ctx σ tx S_T with
-  | .ok (σ', _, _, _) => Solvent σ' weth
-  | .error _ => True
+  afterTx ctx σ tx S_T (fun σ' => Solvent σ' weth)
 
 /-- The deployment / chain-state bundle the solvency guarantee is
 conditional on (exactly the proof-side `WethAssumptions`). -/
