@@ -72,6 +72,27 @@ theorem withdraw (s : EVM.State) (call : Calls .withdraw s)
   exact weth_withdraw_run_impl s callFuel N (s', o) s.executionEnv.codeOwner acc
     hcode hpc0 hstk0 hsel rfl hfind hle (fun sa sb h => noReentry callFuel sa sb h) hrun
 
+/-- **A withdraw debits the caller by `x` at its own write — unconditionally.**
+By the time withdraw makes its external `CALL`, it has already decremented
+the caller's recorded balance by exactly `amount` (checks-effects-
+interactions: the write happens before the call). This needs *no*
+no-reentrancy assumption — it is the contract's own effect, before any
+external code runs. (What the recipient then does to the final balance is
+governed compositionally + by `weth_is_always_solvent`.) -/
+theorem withdraw_debits (s : EVM.State) (call : Calls .withdraw s)
+    (funded : amount ≤ old balance[sender]) :
+    before_call:
+      balance[sender] = old balance[sender] - amount := by
+  obtain ⟨hcode, hpc0, hstk0, ⟨acc, hfind⟩, hsel⟩ := call
+  intro s' ⟨callFuel, N, hrun⟩
+  have hle : (withdrawArg s).toNat
+      ≤ (acc.lookupStorage (tokenBalanceSlot s.executionEnv.source)).toNat := by
+    rw [recordedBalance_of_find s.accountMap s.executionEnv.codeOwner
+          s.executionEnv.source acc hfind] at funded
+    exact funded
+  exact weth_withdraw_to_call_impl s callFuel N s' s.executionEnv.codeOwner acc
+    hcode hpc0 hstk0 hsel rfl hfind hle hrun
+
 /-- **An unknown selector changes nothing** (reverts; no fallback/receive). -/
 theorem fallback (s : EVM.State) (call : Calls .unknown s) :
     ensures

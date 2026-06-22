@@ -141,6 +141,65 @@ at `s'`, returning `o`. The interpreter fuel is existentially hidden. -/
 def Halts (s s' : EVM.State) (o : ByteArray) : Prop :=
   ∃ callFuel N, evmRun callFuel N s = some (s', o)
 
+/-! ## Running up to the first external call
+
+`evmRunToCall` is like `evmRun` but stops *just before* the contract
+executes its first `CALL`, returning that pre-call state — the point at
+which the contract's own effects are done but it has not yet handed
+control to anyone. `ReachesCall s s'` : that point is `s'`. -/
+
+/-- Is this the external-call opcode? -/
+def isCallOp : Operation .EVM → Bool
+  | .CALL => true
+  | _ => false
+
+/-- Run gas-free from `s` until just before the first `CALL`, returning
+that pre-call state (or `none` if it halts first / runs out of fuel). -/
+def evmRunToCall (callFuel : ℕ) : ℕ → EVM.State → Option EVM.State
+  | 0, _ => none
+  | n + 1, s =>
+    match decode s.executionEnv.code s.pc with
+    | none => none
+    | some (op, arg) =>
+      if isCallOp op then some s
+      else if isHaltOp op then none
+      else
+        match EVM.step (callFuel + 1) 0 (some (op, arg)) s with
+        | .ok s' => evmRunToCall callFuel n s'
+        | .error _ => none
+
+/-- One non-call, non-halt `evmRunToCall` step. -/
+theorem evmRunToCall_succ_step
+    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (res : EVM.State)
+    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
+    (hnc : isCallOp op = false) (hnh : isHaltOp op = false)
+    (hrun : evmRunToCall callFuel (n + 1) s = some res) :
+    ∃ s1, EVM.step (callFuel + 1) 0 (some (op, arg)) s = .ok s1
+        ∧ evmRunToCall callFuel n s1 = some res := by
+  rw [evmRunToCall, hdec] at hrun
+  simp only [hnc, hnh] at hrun
+  cases hstep : EVM.step (callFuel + 1) 0 (some (op, arg)) s with
+  | error e => rw [hstep] at hrun; simp at hrun
+  | ok s1 => rw [hstep] at hrun; exact ⟨s1, rfl, hrun⟩
+
+/-- At the `CALL`, `evmRunToCall` returns the (pre-call) current state. -/
+theorem evmRunToCall_at_call
+    (callFuel n : ℕ) (s : EVM.State) (op : Operation .EVM) (arg : Option (UInt256 × Nat))
+    (res : EVM.State)
+    (hdec : decode s.executionEnv.code s.pc = some (op, arg))
+    (hc : isCallOp op = true)
+    (hrun : evmRunToCall callFuel (n + 1) s = some res) :
+    res = s := by
+  rw [evmRunToCall, hdec] at hrun
+  simp only [hc, if_true] at hrun
+  exact (Option.some.inj hrun).symm
+
+/-- The contract reaches the point just before its first external `CALL`,
+in state `s'`. -/
+def ReachesCall (s s' : EVM.State) : Prop :=
+  ∃ callFuel N, evmRunToCall callFuel N s = some s'
+
 /-! ## Solidity-style surface notation
 
 Bound, by convention, to a pre-state `s`, a post-state `s'`, and return
@@ -159,6 +218,9 @@ notation "old" "storage"  => s.accountMap
 
 macro "ensures " body:term : term =>
   `(∀ {s' : EvmYul.EVM.State} {o : ByteArray}, EvmSmith.Spec.Halts s s' o → $body)
+
+macro "before_call" ":" body:term : term =>
+  `(∀ {s' : EvmYul.EVM.State}, EvmSmith.Spec.ReachesCall s s' → $body)
 end
 
 /-! ## Transaction-level plumbing -/
