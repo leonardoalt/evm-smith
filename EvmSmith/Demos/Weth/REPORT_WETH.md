@@ -1,18 +1,41 @@
-# WETH solvency proof — what's proved, what's assumed
+# WETH — what's proved, what's assumed
 
-This report documents the WETH solvency proof, its main theorems and
-lemmas, and the remaining structural assumptions.
+This report documents the WETH verification on two axes: the
+**behavioural spec** (what `deposit` / `withdraw` / the fallback do, as
+machine-checked big-step guarantees stated in a small Solidity-style
+eDSL) and the **solvency proof** (the global invariant preserved across
+any transaction), together with the remaining structural assumptions.
+
+The solvency material is the bulk of this report and comes first; the
+behavioural specification and the spec eDSL are documented in their own
+section ("Behavioural specification").
 
 ## Files of interest
 
 All paths are relative to the `evm-smith` repository root.
 
-- `EvmSmith/Demos/Weth/Spec.lean` — **the human-readable spec**, and the
-  recommended entry point for auditors. Plain-English vocabulary
-  (`ethBalance`, `recordedTokenSupply`, `Solvent`), the assumption
-  bundle, and the headline theorem `weth_is_always_solvent`, all stated
-  without proof machinery. `rfl` bridge lemmas tie the spec names to the
-  proven predicates; the headline theorem is proved by the engine below.
+- `EvmSmith/Demos/Weth/Spec.lean` — **the spec, as an interface**, and the
+  recommended entry point for auditors. A single `structure WethSpec`
+  whose fields are WETH's guarantees (the four entry-point behaviours +
+  `solvent`), each a short pre/post statement and **no proofs**, plus the
+  two `rfl` ABI-decoding bridges. The vocabulary it reads in
+  (`balance[·]`, `sender`, `ensures`, `Calls`, `Solvent`, …) lives in the
+  eDSL files below.
+- `EvmSmith/Demos/Weth/SpecProofs.lean` — the **witness** `weth_spec :
+  WethSpec`: one named theorem per guarantee (so each gets its own editor
+  checkmark), each a one-line delegation into the engine.
+- `EvmSmith/Spec/Dsl.lean` — the **contract-agnostic spec eDSL**: the
+  gas-free interpreter `evmRun` / `evmRunToCall`, `Halts`, the `ensures`
+  and `before_call` macros and the run accessors (`sender`, `value`,
+  `returndata`, `storage`), plus the transaction plumbing (`ExecContext`,
+  `runTx`, `afterTx`) and `ethBalance`.
+- `EvmSmith/Demos/Weth/SpecDSL.lean` — the **WETH-specific eDSL**: `Entry`,
+  `Calls`, the `balance[·]` ledger, `amount`, `untouched (others)`,
+  `NoReentrancy`, and the token-solvency vocabulary (`Solvent`,
+  `tokenBalanceOf`, `recordedTokenSupply`, the `rfl` bridges).
+- `EvmSmith/Demos/Weth/Behaviour.lean` — the **behavioural engine**: the
+  storage-readback lemmas, the bytecode-walking routing / `*_from_call`
+  theorems, and the big-step `weth_*_run_impl` proofs.
 - `EvmSmith/Demos/Weth/Program.lean` — WETH bytecode + decode lemmas.
 - `EvmSmith/Demos/Weth/Invariant.lean` — `WethInv` predicate.
 - `EvmSmith/Demos/Weth/BytecodeFrame.lean` — trace/walks/cascade machinery.
@@ -51,6 +74,150 @@ Safety design:
   supply.
 
 Total bytecode: 86 bytes.
+
+## Behavioural specification: functions as big-steps + a spec eDSL
+
+Solvency (below) is a *global* invariant. Separately we give a
+*behavioural* spec: what each entry point actually does to the state,
+stated so a smart-contract developer can read it without any Lean-proof
+machinery, and proven against the same 86 bytes.
+
+### The interface (`Spec.lean`)
+
+`Spec.lean` is a single structure whose fields *are* the guarantees:
+
+```lean
+structure WethSpec where
+  deposit : ∀ (s : EVM.State), Calls .deposit s →
+    ensures
+      balance[sender] = old balance[sender] + value
+    ∧ untouched (others)
+    ∧ returndata = empty
+  withdraw_debits : ∀ (s : EVM.State), Calls .withdraw s →
+    amount ≤ old balance[sender] →
+    before_call:
+      balance[sender] = old balance[sender] - amount
+  withdraw : ∀ (s : EVM.State), Calls .withdraw s →
+    amount ≤ old balance[sender] → NoReentrancy s →
+    ensures
+      balance[sender] = old balance[sender] - amount
+  fallback : ∀ (s : EVM.State), Calls .unknown s →
+    ensures storage = old storage
+  solvent : ∀ (ctx : ExecContext) (σ : AccountMap .EVM)
+      (tx : Transaction) (S_T weth : Address), …
+      SolventAfter ctx σ tx S_T weth
+```
+
+No proofs appear here. The witness that WETH's bytecode satisfies every
+field is `weth_spec : WethSpec` in `SpecProofs.lean`, where each field is
+a named theorem (its own checkmark) discharged by one delegation line.
+Because `weth_spec` assigns each `weth_*` theorem to the matching field,
+Lean forces the field type and the theorem to agree — the readable
+statement cannot drift from what is proven.
+
+### The eDSL
+
+The readable surface is a thin notation layer, split into a
+contract-agnostic part (`EvmSmith/Spec/Dsl.lean`) and a WETH part
+(`SpecDSL.lean`):
+
+- `Calls e s` bundles the genuine call-entry conditions: pc 0, empty
+  stack, WETH's code installed, the account present, and the ABI selector
+  equal to `e`'s.
+- `ensures Q` is the postcondition of running the contract to its halt.
+  It desugars to `∀ {s' o}, Halts s s' o → Q`, where `Halts s s' o` hides
+  the interpreter fuel behind `∃ callFuel N, evmRun callFuel N s = some
+  (s', o)`.
+- inside `Q`, `balance[a]` reads the *post*-state ledger and `old
+  balance[a]` the *pre*-state (both at the call's own contract); `sender`
+  / `value` / `amount` are `msg.sender` / `msg.value` / the decoded
+  argument; `untouched (others)` is the frame condition (every balance
+  but the caller's unchanged); `returndata` / `storage` name the run's
+  output and post-state account map.
+- `before_call: Q` is the same idea at the point of the outbound `CALL`
+  (`∀ {s'}, ReachesCall s s' → Q`).
+
+These are ordinary `def`s plus a handful of `notation`s and two `macro`s.
+The `s`/`s'`/`o` names are captured by convention (`set_option hygiene
+false`), which is the one bit of notation magic; everything else is
+standard Lean. Auditing or changing the surface means reading ~150 lines
+of definitions, not proof terms.
+
+### The gas-free interpreter
+
+`Halts` / `ReachesCall` run the contract through `evmRun` / `evmRunToCall`:
+iterate the real `EVM.step`, decoding each instruction from the
+contract's own code at the current pc, until a halt (resp. until just
+before the first `CALL`). This is the EVM's frame loop `EVM.X` **with gas
+ignored** (`gasCost = 0`, ample step fuel) — the single modelling
+assumption of the behavioural layer. Every opcode's effect is the real
+semantics; only gas accounting and fuel-bounded halt detection are
+abstracted. (The genuine `EVM.X` form additionally needs the framework's
+gas/halt fuel-induction, an open obligation in `XFrame.lean`.)
+
+### The big-step proofs
+
+Each `weth_*_run_impl` (in `Behaviour.lean`) extracts the per-instruction
+`EVM.step` facts from a single `evmRun … = some (s', o)` hypothesis,
+threading the pc and stack through the dispatch and the function body
+(~15–40 steps), then feeds them to the routing / `*_from_call` delta
+theorems already used by the solvency walk. So one hypothesis ("the
+contract ran to halt") yields the entire state delta and the return data,
+with the instruction chain hidden inside the proof.
+
+### Reentrancy: what is conditional, what is not
+
+`withdraw` writes its decrement *before* the external `CALL`
+(checks-effects-interactions), which is exactly why three different
+statements hold with different strength:
+
+- `withdraw_debits` (**unconditional**): by the time withdraw makes its
+  `CALL`, the caller is already debited by exactly `x`. No reentrancy
+  hypothesis — this is the contract's own effect, before any external
+  code runs.
+- `solvent` (**unconditional**, below): the contract stays
+  collateralised even against arbitrary reentering recipients — a
+  reentrant `withdraw` sees the already-decremented balance and the `LT`
+  gate blocks over-withdrawal.
+- `withdraw` (**conditional**): the *exact end-balance* `old − x` after
+  the whole run needs `NoReentrancy s`. A recipient that reenters and
+  deposits/withdraws would change the final figure, so the precise
+  number is conditional. `NoReentrancy s` says the `CALL` step does not
+  change the caller's recorded balance; it holds vacuously for a codeless
+  (EOA) recipient and guards only this exact figure, never safety.
+
+### ABI decoding: closing the gap to the compiler
+
+`Calls .f` matches on `functionSelector calldata`, and `amount` is
+`withdrawArg`. Two `rfl` bridges (in `Spec.lean`) pin these to the exact
+EVM operations the Solidity compiler emits for ABI dispatch and decoding:
+
+```lean
+theorem selector_is_abi (s) :
+    functionSelector s.executionEnv.calldata
+      = UInt256.shiftRight (calldataload s 0) (UInt256.ofNat 0xe0)   -- shr(224, calldataload(0))
+
+theorem withdraw_arg_is_abi (s) :
+    withdrawArg s = calldataload s (UInt256.ofNat 4)                 -- calldataload(4)
+```
+
+So the spec's "selector" and "argument" are, by construction, the
+selector extraction (`shr(224, calldataload(0))`) and the `uint256` load
+(`calldataload(4)`) the compiler generates. The remaining abstract
+identity — that `shr(224, ·)` of the first word equals the leading 4
+bytes `calldata[0:4]`, and `calldataload(4)` the slice `calldata[4:36]` —
+is the EVM semantics of `SHR` / `CALLDATALOAD`; we take it as the meaning
+of those opcodes rather than re-deriving it through the byte-array
+primitives (`readBytes` / `copySlice` are opaque).
+
+### Trust / axioms (behavioural layer)
+
+The four behavioural theorems and the `weth_spec` witness depend only on
+the standard axioms (`propext`, `Classical.choice`, `Quot.sound`,
+`Lean.ofReduceBool`); no `sorry`, no contract-specific axiom. What the
+behavioural layer abstracts rather than proves: gas accounting (the
+gas-free interpreter), the `NoReentrancy` assumption on `withdraw`'s exact
+figure, and the abstract ABI byte-identity noted above.
 
 ## The headline invariant
 
