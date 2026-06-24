@@ -47,7 +47,7 @@ structure WethSpec where
   `x` (checks-effects-interactions). No reentrancy assumption: this is the
   contract's own effect, before any external code runs. -/
   withdraw_debits : ∀ (s : EVM.State), Calls .withdraw s →
-    amount ≤ old balance[sender] →
+    requires (amount ≤ old balance[sender]) →
     before_call:
       balance[sender] = old balance[sender] - amount
 
@@ -56,7 +56,8 @@ structure WethSpec where
   balance and that the recipient does not reenter to change balances
   (`NoReentrancy`; needed only for this *exact* figure, not for solvency). -/
   withdraw : ∀ (s : EVM.State), Calls .withdraw s →
-    amount ≤ old balance[sender] → NoReentrancy s →
+    requires (amount ≤ old balance[sender]) →
+    assuming (NoReentrancy s) →
     ensures
       balance[sender] = old balance[sender] - amount
 
