@@ -76,4 +76,36 @@ structure WethSpec where
       TxValid σ S_T tx ctx.block ctx.baseFee → SolvencyAssumptions ctx σ tx S_T weth →
       SolventAfter ctx σ tx S_T weth
 
+/-! ## ABI decoding — correspondence to Solidity's compiler output
+
+The behavioural guarantees above are phrased in terms of `functionSelector`
+(which entry point a call dispatches to) and `withdrawArg`/`amount` (the
+decoded `uint256`). These two `rfl` lemmas pin those notions to the *exact*
+EVM calldata operations the Solidity compiler emits for ABI dispatch and
+decoding — so "the selector" / "the argument" in this spec is, by
+construction, the ABI's, with no gap to what the compiler guarantees.
+
+(The remaining abstract identity — that `shr(224, calldataload(0))` equals
+the leading 4 bytes `calldata[0:4]`, and `calldataload(4)` the slice
+`calldata[4:36]` — is the EVM semantics of `CALLDATALOAD` + `SHR`, i.e. a
+big-endian word's high bytes; we take it as the meaning of those opcodes
+rather than re-deriving it through the byte-array primitives.) -/
+
+/-- **Selector = `shr(224, calldataload(0))`.** The dispatched function
+selector is the high 4 bytes of the first calldata word — exactly the
+`msg.sig` extraction the Solidity compiler emits in its dispatcher
+prologue. -/
+theorem selector_is_abi (s : EVM.State) :
+    functionSelector s.executionEnv.calldata
+      = UInt256.shiftRight
+          (EvmYul.State.calldataload s.toState (UInt256.ofNat 0)) (UInt256.ofNat 0xe0) :=
+  rfl
+
+/-- **Argument = `calldataload(4)`.** `withdraw`'s `uint256` argument is the
+calldata word at offset 4 (`calldata[4:36]`) — exactly the argument load
+the Solidity compiler emits for the first `uint256` parameter. -/
+theorem withdraw_arg_is_abi (s : EVM.State) :
+    withdrawArg s = EvmYul.State.calldataload s.toState (UInt256.ofNat 4) :=
+  rfl
+
 end EvmSmith.Weth
