@@ -41,6 +41,7 @@ structure WethSpec where
       balance[sender] = old balance[sender] + value
     ∧ untouched (others)
     ∧ returndata = empty
+
   /-- **`withdraw(x)` — own debit (unconditional).** By the time withdraw
   makes its external `CALL` it has already decremented the caller by exactly
   `x` (checks-effects-interactions). No reentrancy assumption: this is the
@@ -49,6 +50,7 @@ structure WethSpec where
     amount ≤ old balance[sender] →
     before_call:
       balance[sender] = old balance[sender] - amount
+
   /-- **`withdraw(x)` — exact end-balance.** Run to halt *through* the
   external `CALL`, the caller ends debited by exactly `x` — given sufficient
   balance and that the recipient does not reenter to change balances
@@ -57,11 +59,13 @@ structure WethSpec where
     amount ≤ old balance[sender] → NoReentrancy s →
     ensures
       balance[sender] = old balance[sender] - amount
+
   /-- **Unknown selector** reverts, changing no account (no fallback /
   `receive`). -/
   fallback : ∀ (s : EVM.State), Calls .unknown s →
     ensures
       storage = old storage
+
   /-- **Always solvent.** After *any* Ethereum transaction, WETH's recorded
   token supply never exceeds the ETH it holds (or the transaction reverted),
   given a well-formed pre-state, WETH not being the sender/miner, a valid
