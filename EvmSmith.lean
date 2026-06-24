@@ -20,5 +20,6 @@ import EvmSmith.Spec.Dsl
 import EvmSmith.Demos.Weth.Behaviour
 import EvmSmith.Demos.Weth.SpecDSL
 import EvmSmith.Demos.Weth.Spec
+import EvmSmith.Demos.Weth.SpecProofs
 import EvmSmith.Demos.Weth.OptimizedProgram
 import EvmSmith.Demos.Tests
