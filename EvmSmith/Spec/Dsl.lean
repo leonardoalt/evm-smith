@@ -27,17 +27,6 @@ open EvmYul EvmYul.EVM EvmYul.Frame Batteries
 /-- An on-chain account / contract address. -/
 abbrev Address := AccountAddress
 
-/-- Cosmetic label for a contract-enforced precondition (reads like
-Solidity's `require`). Definitionally just `p`, so it adds no logical
-content — it only makes `requires p → …` read as a requirement rather
-than an implication. -/
-abbrev requires (p : Prop) : Prop := p
-
-/-- Cosmetic label for an *external* assumption a guarantee is conditional
-on (something not enforced by the contract, e.g. the recipient not
-reentering). Definitionally just `p`. -/
-abbrev assuming (p : Prop) : Prop := p
-
 /-! ## The gas-free interpreter -/
 
 /-- The halting opcodes (where `EVM.X` stops the frame). -/
