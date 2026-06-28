@@ -22,4 +22,9 @@ import EvmSmith.Demos.Weth.SpecDSL
 import EvmSmith.Demos.Weth.Spec
 import EvmSmith.Demos.Weth.SpecProofs
 import EvmSmith.Demos.Weth.OptimizedProgram
+import EvmSmith.Demos.Groth16.Program
+import EvmSmith.Demos.Groth16.SpecDSL
+import EvmSmith.Demos.Groth16.EntryPoints
+import EvmSmith.Demos.Groth16.Spec
+import EvmSmith.Demos.Groth16.SpecProofs
 import EvmSmith.Demos.Tests

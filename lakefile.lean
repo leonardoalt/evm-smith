@@ -31,3 +31,6 @@ lean_exe «weth-opt-v2-dump-bytecode» where
 lean_exe «weth-call-graph» where
   root := `EvmSmith.Demos.Weth.CallGraph
   supportInterpreter := true
+
+lean_exe «groth16-dump-bytecode» where
+  root := `EvmSmith.Demos.Groth16.DumpBytecode
