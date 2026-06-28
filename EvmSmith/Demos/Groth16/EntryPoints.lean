@@ -25,6 +25,32 @@ bytecode (without its immediate argument), or `none` past the end. -/
 def opAt (pc : Nat) : Option (Operation .EVM) :=
   (decode bytecode (UInt256.ofNat pc)).map (fun instr => instr.1)
 
+/-- **A genuine, push-width-respecting disassembly**, walking sequentially
+from `pc = 0` and skipping over each `PUSH*`'s immediate bytes — unlike
+`opAt`, which decodes whatever instruction *would* start at a given raw
+byte offset, with no regard for whether that offset is ever actually a
+real instruction boundary. The two coincide on `Demos/Weth` (whose only
+immediates are 1/2/4-byte selectors/offsets), which is why `opAt`-at-every-
+offset facts were safe to state directly there. They do *not* coincide
+here: this contract's eighteen 32-byte verifying-key constants are
+effectively random bytes, and `0x55` (`SSTORE`) — or byte sequences that
+decode as `CALL` — reliably turn up *inside* some `PUSH32` immediate at
+some raw offset. `opAt`-at-every-offset claims over the whole 861-byte
+range are therefore false (and were caught failing exactly this way once
+the placeholder constants were replaced with real ones); `linearScan`
+is the fix, and is what `program_has_no_sstore` / `does_three_external_calls`
+below actually use. `fuel` only bounds the recursion (861 steps suffice;
+called with headroom). -/
+def linearScan : Nat → Nat → List (Nat × Operation .EVM)
+  | 0, _ => []
+  | fuel + 1, pc =>
+    if pc ≥ bytecode.size then []
+    else
+      match decode bytecode (UInt256.ofNat pc) with
+      | none => []
+      | some (op, some (_, w)) => (pc, op) :: linearScan fuel (pc + 1 + w)
+      | some (op, none) => (pc, op) :: linearScan fuel (pc + 1)
+
 /-! ## (1) Only one entry point -/
 
 /-- The dispatch prefix extracts the ABI selector in the standard way:
@@ -61,9 +87,10 @@ theorem dispatch_fallthrough_reverts :
 /-- **No instruction in this entire 861-byte program is `SSTORE`.** Storage
 cannot change no matter which branch executes or what the precompiles
 return — the strongest guarantee here, and the only one that needs no
-`SnarkvCorrect`/`BnMulSucceeds`/`BnAddSucceeds` assumption. -/
+`SnarkvCorrect`/`BnMulSucceeds`/`BnAddSucceeds` assumption. Stated over
+`linearScan`, not over every raw byte offset — see its docstring. -/
 theorem program_has_no_sstore :
-    ∀ pc ∈ List.range' 0 861, opAt pc ≠ some .SSTORE := by
+    ∀ p ∈ linearScan 900 0, p.2 ≠ .SSTORE := by
   native_decide
 
 /-! ## (3) ABI decode: the nine proof/input words -/
@@ -113,9 +140,12 @@ theorem decodes_proof_c :
 
 /-! ## (4) Exactly three external calls, to the three precompiles claimed -/
 
-/-- There are exactly three `CALL`s in the program, at PCs 114, 206, 843. -/
+/-- There are exactly three `CALL`s in the program, at PCs 114, 206, 843.
+Stated over `linearScan` — see its docstring for why a raw-offset scan
+(safe for `Demos/Weth`, false here) won't do. -/
 theorem does_three_external_calls :
-    (List.range' 0 861).filter (fun pc => decide (opAt pc = some .CALL)) = [114, 206, 843] := by
+    (linearScan 900 0).filterMap (fun p => match p.2 with | .CALL => some p.1 | _ => none)
+      = [114, 206, 843] := by
   native_decide
 
 /-- The first `CALL` (PC 114) targets address `7` (`BN_MUL`) — the
