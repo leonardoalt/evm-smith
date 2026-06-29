@@ -59,7 +59,7 @@ structure Groth16Spec where
     branch still gated on `SnarkvCorrect` et al. -/
   verifies : ∀ (s : EVM.State), Calls .verifyProof s →
     ensures
-      (r.toNat ≤ UInt256.toNat publicInput → s'.pc = UInt256.ofNat 903)
+      (r.toNat ≤ UInt256.toNat publicInput → Reverts s s' o)
       ∧ (publicInput < r →
           BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
           (∃ vkx : G1,

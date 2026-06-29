@@ -20,16 +20,16 @@ open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Spec
 
 /-- **`checkField` rejects a non-canonical public input by reverting.**
 From the call entry, if the public input is `≥ r` (the precondition
-`groth16_verifies` excludes), then running to a halt always halts via the
-shared `revertLbl` branch's `REVERT` instruction at PC 903 — not `RETURN`,
-not `STOP`. This is the complement of `groth16_verifies`'s `publicInput <
-r` hypothesis: together they account for both branches of `checkField`'s
-`JUMPI`. -/
+`groth16_verifies` excludes), then running to a halt always *reverts*
+(`Reverts s s' o`) — not `RETURN`, not `STOP`. This is the complement of
+`groth16_verifies`'s `publicInput < r` hypothesis: together they account for
+both branches of `checkField`'s `JUMPI`. -/
 theorem groth16_checkfield_rejects
     (s : EVM.State) (call : Calls .verifyProof s) (hge : r.toNat ≤ UInt256.toNat publicInput) :
-    ensures s'.pc = UInt256.ofNat 903 := by
+    ensures Reverts s s' o := by
   obtain ⟨hcode, hpc0, hstk0, hsel⟩ := call
-  intro s' o ⟨callFuel, N, hrun⟩
+  intro s' o hHalt
+  obtain ⟨callFuel, N, hrun⟩ := id hHalt
   -- step 0: PUSH1 0 @ 0
   have hd0 : decode s.executionEnv.code s.pc = some (.Push .PUSH1, some (UInt256.ofNat 0, 1)) := by
     rw [hcode, hpc0]; exact dispatch_extracts_selector.1
@@ -283,6 +283,6 @@ theorem groth16_checkfield_rejects
   · simp [evmRun] at hrun
   have hres := evmRun_halt_step callFuel N s19 _ _ _ hd19 (by decide) hrun
   have hres1 : s' = s19 := congrArg Prod.fst hres
-  rw [hres1, hpc19]
+  exact ⟨hHalt, by rw [hres1]; exact hd19⟩
 
 end EvmSmith.Groth16

@@ -141,6 +141,16 @@ at `s'`, returning `o`. The interpreter fuel is existentially hidden. -/
 def Halts (s s' : EVM.State) (o : ByteArray) : Prop :=
   ∃ callFuel N, evmRun callFuel N s = some (s', o)
 
+/-- `Reverts s s' o` : running from `s` halts at `s'` (returning `o`) via
+`REVERT` specifically, not `STOP`/`RETURN`. Stronger than `Halts s s' o`
+alone: `haltOutput` defines `RETURN` and `REVERT`'s output identically (both
+read `H_return` from the pre-halt state), so `o` by itself cannot
+distinguish "reverted" from "returned/stopped with empty data" — checking
+the opcode at `s'` directly is the only reliable way to say "this is a
+revert." -/
+def Reverts (s s' : EVM.State) (o : ByteArray) : Prop :=
+  Halts s s' o ∧ decode s'.executionEnv.code s'.pc = some (.REVERT, none)
+
 /-! ## Running up to the first external call
 
 `evmRunToCall` is like `evmRun` but stops *just before* the contract

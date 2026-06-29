@@ -93,7 +93,7 @@ behave as assumed, relays the `SNARKV` pairing check (still `sorry`'d — see
 the module docstring's two-part breakdown). -/
 theorem groth16_verifies (s : EVM.State) (call : Calls .verifyProof s) :
     ensures
-      (r.toNat ≤ UInt256.toNat publicInput → s'.pc = UInt256.ofNat 903)
+      (r.toNat ≤ UInt256.toNat publicInput → Reverts s s' o)
       ∧ (publicInput < r →
           BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
           (∃ vkx : G1,
