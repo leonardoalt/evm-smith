@@ -7,3 +7,6 @@ optimizer_runs = 200
 fs_permissions = [
   { access = "read", path = "./test/Groth16.bytecode.hex" },
 ]
+remappings = [
+  "circuit/=../circuit/",
+]
