@@ -22,3 +22,6 @@
 [submodule "EvmSmith/Demos/ERC20-Vyper/foundry/lib/snekmate"]
 	path = EvmSmith/Demos/ERC20-Vyper/foundry/lib/snekmate
 	url = https://github.com/pcaversaccio/snekmate.git
+[submodule "EvmSmith/Demos/Groth16/foundry/lib/forge-std"]
+	path = EvmSmith/Demos/Groth16/foundry/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std.git
