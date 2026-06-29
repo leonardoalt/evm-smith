@@ -29,6 +29,15 @@ ceiling is: **prove the bytecode correctly relays whatever `SNARKV` answers**
 correctly**. Proving the latter is a different (and much larger) undertaking
 — formalising the Groth16 protocol's soundness — that is out of scope for a
 bytecode-correctness tool by design, not by oversight.
+
+Even *granting* `SnarkvCorrect`/`BnMulSucceeds`/`BnAddSucceeds`, actually
+discharging `Groth16Spec.verifies` is still blocked — by a multi-call-
+chaining gap in `Spec/Dsl.lean`, and beneath that, by a foundational
+`EVMYulLean` issue (`ffi.ByteArray.zeroes` is `opaque` with no semantic
+axiom, which blocks reasoning about the byte-encoding of any abstract
+value written to memory). See the module docstring in `SpecProofs.lean`
+for the full breakdown and the one-line fix that would unblock the second
+issue project-wide.
 -/
 
 namespace EvmSmith.Groth16
