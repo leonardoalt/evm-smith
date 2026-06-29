@@ -1,5 +1,6 @@
 import EvmSmith.Demos.Groth16.Spec
 import EvmSmith.Demos.Groth16.EntryPoints
+import EvmSmith.Demos.Groth16.Behaviour
 
 /-!
 # Groth16 verifier — attempted witness for `Groth16Spec`
@@ -21,9 +22,16 @@ different kinds of gap:
   (`step_MSTORE_shape` etc.) already make clear `MSTORE`/`PUSH`/etc. only
   ever touch the latter.
 
-* `groth16_verifies` is blocked on **two distinct, independent obstacles**,
-  one of framework scope, one of foundations. Both must be resolved (in
-  either order) to close it; resolving only one leaves the other.
+* `groth16_verifies` is a total case split on `publicInput`'s canonicality
+  (see `Spec.lean`'s docstring on why that split is exhaustive, not a
+  fragment of the spec). Its first conjunct — non-canonical input reverts —
+  is **fully proved, no `sorry`**, by `Behaviour.lean`'s
+  `groth16_checkfield_rejects`: `checkField` rejects before any precompile
+  is ever called, so this branch needs no precompile assumption at all.
+  Its second conjunct — the canonical-input relay — is the one still
+  `sorry`'d, blocked on **two distinct, independent obstacles**, one of
+  framework scope, one of foundations. Both must be resolved (in either
+  order) to close it; resolving only one leaves the other.
 
   **(1) Multi-call chaining (framework scope, not depth).**
   `Spec/Dsl.lean`'s `ReachesCall`/`evmRunToCall` only run a program up to
@@ -78,26 +86,30 @@ namespace EvmSmith.Groth16
 
 open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Spec
 
-/-- `verifyProof` relays the `SNARKV` pairing check, given that the three
-precompile calls behave as assumed and the public input is canonical
-(`< r`) — see `Spec.lean`'s `verifies` field docstring on why that
-precondition is needed now that `checkField` (`Program.lean`) rejects
-`input ≥ r` instead of letting it through. -/
-theorem groth16_verifies (s : EVM.State) (call : Calls .verifyProof s)
-    (hfield : publicInput < r)
-    (hmul : BnMulSucceeds) (hadd : BnAddSucceeds) (hsnarkv : SnarkvCorrect) :
+/-- `verifyProof` is total on `publicInput`'s canonicality: non-canonical
+input reverts (proved, via `groth16_checkfield_rejects` — no precompile
+assumption needed), and canonical input, given the three precompile calls
+behave as assumed, relays the `SNARKV` pairing check (still `sorry`'d — see
+the module docstring's two-part breakdown). -/
+theorem groth16_verifies (s : EVM.State) (call : Calls .verifyProof s) :
     ensures
-      (∃ vkx : G1,
-        returndata =
-          boolWord (PairingProductHolds
-            (pairingInput
-              (proofAx, negYOf proofAy) (proofBx1, proofBx0, proofBy1, proofBy0)
-              (alphaX, alphaY)          (betaX1, betaX0, betaY1, betaY0)
-              vkx                      (gammaX1, gammaX0, gammaY1, gammaY0)
-              (proofCx, proofCy)        (deltaX1, deltaX0, deltaY1, deltaY0))))
-      ∧ storage = old storage := by
+      (r.toNat ≤ UInt256.toNat publicInput → s'.pc = UInt256.ofNat 903)
+      ∧ (publicInput < r →
+          BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
+          (∃ vkx : G1,
+            returndata =
+              boolWord (PairingProductHolds
+                (pairingInput
+                  (proofAx, negYOf proofAy) (proofBx1, proofBx0, proofBy1, proofBy0)
+                  (alphaX, alphaY)          (betaX1, betaX0, betaY1, betaY0)
+                  vkx                      (gammaX1, gammaX0, gammaY1, gammaY0)
+                  (proofCx, proofCy)        (deltaX1, deltaX0, deltaY1, deltaY0))))
+          ∧ storage = old storage) := by
+  intro s' o hHalt
+  refine ⟨fun hge => groth16_checkfield_rejects s call hge hHalt, ?_⟩
+  intro _hfield hmul hadd hsnarkv
   obtain ⟨hcode, hpc0, hstk0, hsel⟩ := call
-  intro s' o ⟨callFuel, N, hrun⟩
+  obtain ⟨callFuel, N, hrun⟩ := hHalt
   sorry
   -- See module docstring's two-part breakdown: (1) the missing
   -- multi-call-chaining infrastructure in `Spec/Dsl.lean`

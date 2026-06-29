@@ -25,6 +25,8 @@ import EvmSmith.Demos.Weth.OptimizedProgram
 import EvmSmith.Demos.Groth16.Program
 import EvmSmith.Demos.Groth16.SpecDSL
 import EvmSmith.Demos.Groth16.EntryPoints
+import EvmSmith.Demos.Groth16.Dispatch
+import EvmSmith.Demos.Groth16.Behaviour
 import EvmSmith.Demos.Groth16.Spec
 import EvmSmith.Demos.Groth16.SpecProofs
 import EvmSmith.Demos.Tests

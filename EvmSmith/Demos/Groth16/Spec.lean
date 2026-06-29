@@ -26,38 +26,51 @@ open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Spec
 
 /-- **This contract's guarantees, as an interface.** Each field is a
 behaviour the bytecode is meant to obey. Unlike `WethSpec`, the headline
-field (`verifies`) is *conditional* on an explicit, named, and — per the
-module docstring in `SpecDSL.lean` — **unprovable-in-this-repo** assumption
-about the `SNARKV` precompile. That is the honest ceiling for a tool that
-proves bytecode-to-spec correctness without a BN254 pairing formalisation:
-it can show the contract *correctly relays* `SNARKV`'s answer, not that
-`SNARKV`'s answer is cryptographically meaningful. -/
+field (`verifies`) is *conditional*, on its second branch, on an explicit,
+named, and — per the module docstring in `SpecDSL.lean` —
+**unprovable-in-this-repo** assumption about the `SNARKV` precompile. That
+is the honest ceiling for a tool that proves bytecode-to-spec correctness
+without a BN254 pairing formalisation: it can show the contract *correctly
+relays* `SNARKV`'s answer, not that `SNARKV`'s answer is cryptographically
+meaningful. -/
 structure Groth16Spec where
-  /-- **`verifyProof` relays the pairing check, given that the precompiles
-  behave and the public input is canonical.** If `BN_MUL` and `BN_ADD`
-  succeed on the (well-formed) inputs this contract feeds them, `SNARKV`
-  answers correctly (`SnarkvCorrect`), *and* the public input is `< r`
-  (the `checkField` precondition — see `Program.lean`'s docstring on why a
-  non-canonical `input ≥ r` must be excluded: `EC_MUL` aliases `input` and
-  `input + r`), then the returned boolean is exactly the pairing-product
-  check over the eight points this contract assembles: `(-A, B), (alpha,
-  beta), (vk_x, gamma), (C, delta)` — where `vk_x` is whatever `BN_ADD`
-  computed (its arithmetic is *not* characterised here, only that it didn't
-  fail; see `SpecDSL.lean`). Outside that precondition (`input ≥ r`), the
-  contract reverts instead — a *different*, equally-provable guarantee this
-  field does not (yet) state. -/
-  verifies : ∀ (s : EVM.State), Calls .verifyProof s → publicInput < r →
-    BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
+  /-- **`verifyProof` is total on the public input's canonicality, by case
+  split.** For *every* call (no precondition on `publicInput` at all), one
+  of the two branches below applies — `publicInput < r` and `r ≤
+  publicInput` are jointly exhaustive for any `UInt256`, so together these
+  two implications characterise the *entire* domain, not just a fragment of
+  it:
+
+  * **Non-canonical input (`r ≤ publicInput`) reverts — unconditionally,
+    no precompile assumption needed.** `checkField` (`Program.lean`)
+    catches this before any precompile is ever called: `EC_MUL` aliases
+    `input` and `input + r` (since `r·P = O`), so a non-canonical input
+    would otherwise verify identically to the canonical one — see
+    `Program.lean`'s docstring.
+
+  * **Canonical input (`publicInput < r`), given the precompiles behave,
+    relays the pairing check.** If `BN_MUL` and `BN_ADD` succeed on the
+    (well-formed) inputs this contract feeds them, and `SNARKV` answers
+    correctly (`SnarkvCorrect`), then the returned boolean is exactly the
+    pairing-product check over the eight points this contract assembles:
+    `(-A, B), (alpha, beta), (vk_x, gamma), (C, delta)` — where `vk_x` is
+    whatever `BN_ADD` computed (its arithmetic is *not* characterised
+    here, only that it didn't fail; see `SpecDSL.lean`). This is the
+    branch still gated on `SnarkvCorrect` et al. -/
+  verifies : ∀ (s : EVM.State), Calls .verifyProof s →
     ensures
-      (∃ vkx : G1,
-        returndata =
-          boolWord (PairingProductHolds
-            (pairingInput
-              (proofAx, negYOf proofAy) (proofBx1, proofBx0, proofBy1, proofBy0)
-              (alphaX, alphaY)          (betaX1, betaX0, betaY1, betaY0)
-              vkx                      (gammaX1, gammaX0, gammaY1, gammaY0)
-              (proofCx, proofCy)        (deltaX1, deltaX0, deltaY1, deltaY0))))
-      ∧ storage = old storage
+      (r.toNat ≤ UInt256.toNat publicInput → s'.pc = UInt256.ofNat 903)
+      ∧ (publicInput < r →
+          BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
+          (∃ vkx : G1,
+            returndata =
+              boolWord (PairingProductHolds
+                (pairingInput
+                  (proofAx, negYOf proofAy) (proofBx1, proofBx0, proofBy1, proofBy0)
+                  (alphaX, alphaY)          (betaX1, betaX0, betaY1, betaY0)
+                  vkx                      (gammaX1, gammaX0, gammaY1, gammaY0)
+                  (proofCx, proofCy)        (deltaX1, deltaX0, deltaY1, deltaY0))))
+          ∧ storage = old storage)
 
   /-- **This contract never writes storage**, on *any* call (matching
   selector or not), regardless of what the precompiles return — it is a
