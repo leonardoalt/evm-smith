@@ -30,6 +30,10 @@ contract Groth16Test is Test {
     uint256 constant Cy  = 0x1c2eec5c65a2bbd28d9d83c46c50effa12e3e56ca243935c72341375b2e53685;
     uint256 constant INPUT = 9;
 
+    // BN254 scalar-field modulus (the order of the curve's prime subgroup,
+    // `Fr` -- not `q`, the base field `Fq` the curve coordinates live in).
+    uint256 constant R = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
     function setUp() public {
         string memory raw = vm.readFile("test/Groth16.bytecode.hex");
         bytes memory runtime = vm.parseBytes(_trim(raw));
@@ -103,5 +107,19 @@ contract Groth16Test is Test {
     function test_Groth16_bad_selector_reverts() public {
         (bool ok,) = VERIFIER.call(hex"deadbeef");
         assertFalse(ok);
+    }
+
+    /// `checkField`: a non-canonical public input (`INPUT + r`) must revert,
+    /// even though -- absent the guard -- it would verify identically to
+    /// `INPUT`. `EC_MUL` multiplies by a point of order `r`, so
+    /// `(INPUT + r)*P = INPUT*P`: the pairing check itself cannot tell the
+    /// two inputs apart. Without `checkField`, a caller could submit
+    /// `INPUT + r` and have it verify true, while a downstream consumer
+    /// reading the raw `uint256` calldata value sees a different number
+    /// than the canonical `INPUT`. This is the scenario `checkField` exists
+    /// to rule out.
+    function test_Groth16_non_canonical_input_reverts() public {
+        (bool ok,) = _verify(Ax, Ay, Bx1, Bx0, By1, By0, Cx, Cy, INPUT + R);
+        assertFalse(ok, "non-canonical input (input + r) must revert");
     }
 }

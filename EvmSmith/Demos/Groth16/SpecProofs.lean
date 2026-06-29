@@ -79,8 +79,12 @@ namespace EvmSmith.Groth16
 open EvmYul EvmYul.EVM EvmYul.Frame Batteries EvmSmith.Spec
 
 /-- `verifyProof` relays the `SNARKV` pairing check, given that the three
-precompile calls behave as assumed. -/
+precompile calls behave as assumed and the public input is canonical
+(`< r`) — see `Spec.lean`'s `verifies` field docstring on why that
+precondition is needed now that `checkField` (`Program.lean`) rejects
+`input ≥ r` instead of letting it through. -/
 theorem groth16_verifies (s : EVM.State) (call : Calls .verifyProof s)
+    (hfield : publicInput < r)
     (hmul : BnMulSucceeds) (hadd : BnAddSucceeds) (hsnarkv : SnarkvCorrect) :
     ensures
       (∃ vkx : G1,

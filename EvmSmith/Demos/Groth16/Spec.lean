@@ -10,7 +10,7 @@ that, unlike `weth_spec`, it is not yet a complete proof). Vocabulary
 (`Calls`, `ensures`, `PairingProductHolds`, `SnarkvCorrect`, …) is in
 `SpecDSL.lean` / `Spec/Dsl.lean`.
 
-## The contract (861 bytes of runtime code, one public input)
+## The contract (904 bytes of runtime code, one public input)
 
 | Selector     | Shape                                                                | Behaviour |
 |--------------|-----------------------------------------------------------------------|-----------|
@@ -34,14 +34,19 @@ it can show the contract *correctly relays* `SNARKV`'s answer, not that
 `SNARKV`'s answer is cryptographically meaningful. -/
 structure Groth16Spec where
   /-- **`verifyProof` relays the pairing check, given that the precompiles
-  behave.** If `BN_MUL` and `BN_ADD` succeed on the (well-formed) inputs this
-  contract feeds them, and `SNARKV` answers correctly (`SnarkvCorrect`), then
-  the returned boolean is exactly the pairing-product check over the eight
-  points this contract assembles: `(-A, B), (alpha, beta), (vk_x, gamma),
-  (C, delta)` — where `vk_x` is whatever `BN_ADD` computed (its arithmetic
-  is *not* characterised here, only that it didn't fail; see
-  `SpecDSL.lean`). -/
-  verifies : ∀ (s : EVM.State), Calls .verifyProof s →
+  behave and the public input is canonical.** If `BN_MUL` and `BN_ADD`
+  succeed on the (well-formed) inputs this contract feeds them, `SNARKV`
+  answers correctly (`SnarkvCorrect`), *and* the public input is `< r`
+  (the `checkField` precondition — see `Program.lean`'s docstring on why a
+  non-canonical `input ≥ r` must be excluded: `EC_MUL` aliases `input` and
+  `input + r`), then the returned boolean is exactly the pairing-product
+  check over the eight points this contract assembles: `(-A, B), (alpha,
+  beta), (vk_x, gamma), (C, delta)` — where `vk_x` is whatever `BN_ADD`
+  computed (its arithmetic is *not* characterised here, only that it didn't
+  fail; see `SpecDSL.lean`). Outside that precondition (`input ≥ r`), the
+  contract reverts instead — a *different*, equally-provable guarantee this
+  field does not (yet) state. -/
+  verifies : ∀ (s : EVM.State), Calls .verifyProof s → publicInput < r →
     BnMulSucceeds → BnAddSucceeds → SnarkvCorrect →
     ensures
       (∃ vkx : G1,

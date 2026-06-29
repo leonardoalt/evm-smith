@@ -32,14 +32,15 @@ byte offset, with no regard for whether that offset is ever actually a
 real instruction boundary. The two coincide on `Demos/Weth` (whose only
 immediates are 1/2/4-byte selectors/offsets), which is why `opAt`-at-every-
 offset facts were safe to state directly there. They do *not* coincide
-here: this contract's eighteen 32-byte verifying-key constants are
-effectively random bytes, and `0x55` (`SSTORE`) — or byte sequences that
-decode as `CALL` — reliably turn up *inside* some `PUSH32` immediate at
-some raw offset. `opAt`-at-every-offset claims over the whole 861-byte
-range are therefore false (and were caught failing exactly this way once
+here: this contract's nineteen 32-byte constants (eighteen verifying-key
+words plus the scalar-field modulus `r`) are effectively random bytes, and
+`0x55` (`SSTORE`) — or byte sequences that decode as `CALL` — reliably turn
+up *inside* some `PUSH32` immediate at some raw offset. `opAt`-at-every-
+offset claims over the whole 904-byte range are therefore false (and were
+caught failing exactly this way once
 the placeholder constants were replaced with real ones); `linearScan`
 is the fix, and is what `program_has_no_sstore` / `does_three_external_calls`
-below actually use. `fuel` only bounds the recursion (861 steps suffice;
+below actually use. `fuel` only bounds the recursion (904 steps suffice;
 called with headroom). -/
 def linearScan : Nat → Nat → List (Nat × Operation .EVM)
   | 0, _ => []
@@ -84,7 +85,7 @@ theorem dispatch_fallthrough_reverts :
 
 /-! ## (2) This is a `view` function: no `SSTORE`, ever -/
 
-/-- **No instruction in this entire 861-byte program is `SSTORE`.** Storage
+/-- **No instruction in this entire 904-byte program is `SSTORE`.** Storage
 cannot change no matter which branch executes or what the precompiles
 return — the strongest guarantee here, and the only one that needs no
 `SnarkvCorrect`/`BnMulSucceeds`/`BnAddSucceeds` assumption. Stated over
@@ -96,75 +97,102 @@ theorem program_has_no_sstore :
 /-! ## (3) ABI decode: the nine proof/input words -/
 
 /-- `verifyProof` decodes its single public input from calldata offset 260
-(`PUSH2 260; CALLDATALOAD` at PCs 94/97) — i.e. the tenth word of calldata
+(`PUSH2 260; CALLDATALOAD` at PCs 137/140) — i.e. the tenth word of calldata
 (selector + 9 preceding proof words), as the one-public-input ABI layout
-demands. -/
+demands. (This is the *second* decode of the same offset — the first is
+`checkField`'s read at PCs 55/58, validated separately by
+`checkfield_validates_input`.) -/
 theorem decodes_public_input :
-    decode bytecode (UInt256.ofNat 94) = some (.Push .PUSH2, some (UInt256.ofNat 260, 2)) ∧
-    decode bytecode (UInt256.ofNat 97) = some (.CALLDATALOAD, none) := by
+    decode bytecode (UInt256.ofNat 137) = some (.Push .PUSH2, some (UInt256.ofNat 260, 2)) ∧
+    decode bytecode (UInt256.ofNat 140) = some (.CALLDATALOAD, none) := by
   native_decide
 
 /-- `verifyProof` decodes `proof.A` from calldata offsets 4 and 36. -/
 theorem decodes_proof_a :
-    decode bytecode (UInt256.ofNat 212) = some (.Push .PUSH1, some (UInt256.ofNat 4, 1)) ∧
-    decode bytecode (UInt256.ofNat 214) = some (.CALLDATALOAD, none) ∧
-    decode bytecode (UInt256.ofNat 219) = some (.Push .PUSH1, some (UInt256.ofNat 36, 1)) ∧
-    decode bytecode (UInt256.ofNat 221) = some (.CALLDATALOAD, none) := by
+    decode bytecode (UInt256.ofNat 255) = some (.Push .PUSH1, some (UInt256.ofNat 4, 1)) ∧
+    decode bytecode (UInt256.ofNat 257) = some (.CALLDATALOAD, none) ∧
+    decode bytecode (UInt256.ofNat 262) = some (.Push .PUSH1, some (UInt256.ofNat 36, 1)) ∧
+    decode bytecode (UInt256.ofNat 264) = some (.CALLDATALOAD, none) := by
   native_decide
 
 /-- `verifyProof` decodes `proof.B`'s `x` words (`x.c1` at calldata offset
 68, `x.c0` at offset 100) — the EIP-197 `(c1, c0)` ordering. -/
 theorem decodes_proof_b_x :
-    decode bytecode (UInt256.ofNat 267) = some (.Push .PUSH1, some (UInt256.ofNat 68, 1)) ∧
-    decode bytecode (UInt256.ofNat 269) = some (.CALLDATALOAD, none) ∧
-    decode bytecode (UInt256.ofNat 274) = some (.Push .PUSH1, some (UInt256.ofNat 100, 1)) ∧
-    decode bytecode (UInt256.ofNat 276) = some (.CALLDATALOAD, none) := by
+    decode bytecode (UInt256.ofNat 310) = some (.Push .PUSH1, some (UInt256.ofNat 68, 1)) ∧
+    decode bytecode (UInt256.ofNat 312) = some (.CALLDATALOAD, none) ∧
+    decode bytecode (UInt256.ofNat 317) = some (.Push .PUSH1, some (UInt256.ofNat 100, 1)) ∧
+    decode bytecode (UInt256.ofNat 319) = some (.CALLDATALOAD, none) := by
   native_decide
 
 /-- `verifyProof` decodes `proof.B`'s `y` words (`y.c1` at calldata offset
 132, `y.c0` at offset 164). -/
 theorem decodes_proof_b_y :
-    decode bytecode (UInt256.ofNat 281) = some (.Push .PUSH1, some (UInt256.ofNat 132, 1)) ∧
-    decode bytecode (UInt256.ofNat 283) = some (.CALLDATALOAD, none) ∧
-    decode bytecode (UInt256.ofNat 288) = some (.Push .PUSH1, some (UInt256.ofNat 164, 1)) ∧
-    decode bytecode (UInt256.ofNat 290) = some (.CALLDATALOAD, none) := by
+    decode bytecode (UInt256.ofNat 324) = some (.Push .PUSH1, some (UInt256.ofNat 132, 1)) ∧
+    decode bytecode (UInt256.ofNat 326) = some (.CALLDATALOAD, none) ∧
+    decode bytecode (UInt256.ofNat 331) = some (.Push .PUSH1, some (UInt256.ofNat 164, 1)) ∧
+    decode bytecode (UInt256.ofNat 333) = some (.CALLDATALOAD, none) := by
   native_decide
 
 /-- `verifyProof` decodes `proof.C` from calldata offsets 196 and 228. -/
 theorem decodes_proof_c :
-    decode bytecode (UInt256.ofNat 665) = some (.Push .PUSH1, some (UInt256.ofNat 196, 1)) ∧
-    decode bytecode (UInt256.ofNat 667) = some (.CALLDATALOAD, none) ∧
-    decode bytecode (UInt256.ofNat 672) = some (.Push .PUSH1, some (UInt256.ofNat 228, 1)) ∧
-    decode bytecode (UInt256.ofNat 674) = some (.CALLDATALOAD, none) := by
+    decode bytecode (UInt256.ofNat 708) = some (.Push .PUSH1, some (UInt256.ofNat 196, 1)) ∧
+    decode bytecode (UInt256.ofNat 710) = some (.CALLDATALOAD, none) ∧
+    decode bytecode (UInt256.ofNat 715) = some (.Push .PUSH1, some (UInt256.ofNat 228, 1)) ∧
+    decode bytecode (UInt256.ofNat 717) = some (.CALLDATALOAD, none) := by
+  native_decide
+
+/-! ## (3b) `checkField`: the public input is read once more, before everything else -/
+
+/-- `verifyProof` reads `input` from calldata offset 260 a *second* time
+(see `decodes_public_input`), right after `JUMPDEST verifyLbl`, before any
+other computation: `PUSH32 r; PUSH2 260; CALLDATALOAD` at PCs 22/55/58. This
+is the start of the `checkField` guard — see `Program.lean`'s docstring on
+why a non-canonical `input ≥ r` must be rejected before it ever reaches
+`BN_MUL`. (Split from `checkfield_compares_and_branches` below: an 7-conjunct
+`native_decide` here failed to synthesize `Decidable`, the same issue
+`decodes_proof_b` hit — see its split into `_x`/`_y`.) -/
+theorem checkfield_reads_input_and_r :
+    decode bytecode (UInt256.ofNat 22) = some (.Push .PUSH32, some (r, 32)) ∧
+    decode bytecode (UInt256.ofNat 55) = some (.Push .PUSH2, some (UInt256.ofNat 260, 2)) ∧
+    decode bytecode (UInt256.ofNat 58) = some (.CALLDATALOAD, none) := by
+  native_decide
+
+/-- ... then compares (`LT; ISZERO`) and branches to `revertLbl` on failure:
+`LT; ISZERO; PUSH2 revertLbl; JUMPI` at PCs 59/60/61/64. -/
+theorem checkfield_compares_and_branches :
+    decode bytecode (UInt256.ofNat 59) = some (.LT, none) ∧
+    decode bytecode (UInt256.ofNat 60) = some (.ISZERO, none) ∧
+    decode bytecode (UInt256.ofNat 61) = some (.Push .PUSH2, some (revertLbl, 2)) ∧
+    decode bytecode (UInt256.ofNat 64) = some (.JUMPI, none) := by
   native_decide
 
 /-! ## (4) Exactly three external calls, to the three precompiles claimed -/
 
-/-- There are exactly three `CALL`s in the program, at PCs 114, 206, 843.
+/-- There are exactly three `CALL`s in the program, at PCs 157, 249, 886.
 Stated over `linearScan` — see its docstring for why a raw-offset scan
 (safe for `Demos/Weth`, false here) won't do. -/
 theorem does_three_external_calls :
     (linearScan 900 0).filterMap (fun p => match p.2 with | .CALL => some p.1 | _ => none)
-      = [114, 206, 843] := by
+      = [157, 249, 886] := by
   native_decide
 
-/-- The first `CALL` (PC 114) targets address `7` (`BN_MUL`) — the
-immediately preceding `PUSH1` (PC 111) supplies the `to` argument. -/
+/-- The first `CALL` (PC 157) targets address `7` (`BN_MUL`) — the
+immediately preceding `PUSH1` (PC 154) supplies the `to` argument. -/
 theorem first_call_targets_bn_mul :
-    decode bytecode (UInt256.ofNat 111) = some (.Push .PUSH1, some (UInt256.ofNat 7, 1)) ∧
-    decode bytecode (UInt256.ofNat 114) = some (.CALL, none) := by
+    decode bytecode (UInt256.ofNat 154) = some (.Push .PUSH1, some (UInt256.ofNat 7, 1)) ∧
+    decode bytecode (UInt256.ofNat 157) = some (.CALL, none) := by
   native_decide
 
-/-- The second `CALL` (PC 206) targets address `6` (`BN_ADD`). -/
+/-- The second `CALL` (PC 249) targets address `6` (`BN_ADD`). -/
 theorem second_call_targets_bn_add :
-    decode bytecode (UInt256.ofNat 203) = some (.Push .PUSH1, some (UInt256.ofNat 6, 1)) ∧
-    decode bytecode (UInt256.ofNat 206) = some (.CALL, none) := by
+    decode bytecode (UInt256.ofNat 246) = some (.Push .PUSH1, some (UInt256.ofNat 6, 1)) ∧
+    decode bytecode (UInt256.ofNat 249) = some (.CALL, none) := by
   native_decide
 
-/-- The third `CALL` (PC 843) targets address `8` (`SNARKV`). -/
+/-- The third `CALL` (PC 886) targets address `8` (`SNARKV`). -/
 theorem third_call_targets_snarkv :
-    decode bytecode (UInt256.ofNat 840) = some (.Push .PUSH1, some (UInt256.ofNat 8, 1)) ∧
-    decode bytecode (UInt256.ofNat 843) = some (.CALL, none) := by
+    decode bytecode (UInt256.ofNat 883) = some (.Push .PUSH1, some (UInt256.ofNat 8, 1)) ∧
+    decode bytecode (UInt256.ofNat 886) = some (.CALL, none) := by
   native_decide
 
 end EvmSmith.Groth16
